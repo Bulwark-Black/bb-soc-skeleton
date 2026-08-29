@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <meta name="description" content="A synthetic, static security console interface scaffold.">
+  <title>SOC Console Skeleton</title>
+  <link rel="stylesheet" href="app.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#content">Skip to content</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Primary navigation">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">SC</span>
+        <span><strong>SOC Console</strong><small>interface skeleton</small></span>
+      </div>
+      <div class="demo-banner"><span class="status-dot"></span>Synthetic demo</div>
+      <nav id="side-navigation"></nav>
+      <p class="sidebar-note">No external systems are connected. Nothing on this page is operational.</p>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <label class="mobile-route">
+          <span class="sr-only">Choose a page</span>
+          <select id="route-select" aria-label="Choose a page"></select>
+        </label>
+        <label class="nav-filter">
+          <span class="sr-only">Filter navigation</span>
+          <input id="nav-filter" type="search" autocomplete="off" placeholder="Filter demo pages">
+        </label>
+        <span class="read-only-pill">Static · read only</span>
+      </header>
+
+      <main id="content" tabindex="-1">
+        <noscript>
+          <section class="panel empty-state">
+            <h1>JavaScript is required for this static demonstration.</h1>
+            <p>The project contains no backend or live data connection.</p>
+          </section>
+        </noscript>
+      </main>
+    </div>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
