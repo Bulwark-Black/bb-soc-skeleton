@@ -1,0 +1,40 @@
+{
+  "clientId": "soc-console-server",
+  "name": "SOC console server reference",
+  "description": "Placeholder-only confidential OpenID Connect relying-party client.",
+  "enabled": true,
+  "protocol": "openid-connect",
+  "publicClient": false,
+  "bearerOnly": false,
+  "clientAuthenticatorType": "client-secret",
+  "standardFlowEnabled": true,
+  "implicitFlowEnabled": false,
+  "directAccessGrantsEnabled": false,
+  "serviceAccountsEnabled": false,
+  "authorizationServicesEnabled": false,
+  "consentRequired": false,
+  "fullScopeAllowed": false,
+  "rootUrl": "https://soc.example.invalid/",
+  "baseUrl": "https://soc.example.invalid/",
+  "redirectUris": [
+    "https://soc.example.invalid/auth/callback"
+  ],
+  "webOrigins": [],
+  "frontchannelLogout": false,
+  "attributes": {
+    "pkce.code.challenge.method": "S256",
+    "post.logout.redirect.uris": "https://soc.example.invalid/auth/logged-out",
+    "backchannel.logout.url": "https://soc.example.invalid/auth/backchannel-logout",
+    "backchannel.logout.session.required": "true",
+    "backchannel.logout.revoke.offline.tokens": "false",
+    "oauth2.device.authorization.grant.enabled": "false",
+    "oidc.ciba.grant.enabled": "false"
+  },
+  "defaultClientScopes": [
+    "profile",
+    "email",
+    "roles"
+  ],
+  "optionalClientScopes": [],
+  "protocolMappers": []
+}

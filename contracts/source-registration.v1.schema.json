@@ -1,0 +1,532 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "source-registration.v1.schema.json",
+  "title": "SOC Console connector registration and control contract v1",
+  "description": "Strict data shapes for source registrations, health snapshots, connector-control snapshots, and the closed connector lifecycle command protocol. Persistent shapes carry credential references only. One-time credentials are allowed solely in successful host-enrollment and source-activation results and are forbidden from snapshots and change records.",
+  "oneOf": [
+    { "$ref": "#/$defs/sourceRegistration" },
+    { "$ref": "#/$defs/sourceHealthSnapshot" },
+    { "$ref": "#/$defs/commandRequest" },
+    { "$ref": "#/$defs/commandResult" },
+    { "$ref": "#/$defs/controlSnapshot" }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "nonSecretIdentifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^(?!.*(?:secret|password|passwd|token|apikey|privatekey|credential|credentials|authorization|cookie|sessionid|clientsecret|accesskey)$)[a-z][a-z0-9-]*$"
+    },
+    "typeName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[a-z][a-z0-9.-]*$"
+    },
+    "resourceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "credentialReferenceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]*$"
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": ".*\\S.*"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "nullableTimestamp": {
+      "oneOf": [
+        { "$ref": "#/$defs/timestamp" },
+        { "type": "null" }
+      ]
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "configValue": {
+      "oneOf": [
+        { "type": "string", "maxLength": 1000 },
+        { "type": "number" },
+        { "type": "boolean" },
+        {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": ".*\\S.*" }
+        }
+      ]
+    },
+    "config": {
+      "type": "object",
+      "maxProperties": 40,
+      "propertyNames": { "$ref": "#/$defs/nonSecretIdentifier" },
+      "additionalProperties": { "$ref": "#/$defs/configValue" },
+      "description": "Non-secret connector configuration only. Sensitive values must be supplied through credentialReferences."
+    },
+    "credentialReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slot", "store", "referenceId"],
+      "properties": {
+        "slot": { "$ref": "#/$defs/identifier" },
+        "store": { "enum": ["environment", "host-managed", "secret-manager", "vault"] },
+        "referenceId": { "$ref": "#/$defs/credentialReferenceId" }
+      }
+    },
+    "credentialReferences": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/credentialReference" },
+      "description": "Slots must be unique; the runtime and CLI enforce that relationship. No credential value is accepted here."
+    },
+    "healthCounters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempts", "successfulAttempts", "receivedRecords", "acceptedRecords", "rejectedRecords"],
+      "properties": {
+        "attempts": { "$ref": "#/$defs/revision" },
+        "successfulAttempts": { "$ref": "#/$defs/revision" },
+        "receivedRecords": { "$ref": "#/$defs/revision" },
+        "acceptedRecords": { "$ref": "#/$defs/revision" },
+        "rejectedRecords": { "$ref": "#/$defs/revision" }
+      },
+      "description": "The runtime and CLI enforce successfulAttempts <= attempts and acceptedRecords + rejectedRecords <= receivedRecords."
+    },
+    "sourceHealthSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion", "documentType", "sourceId", "connectorInstanceId", "revision", "observedAt",
+        "state", "reason", "lastAttemptAt", "lastSuccessAt", "nextExpectedAt", "counters"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "documentType": { "const": "source-health-snapshot" },
+        "sourceId": { "$ref": "#/$defs/resourceId" },
+        "connectorInstanceId": { "$ref": "#/$defs/resourceId" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "observedAt": { "$ref": "#/$defs/timestamp" },
+        "state": { "enum": ["unknown", "pending", "healthy", "degraded", "stale", "offline", "error", "disabled"] },
+        "reason": {
+          "enum": [
+            "none", "awaiting-first-delivery", "late", "connector-error", "authentication-required",
+            "configuration-invalid", "permission-denied", "rate-limited", "disabled"
+          ]
+        },
+        "lastAttemptAt": { "$ref": "#/$defs/nullableTimestamp" },
+        "lastSuccessAt": { "$ref": "#/$defs/nullableTimestamp" },
+        "nextExpectedAt": { "$ref": "#/$defs/nullableTimestamp" },
+        "counters": { "$ref": "#/$defs/healthCounters" },
+        "message": { "type": "string", "maxLength": 500 }
+      },
+      "description": "The runtime and CLI also validate timestamp ordering and state/reason consistency. This shape never carries payload lines, content, or records."
+    },
+    "sourceRegistration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion", "documentType", "sourceId", "connectorInstanceId", "appId", "connectorType",
+        "sourceKind", "displayName", "state", "config", "credentialReferences", "revision", "createdAt", "updatedAt"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "documentType": { "const": "source-registration" },
+        "sourceId": { "$ref": "#/$defs/resourceId" },
+        "connectorInstanceId": { "$ref": "#/$defs/resourceId" },
+        "appId": { "$ref": "#/$defs/resourceId" },
+        "connectorType": { "$ref": "#/$defs/typeName" },
+        "sourceKind": { "$ref": "#/$defs/typeName" },
+        "displayName": { "$ref": "#/$defs/displayName" },
+        "hostId": { "$ref": "#/$defs/resourceId" },
+        "state": { "enum": ["draft", "configured", "tested", "active", "disabled"] },
+        "config": { "$ref": "#/$defs/config" },
+        "credentialReferences": { "$ref": "#/$defs/credentialReferences" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "createdAt": { "$ref": "#/$defs/timestamp" },
+        "updatedAt": { "$ref": "#/$defs/timestamp" },
+        "health": { "$ref": "#/$defs/sourceHealthSnapshot" }
+      },
+      "description": "sourceId and connectorInstanceId are stable, independent identities. appId and optional hostId are references, never identity derivation inputs. connectorType and sourceKind are distinct required fields."
+    },
+    "appRegistration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["appId", "displayName", "hosts", "publicPages", "state", "revision", "createdAt", "updatedAt"],
+      "properties": {
+        "appId": { "$ref": "#/$defs/resourceId" },
+        "displayName": { "$ref": "#/$defs/displayName" },
+        "hosts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/resourceId" }
+        },
+        "publicPages": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 500, "pattern": "^https://" }
+        },
+        "state": { "enum": ["registered", "disabled"] },
+        "revision": { "$ref": "#/$defs/revision" },
+        "createdAt": { "$ref": "#/$defs/timestamp" },
+        "updatedAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "hostEnrollment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hostId", "appId", "displayName", "state", "connectionState", "lastProvenAt", "revision", "createdAt", "updatedAt"
+      ],
+      "properties": {
+        "hostId": { "$ref": "#/$defs/resourceId" },
+        "appId": { "$ref": "#/$defs/resourceId" },
+        "displayName": { "$ref": "#/$defs/displayName" },
+        "state": { "enum": ["pending", "enrolled", "disabled"] },
+        "connectionState": { "enum": ["unknown", "pending", "proven", "stale", "offline", "disabled"] },
+        "lastProvenAt": { "$ref": "#/$defs/nullableTimestamp" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "createdAt": { "$ref": "#/$defs/timestamp" },
+        "updatedAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "connectorInstance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "connectorInstanceId", "appId", "connectorType", "displayName", "state", "config",
+        "credentialReferences", "revision", "createdAt", "updatedAt"
+      ],
+      "properties": {
+        "connectorInstanceId": { "$ref": "#/$defs/resourceId" },
+        "appId": { "$ref": "#/$defs/resourceId" },
+        "connectorType": { "$ref": "#/$defs/typeName" },
+        "displayName": { "$ref": "#/$defs/displayName" },
+        "state": { "enum": ["configured", "tested", "active", "disabled"] },
+        "config": { "$ref": "#/$defs/config" },
+        "credentialReferences": { "$ref": "#/$defs/credentialReferences" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "createdAt": { "$ref": "#/$defs/timestamp" },
+        "updatedAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changeId", "resourceType", "resourceId", "action", "status", "at"],
+      "properties": {
+        "changeId": { "$ref": "#/$defs/resourceId" },
+        "resourceType": { "enum": ["app", "host", "connector-instance", "source"] },
+        "resourceId": { "$ref": "#/$defs/resourceId" },
+        "action": {
+          "enum": [
+            "app.registered", "app.disabled", "host.enrolled", "host.disabled",
+            "connector-instance.configured", "connector-instance.tested", "connector-instance.activated", "connector-instance.disabled",
+            "source.configured", "source.tested", "source.activated", "source.disabled"
+          ]
+        },
+        "status": { "enum": ["succeeded", "failed", "rejected", "conflict"] },
+        "at": { "$ref": "#/$defs/timestamp" },
+        "message": { "type": "string", "maxLength": 500 }
+      },
+      "description": "The runtime and CLI require the action prefix to match resourceType. This record cannot contain credentials."
+    },
+    "appRegisterInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["displayName", "hosts", "publicPages"],
+      "properties": {
+        "displayName": { "$ref": "#/$defs/displayName" },
+        "hosts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/resourceId" }
+        },
+        "publicPages": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 500, "pattern": "^https://" }
+        }
+      }
+    },
+    "hostEnrollInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["appId", "hostId"],
+      "properties": {
+        "appId": { "$ref": "#/$defs/resourceId" },
+        "hostId": { "$ref": "#/$defs/resourceId" }
+      }
+    },
+    "sourceSetupInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["appId", "connectorType", "sourceKind", "displayName", "config", "credentialReferences"],
+      "properties": {
+        "appId": { "$ref": "#/$defs/resourceId" },
+        "hostId": { "$ref": "#/$defs/resourceId" },
+        "connectorType": { "$ref": "#/$defs/typeName" },
+        "sourceKind": { "$ref": "#/$defs/typeName" },
+        "displayName": { "$ref": "#/$defs/displayName" },
+        "config": { "$ref": "#/$defs/config" },
+        "credentialReferences": { "$ref": "#/$defs/credentialReferences" }
+      }
+    },
+    "sourceRevisionInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "connectorInstanceId", "expectedRevision"],
+      "properties": {
+        "sourceId": { "$ref": "#/$defs/resourceId" },
+        "connectorInstanceId": { "$ref": "#/$defs/resourceId" },
+        "expectedRevision": { "$ref": "#/$defs/revision" }
+      }
+    },
+    "commandRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "documentType", "requestId", "command", "requestedAt", "input"],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "documentType": { "const": "connector-command-request" },
+        "requestId": { "$ref": "#/$defs/resourceId" },
+        "command": { "enum": ["app.register", "host.enroll", "source.setup", "source.test", "source.activate"] },
+        "requestedAt": { "$ref": "#/$defs/timestamp" },
+        "input": { "type": "object" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "command": { "const": "app.register" } }, "required": ["command"] },
+          "then": { "properties": { "input": { "$ref": "#/$defs/appRegisterInput" } } }
+        },
+        {
+          "if": { "properties": { "command": { "const": "host.enroll" } }, "required": ["command"] },
+          "then": { "properties": { "input": { "$ref": "#/$defs/hostEnrollInput" } } }
+        },
+        {
+          "if": { "properties": { "command": { "const": "source.setup" } }, "required": ["command"] },
+          "then": { "properties": { "input": { "$ref": "#/$defs/sourceSetupInput" } } }
+        },
+        {
+          "if": { "properties": { "command": { "enum": ["source.test", "source.activate"] } }, "required": ["command"] },
+          "then": { "properties": { "input": { "$ref": "#/$defs/sourceRevisionInput" } } }
+        }
+      ]
+    },
+    "oneTimeConnectionCredential": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "expiresAt", "purpose"],
+      "properties": {
+        "value": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": ".*\\S.*" },
+        "expiresAt": { "$ref": "#/$defs/timestamp" },
+        "purpose": { "const": "connection-check" }
+      }
+    },
+    "oneTimeSourceCredential": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "expiresAt", "purpose"],
+      "properties": {
+        "value": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": ".*\\S.*" },
+        "expiresAt": { "$ref": "#/$defs/timestamp" },
+        "purpose": { "const": "source-ingest" }
+      }
+    },
+    "appRegisterOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["appId", "state"],
+      "properties": {
+        "appId": { "$ref": "#/$defs/resourceId" },
+        "state": { "const": "registered" }
+      }
+    },
+    "hostEnrollOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["appId", "hostId", "state"],
+      "properties": {
+        "appId": { "$ref": "#/$defs/resourceId" },
+        "hostId": { "$ref": "#/$defs/resourceId" },
+        "state": { "const": "enrolled" },
+        "oneTimeCredential": { "$ref": "#/$defs/oneTimeConnectionCredential" }
+      }
+    },
+    "sourceSetupOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["appId", "sourceId", "connectorInstanceId", "revision", "state"],
+      "properties": {
+        "appId": { "$ref": "#/$defs/resourceId" },
+        "sourceId": { "$ref": "#/$defs/resourceId" },
+        "connectorInstanceId": { "$ref": "#/$defs/resourceId" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "state": { "const": "configured" }
+      }
+    },
+    "sourceTestOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "connectorInstanceId", "revision", "state"],
+      "properties": {
+        "sourceId": { "$ref": "#/$defs/resourceId" },
+        "connectorInstanceId": { "$ref": "#/$defs/resourceId" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "state": { "const": "tested" }
+      }
+    },
+    "sourceActivateOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "connectorInstanceId", "revision", "state"],
+      "properties": {
+        "sourceId": { "$ref": "#/$defs/resourceId" },
+        "connectorInstanceId": { "$ref": "#/$defs/resourceId" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "state": { "const": "active" },
+        "oneTimeCredential": { "$ref": "#/$defs/oneTimeSourceCredential" }
+      }
+    },
+    "commandError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": {
+          "enum": [
+            "validation-failed", "not-authorized", "not-found", "already-exists", "revision-conflict",
+            "credential-reference-unavailable", "connector-unavailable", "provider-unavailable", "test-failed", "activation-blocked", "internal-error"
+          ]
+        },
+        "message": { "type": "string", "minLength": 1, "maxLength": 500, "pattern": ".*\\S.*" },
+        "field": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z][A-Za-z0-9.-]*$" },
+        "retryable": { "type": "boolean" }
+      }
+    },
+    "commandResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "documentType", "requestId", "command", "status", "completedAt"],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "documentType": { "const": "connector-command-result" },
+        "requestId": { "$ref": "#/$defs/resourceId" },
+        "command": { "enum": ["app.register", "host.enroll", "source.setup", "source.test", "source.activate"] },
+        "status": { "enum": ["succeeded", "failed", "rejected", "conflict"] },
+        "completedAt": { "$ref": "#/$defs/timestamp" },
+        "output": { "type": "object" },
+        "error": { "$ref": "#/$defs/commandError" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "succeeded" } }, "required": ["status"] },
+          "then": { "required": ["output"], "not": { "required": ["error"] } },
+          "else": { "required": ["error"], "not": { "required": ["output"] } }
+        },
+        {
+          "if": { "properties": { "command": { "const": "app.register" }, "status": { "const": "succeeded" } }, "required": ["command", "status"] },
+          "then": { "properties": { "output": { "$ref": "#/$defs/appRegisterOutput" } } }
+        },
+        {
+          "if": { "properties": { "command": { "const": "host.enroll" }, "status": { "const": "succeeded" } }, "required": ["command", "status"] },
+          "then": { "properties": { "output": { "$ref": "#/$defs/hostEnrollOutput" } } }
+        },
+        {
+          "if": { "properties": { "command": { "const": "source.setup" }, "status": { "const": "succeeded" } }, "required": ["command", "status"] },
+          "then": { "properties": { "output": { "$ref": "#/$defs/sourceSetupOutput" } } }
+        },
+        {
+          "if": { "properties": { "command": { "const": "source.test" }, "status": { "const": "succeeded" } }, "required": ["command", "status"] },
+          "then": { "properties": { "output": { "$ref": "#/$defs/sourceTestOutput" } } }
+        },
+        {
+          "if": { "properties": { "command": { "const": "source.activate" }, "status": { "const": "succeeded" } }, "required": ["command", "status"] },
+          "then": { "properties": { "output": { "$ref": "#/$defs/sourceActivateOutput" } } }
+        }
+      ]
+    },
+    "controlSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion", "documentType", "connectorTypes", "apps", "hosts", "connectorInstances",
+        "setups", "sources", "changes", "revision"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "documentType": { "const": "connector-control-snapshot" },
+        "connectorTypes": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "connector-manifest.v1.schema.json" }
+        },
+        "apps": {
+          "type": "array",
+          "maxItems": 500,
+          "items": { "$ref": "#/$defs/appRegistration" }
+        },
+        "hosts": {
+          "type": "array",
+          "maxItems": 500,
+          "items": { "$ref": "#/$defs/hostEnrollment" }
+        },
+        "connectorInstances": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": { "$ref": "#/$defs/connectorInstance" }
+        },
+        "setups": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "allOf": [
+              { "$ref": "#/$defs/sourceRegistration" },
+              { "properties": { "state": { "enum": ["draft", "configured", "tested"] } } }
+            ]
+          }
+        },
+        "sources": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "allOf": [
+              { "$ref": "#/$defs/sourceRegistration" },
+              { "properties": { "state": { "enum": ["active", "disabled"] } } }
+            ]
+          }
+        },
+        "changes": {
+          "type": "array",
+          "maxItems": 200,
+          "items": { "$ref": "#/$defs/change" }
+        },
+        "revision": { "$ref": "#/$defs/revision" }
+      },
+      "description": "The runtime and CLI enforce uniqueness and all app/host/connector-instance/source referential relationships. No one-time credential is valid anywhere in this snapshot."
+    }
+  }
+}

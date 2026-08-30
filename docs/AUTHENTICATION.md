@@ -1,0 +1,617 @@
+# Authentication integration boundary
+
+This repository implements a browser-side authentication integration contract.
+It validates a closed session projection, exposes login/logout entry points, and
+can gate page rendering when authentication is required. It deliberately does
+not implement OpenID Connect protocol, token processing/storage, cookies,
+server-side sessions, or authorization decisions.
+
+A static download cannot safely become its own authentication system by adding
+browser JavaScript: credential handling, protocol callbacks, session protection,
+and resource authorization require a trusted server boundary.
+
+The browser contract is provider-neutral and assumes an adopter-owned
+backend-for-frontend (BFF). For one TypeScript/Node application, Better Auth is
+the recommended starting point and the repository includes an executable
+same-origin bridge. For centralized identity shared by several products or
+stacks, use the provider-neutral OpenID Connect (OIDC) design; Keycloak is the
+worked provider reference and authentik compatibility notes are included below.
+
+## Browser contract implemented here
+
+By default, bootstrap resolves the global named by `config.auth.globalName`:
+
+```js
+window.SOC_CONSOLE_AUTH = {
+  schemaVersion: "1",
+  id: "application-auth",
+  getSession,
+  login,
+  logout
+};
+```
+
+`public/auth-contract.js` installs the frozen
+`window.SocConsoleAuthRuntime`. Its version-1 API exposes `VERSION`,
+`validateReturnTo`, `validateSession`, `validateProvider`, and
+`resolveProvider`. The runtime validates this plain object, requires an ID of at
+most 80 characters that starts with a lowercase letter and then contains only
+lowercase letters, digits, or hyphens, binds the three methods, and passes the
+normalized integration into the application factory. Unknown keys and accessor
+properties are rejected.
+
+Do not add issuer, client, endpoint, role, token, cookie, CSRF, or provider
+configuration fields to this object. A host bridge may close over its reviewed
+same-origin client/navigation functions, but sensitive authentication and
+session state still belongs to the BFF. The closed public shape is deliberate.
+
+`getSession()` resolves to one closed projection:
+
+```js
+{ authenticated: false }
+```
+
+or:
+
+```js
+{
+  authenticated: true,
+  display: { name: "Display name", initials: "DN" },
+  capabilities: ["console:read"]
+}
+```
+
+`display` and `capabilities` are optional for authenticated sessions. A display
+name is at most 120 characters; initials are one to four Unicode letters or
+digits. Capabilities are at most 50 unique normalized strings, each at most 100
+characters and beginning with a lowercase letter. They are browser presentation
+inputs only; a server must reauthorize every protected request. An
+unauthenticated projection may contain neither.
+
+The validator rejects unknown fields and dedicated fields for provider claims,
+subject/session identifiers, cookies, credentials, and access, refresh, or ID
+tokens. The browser contract has no method intended to retrieve those values.
+Shape validation is not a semantic secret scanner: a host projector must not
+encode sensitive material inside an allowed display or capability string.
+
+`login({ returnTo })` and `logout({ returnTo })` receive only a validated internal
+hash route such as `#/triage`; absolute/scheme-relative/external destinations are
+not contract values. A return route is at most 512 characters, uses canonical
+traversal-free hash-path segments, and may contain at most 20 uniquely keyed
+decoded query entries with bounded keys and values. The validator returns the original valid
+hash string; the BFF must independently allowlist actual destinations. A host
+implementation normally navigates to same-origin BFF endpoints that perform the
+server flow described below.
+
+The normalized `getSession`, `login`, and `logout` wrappers are promise-based
+even when the host method returns synchronously. Results from `login` and
+`logout` are deliberately discarded so the browser contract cannot become an
+accidental channel for authentication material. Validation errors reject or
+throw before untrusted values reach the application. `resolveProvider(name)`
+returns `null` for a missing global and otherwise returns a frozen, bound
+wrapper; it never begins an OIDC flow itself.
+
+With `config.auth.required: true`, a missing integration or unauthenticated
+projection gates page rendering and suppresses `provider.readPage` until an
+authenticated projection is available. With `false`, the data-free 38-route
+shell can be inspected without authentication; that setting never authorizes
+adapter data or commands.
+
+When an auth provider is installed, the unauthenticated top-bar identity chip
+and required-auth gate call `login({ returnTo })`. The Access page exposes the
+same sign-in action and, for an authenticated projection, a sign-out action that
+calls `logout({ returnTo: "#/" })`. These calls delegate navigation and protocol
+work to the host adapter; the skeleton never constructs an OIDC request itself.
+
+## Requirements shared by every deployment
+
+Every authentication choice, including direct Better Auth and an OIDC BFF, must
+preserve these properties:
+
+- Authenticate each protected server request from current server-controlled
+  session state and authorize the exact tenant, route, resource, field, and
+  action. Deny missing or stale authorization by default.
+- Treat the browser's authenticated flag, display fields, capability hints,
+  route, and disabled controls as untrusted presentation state.
+- Keep credentials, session internals, provider data, and protocol tokens out of
+  browser storage, URLs, page models, logs, and client error messages.
+- Represent the browser session with an opaque server-managed identifier in a
+  `Secure`, `HttpOnly`, appropriately `SameSite`, host-only cookie; rotate,
+  expire, and revoke it according to reviewed policy.
+- Protect every state-changing cookie-authenticated request against CSRF and
+  validate every redirect/callback destination again on the server.
+- Treat roles, groups, organization membership, and other identity attributes
+  as inputs to application authorization, never as self-executing permissions.
+- Define and test the exact guarantee of local logout, upstream-provider logout,
+  revocation, expiry, and privilege changes.
+
+## Additional requirements when OIDC is used
+
+An OIDC deployment must also preserve these properties:
+
+- Use Authorization Code flow with PKCE `S256`.
+- Perform authorization-code exchange and token processing on the application
+  server, never in the console JavaScript.
+- Keep ID, access, and refresh tokens out of browser storage, browser-readable
+  cookies, URLs, page models, logs, and client error messages.
+- Match the configured issuer, client ID/audience, redirect URI, and post-logout
+  redirect URI exactly. Do not use wildcard production redirects.
+- Generate transaction-specific state, nonce, and PKCE values with a maintained
+  library. Bind them to one short-lived server-side login transaction and
+  consume them once.
+- Treat identity-provider roles, groups, and claims as untrusted authorization
+  inputs. The application server makes the final, resource-specific decision
+  and denies by default.
+- Use provider discovery and maintained JOSE/OIDC libraries. Do not implement
+  token parsing, signature verification, key rotation, PKCE, state protection,
+  nonce generation, or logout-token validation in this repository.
+
+## Trust-boundary architecture
+
+```text
+browser                            application server (BFF)
+┌─────────────────────────┐       ┌────────────────────────────────────┐
+│ static SOC console      │       │ OIDC relying party                 │
+│ validated auth contract │       │                                    │
+│ opaque session cookie ──┼──────>│ server-side session store          │
+│ Secure + HttpOnly       │       │ state / nonce / PKCE transactions  │
+│ no OAuth/OIDC tokens    │       │ ID-token validation                │
+│ no provider secret      │       │ application authorization policy   │
+└─────────────────────────┘       └───────────────┬────────────────────┘
+                                                  │ server-to-server
+                                                  │ code/tokens/logout
+                                  ┌───────────────▼────────────────────┐
+                                  │ OpenID Provider                    │
+                                  │ Keycloak, authentik, other OIDC   │
+                                  └────────────────────────────────────┘
+```
+
+The BFF terminates authentication. It may expose authenticated presentation
+models to the console adapter, but the adapter contract must never contain raw
+provider tokens or unfiltered provider claims.
+
+In the direct Better Auth shape, Better Auth runs inside the application-server
+box and owns its same-origin auth handler/session; the separate OpenID Provider
+box is present only when that application uses an upstream provider.
+
+## Reference OIDC/BFF HTTP surface
+
+These paths are placeholders for an adopter-owned application server. They are
+not implemented by the static server in this repository. They describe the OIDC
+BFF shape, not Better Auth's handler paths. A direct Better Auth deployment uses
+the handler/API surface of its pinned Better Auth version inside the adopter
+application.
+
+| Method and path | Server responsibility |
+| --- | --- |
+| `GET /auth/login` | Start one OIDC transaction and redirect to the discovered authorization endpoint |
+| `GET /auth/callback` | Validate the authorization response, exchange the code, validate tokens, create/rotate the application session, then redirect to an allowlisted local path |
+| `GET /auth/session` | Return a minimal browser-safe session projection, never tokens or raw claims |
+| `POST /auth/logout` | Require CSRF protection, invalidate the local session, expire the cookie, and optionally begin RP-initiated provider logout |
+| `GET /auth/logged-out` | Exact registered landing page after provider logout; do not accept an arbitrary onward redirect |
+| `POST /auth/backchannel-logout` | Optional standards-compliant logout-token receiver; validate before terminating matching sessions |
+
+Do not turn a `returnTo`, `next`, or similar query parameter into an open
+redirect. Store an allowlisted relative destination in the server-side login
+transaction, or use a fixed post-login destination.
+
+## Authorization Code + PKCE flow
+
+### 1. Start login
+
+The application server:
+
+1. Selects one configured issuer; it does not accept an issuer from the request.
+2. Creates high-entropy, transaction-specific `state`, `nonce`, and PKCE
+   `code_verifier` values through the selected OIDC library.
+3. Derives the `S256` `code_challenge` through that library.
+4. Stores the state, nonce, verifier, exact redirect URI, issuer, and expiry in a
+   short-lived, single-use server-side transaction.
+5. Redirects to the provider authorization endpoint with `response_type=code`,
+   `scope=openid` plus explicitly approved scopes, the exact client ID and
+   redirect URI, state, nonce, code challenge, and
+   `code_challenge_method=S256`.
+
+Do not use implicit or hybrid response types. Do not request `offline_access`
+unless the server has a reviewed need for refresh tokens and implements their
+rotation, revocation, encryption-at-rest, retention, and reuse handling.
+
+### 2. Process the callback
+
+The callback handler must reject unsolicited, expired, replayed, or ambiguous
+responses. A maintained OIDC client should:
+
+- require a successful response for the transaction's configured issuer;
+- compare returned state in constant-time using the library's supported API;
+- consume the transaction exactly once;
+- exchange the code from the server using the original verifier, exact redirect
+  URI, and registered client-authentication method;
+- validate the ID token as described below;
+- establish the application identity from exact issuer plus stable `sub`;
+- apply current server authorization policy;
+- rotate the application session identifier before authentication state or
+  privilege changes;
+- redirect only to the fixed or allowlisted local destination stored with the
+  transaction.
+
+The callback response should use a conservative `Referrer-Policy`, avoid
+third-party resources, and redirect promptly so the authorization code does not
+remain in the visible URL or page history longer than necessary.
+
+### 3. Validate tokens on the server
+
+Use the discovery document whose `issuer` exactly equals the configured issuer.
+The OIDC library must validate, as applicable:
+
+- the signature with a permitted asymmetric algorithm and a current key from
+  the discovered JWKS;
+- exact `iss`;
+- that `aud` contains the configured client ID, and `azp` when OIDC requires it
+  for a multiple-audience token;
+- expiration, issued-at, not-before, and any configured maximum-authentication-
+  age rules with a small, explicit clock tolerance;
+- the transaction-specific nonce;
+- token type and protocol context, so an access token is not accepted as an ID
+  token;
+- any OIDC hash claims present and required for the selected response mode.
+
+Key rotation should trigger one bounded metadata/JWKS refresh when an otherwise
+valid token references an unknown key. Do not accept unsigned tokens, the
+`none` algorithm, a token-selected JWKS URL, or an algorithm inferred only from
+the token header.
+
+## Server-side session
+
+Use an opaque random session identifier that resolves to server-managed state.
+The browser cookie should be equivalent to:
+
+```text
+__Host-soc_session=<opaque>; Path=/; Secure; HttpOnly; SameSite=Lax
+```
+
+The `__Host-` prefix requires `Secure`, `Path=/`, and no `Domain` attribute.
+`SameSite=Lax` accommodates the normal top-level authorization-code callback.
+If a deployment can use `SameSite=Strict` without breaking its provider flow,
+it may choose the stricter value after end-to-end testing. Do not use
+`SameSite=None` unless a documented cross-site requirement exists; it still
+requires `Secure` and stronger CSRF analysis.
+
+The server must:
+
+- keep identity, provider tokens, claim snapshots, and authorization context in
+  the server-side session store;
+- rotate the session identifier at login, reauthentication, and privilege
+  change;
+- enforce both idle and absolute expiry;
+- bind session validity to current account and authorization state where
+  required;
+- expire the cookie no later than the server session;
+- invalidate all applicable server records on logout, revocation, or validated
+  back-channel logout;
+- use CSRF protection for every state-changing cookie-authenticated request.
+
+`SameSite` is defense in depth, not the only CSRF control. XSS remains able to
+issue same-origin requests even though `HttpOnly` prevents JavaScript from
+reading the cookie, so maintain a restrictive Content Security Policy and safe
+DOM rendering too.
+
+## Browser session projection
+
+An implementation may back `getSession()` with `/auth/session`. That response
+must contain only the closed projection accepted by the browser contract. For
+example:
+
+```json
+{
+  "authenticated": true,
+  "display": {
+    "name": "Display name",
+    "initials": "DN"
+  },
+  "capabilities": [
+    "console:read"
+  ]
+}
+```
+
+This is presentation data, not proof of authorization. Every protected server
+operation must reevaluate the current session and resource/action policy. Do not
+return ID/access/refresh tokens, raw provider claims, provider group dumps,
+client credentials, session-store keys, or internal policy explanations.
+
+## Claim and role mapping
+
+Use the tuple `(issuer, sub)` as the external identity key. Email addresses,
+usernames, display names, and group labels can change and are not stable account
+keys.
+
+Classify claims before using them:
+
+| Claim category | Permitted use |
+| --- | --- |
+| `iss`, `sub` | External identity key after token validation |
+| `email`, `email_verified`, `name`, `preferred_username` | Optional display or provisioning inputs; never sufficient authorization alone |
+| Realm/client roles or groups | Inputs to an explicit application-owned mapping allowlist |
+| `acr`, `amr`, `auth_time` | Inputs to reauthentication or assurance policy when validated and provider semantics are documented |
+| `aud`, `azp` | Token-recipient validation, not an application permission |
+
+The application policy must map recognized provider values to internal roles or
+capabilities, evaluate the requested tenant/resource/action, and deny unknown or
+missing values. A claim called `admin` is not self-executing. Do not let a
+provider role bypass resource ownership, separation-of-duties, approval, or
+step-up requirements.
+
+Refresh or invalidate authorization state when membership changes. For
+high-impact actions, consider current server-side policy or authoritative group
+lookups instead of waiting for a long-lived claim snapshot to expire.
+
+## Logout
+
+### Local logout
+
+`POST /auth/logout` should be CSRF-protected. Invalidate the server session and
+expire the `__Host-` cookie even when provider logout fails. Logout should be
+idempotent and must not accept an arbitrary post-logout destination.
+
+### RP-initiated provider logout
+
+When supported, redirect through the provider's discovered
+`end_session_endpoint`. Use the library's RP-initiated logout support and an
+exactly registered `post_logout_redirect_uri`. Keycloak accepts an
+`id_token_hint` or client ID for a post-logout redirect; keep any ID token used
+as a hint on the server and never expose it to application JavaScript. Bind a
+logout `state` value to the server flow and validate it on return.
+
+Provider logout and local logout are distinct. A provider session can outlive a
+local session, and another relying party may keep the provider session active.
+Tell operators what the deployment's logout action guarantees.
+
+### Back-channel logout
+
+Back-channel logout is preferred over front-channel iframe notification when
+the provider and relying-party library support it. The server endpoint must
+validate the logout-token signature, issuer, audience, issued-at time, events
+claim, `sid` or `sub`, token shape, and a replay identifier before invalidating
+sessions. Do not reuse the normal ID-token validation function without the
+additional logout-token rules.
+
+Front-channel logout depends on browser/iframe behavior and can conflict with a
+restrictive framing policy. Do not relax the console's framing policy merely to
+make an unreviewed front-channel implementation work.
+
+## Provider-neutral OIDC relying-party configuration
+
+An OIDC server-side relying party needs an allowlisted configuration equivalent
+to:
+
+| Setting | Requirement |
+| --- | --- |
+| Issuer | One exact HTTPS issuer selected by deployment configuration |
+| Client ID | Exact registered confidential-client identifier |
+| ID-token audience | Exact client ID unless the provider's reviewed profile specifies otherwise |
+| Redirect URI | One exact HTTPS callback URI |
+| Post-logout redirect URI | One exact HTTPS logged-out URI |
+| Back-channel logout URI | Optional exact server endpoint reachable by the provider |
+| Flow | Authorization Code only |
+| PKCE | Required `S256` |
+| Scopes | Start with `openid`; add `profile`/`email` only when needed |
+| Client authentication | Server-supported method such as `client_secret_basic` or `private_key_jwt` |
+| Token algorithms | Explicit allowlist compatible with provider metadata and deployment policy |
+| Cookie | `__Host-` name, `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`, no `Domain` |
+| Time limits | Short login transaction, idle session, and absolute session expiries |
+
+Client credentials or private keys must be loaded from a server secret manager.
+They must not appear in a static config script, JSON template, container image,
+browser environment variable, source history, or downloadable bundle.
+
+## Keycloak reference provider
+
+The files under
+[examples/keycloak-reference/](../examples/keycloak-reference/README.md) are
+placeholder-only review templates. They intentionally contain no client secret,
+realm user, group, customer data, or operational hostname.
+
+For a production Keycloak realm/client:
+
+1. Create an OpenID Connect client with client authentication enabled
+   (confidential server client).
+2. Enable Standard Flow and require PKCE method `S256`.
+3. Disable Implicit Flow, Direct Access Grants, service accounts, device flow,
+   CIBA, and authorization services unless a separately reviewed use case needs
+   one of them. The console login does not.
+4. Register the exact callback and post-logout redirect URIs. Do not use `*` or
+   a path wildcard in production.
+5. Leave Web Origins empty for this BFF design; console JavaScript does not call
+   Keycloak token or UserInfo endpoints.
+6. Generate the confidential client credential in Keycloak, place it directly
+   in the application server's secret manager, and configure rotation. Never add
+   it to the reference JSON.
+7. Use the realm's exact discovery issuer and validate that metadata reports the
+   same issuer. For current Keycloak layouts it has the form
+   `https://id.example.invalid/realms/soc-reference`.
+8. Treat `realm_access.roles` and
+   `resource_access.soc-console-server.roles` as possible mapping inputs only.
+   Limit scopes/mappers to claims the application actually consumes.
+9. Configure realm login protections, MFA/step-up policy, session lifetimes,
+   signing-key rotation, administrative separation, backups, and audit/event
+   handling outside this public template.
+10. If back-channel logout is enabled, register the exact endpoint and validate
+    Keycloak logout tokens with a conformant server library.
+
+Keycloak import/export representations change between releases. Review the
+template against the exact supported Keycloak version before importing; do not
+treat successful JSON parsing as Keycloak compatibility or production approval.
+
+## authentik compatibility
+
+authentik can act as the OIDC Provider through an OAuth2/OIDC provider:
+
+- Prefer the default per-application issuer and configure that exact value in
+  the relying party. Do not silently switch between the per-provider and global
+  issuer modes.
+- Use a confidential authorization-code client and require PKCE `S256` from the
+  relying party even where the provider can accept a non-PKCE confidential
+  flow.
+- Register strict callback/logout URIs and request only approved scope mappings.
+- Treat property/scope-mapped groups and roles as application-policy inputs.
+- Add `offline_access` only when refresh tokens are required and reviewed.
+- Verify the deployed authentik release and relying-party library support before
+  enabling front- or back-channel logout; validate logout tokens on the server.
+
+The console does not depend on authentik-specific claim names. Put provider
+claim-path selection in server configuration and normalize only approved values
+into the application's internal identity model.
+
+## Better Auth reference for one TypeScript/Node application
+
+For a single TypeScript/Node application, Better Auth can own the same-origin
+auth handler and application session directly; it does not need to act as a
+separate OIDC provider for the console. The executable
+[reference bridge](../examples/better-auth-reference/README.md) adapts the
+current client calls `authClient.getSession()` and `authClient.signOut()`, plus
+an adopter-supplied `beginLogin` such as `authClient.signIn.social(...)`, to the
+closed console contract.
+
+The bridge deliberately takes an already-created Better Auth client. This
+repository therefore adds no Better Auth dependency and contains no server
+configuration, database adapter, provider credential, or deployment origin.
+Keep the client and auth handler on the console's origin. The bridge supplies a
+validated same-origin `callbackURL` whose fragment is the console's internal
+`returnTo` route. Better Auth receives that complete callback value, but the
+fragment is not sent with the browser's eventual HTTP navigation request and is
+read by the console router after navigation.
+
+Configure the Better Auth server with an exact production base URL and explicit
+`trustedOrigins`; it must independently reject untrusted origins and redirect
+destinations. The bridge's URL validation is browser-side defense in depth, not
+the server's CSRF/open-redirect policy. The adopted host must also replace the
+empty skeleton's `connect-src 'none'` response and meta policies with a reviewed
+policy that permits only required application connections. The checked-in local
+server neither mounts Better Auth nor accepts its state-changing requests.
+
+`getSession()` may return Better Auth's application session to the bridge, but
+only an authenticated flag and optional display/capability projection can leave
+it. User IDs, email addresses, session identifiers, raw provider data, and any
+other session fields are discarded by default. A custom projector is validated
+again by `SocConsoleAuthRuntime` before the console receives it.
+
+On the server, resolve the Better Auth session for every protected request and
+authorize the exact route, resource, field, and action using current application
+policy. The browser projection and its optional capabilities are display hints,
+not proof of permission. Preserve same-origin request protection, implement any
+additional CSRF controls required by the framework and command endpoint, and
+deny missing or stale authorization by default.
+
+The reference calls `authClient.signOut()` and can guarantee only the configured
+Better Auth application-session behavior. An upstream provider/plugin may start
+its own logout redirect or leave its SSO session active. Define, document, and
+test local versus upstream logout for the exact pinned version/plugins; do not
+promise global sign-out from the bridge alone.
+
+For centralized identity used by multiple products, languages, or independent
+deployments, prefer the Keycloak OIDC/BFF reference above. Better Auth's OAuth
+provider plugins can also support a separate-provider architecture, but that is
+a different deployment and must satisfy all OIDC validation, client, session,
+and logout requirements in this document.
+
+Confirm the exact Better Auth version and configured plugins in the adopter's
+own tests. This repository does not take a Better Auth runtime dependency.
+
+## Failure behavior
+
+The application server should fail closed and expose safe operator messages.
+OIDC-specific rows apply only when the deployment uses OIDC:
+
+| Failure | Required outcome |
+| --- | --- |
+| Unknown/mismatched issuer or audience | Reject authentication; do not create a session |
+| State, nonce, PKCE, or redirect mismatch | Reject and consume/invalidate the transaction |
+| Expired/replayed code or transaction | Reject; start a new login only after an explicit user action |
+| Signing key unavailable | One bounded metadata refresh, then fail unavailable |
+| Missing/unmapped authorization input | Authenticated but denied by default |
+| Provider unavailable | Preserve no tokens in the browser; show a retryable authentication-unavailable state |
+| Local logout succeeds, provider logout fails | Keep local session invalid and report the limited logout scope safely |
+| Invalid back-channel logout token | Do not terminate sessions; record a protected security event |
+
+Logs should use a correlation identifier and coarse failure category. Do not log
+authorization codes, state/nonce/verifier values, tokens, cookies, client
+credentials, full claims, or sensitive identity data.
+
+## Acceptance checklist
+
+### Every deployment
+
+- [ ] The host object passes `SocConsoleAuthRuntime.validateProvider`, and its
+      closed session projections pass `validateSession`.
+- [ ] Unauthenticated projections contain no display/capability fields, and
+      authenticated projections contain no dedicated raw-claim, token, cookie,
+      subject, or session-identifier fields; allowed string values are reviewed
+      for the same material.
+- [ ] Login/logout accept only runtime-validated internal hash return routes,
+      and the application server independently allowlists the destination.
+- [ ] `auth.required: true` gates page rendering for both a missing integration
+      and an unauthenticated projection; `false` is used only for intentional
+      inspection of the data-free shell.
+- [ ] The session cookie is opaque, `Secure`, `HttpOnly`, appropriately
+      `SameSite`, host-only, rotated, and bounded by idle/absolute expiry.
+- [ ] CSRF protection covers logout and every state-changing session request.
+- [ ] Current server session and application policy authorize every protected
+      route, tenant, resource, field, and action and deny missing/stale access.
+- [ ] Local, upstream-provider (when present), expired-session, revoked-session,
+      and privilege-change behavior is defined and tested without overpromising
+      the scope of logout.
+- [ ] Authentication and authorization security events are protected, useful,
+      and free of secrets/tokens.
+- [ ] The deployment has an independent threat model and security review.
+
+### Direct Better Auth deployments
+
+- [ ] The adopter pins and tests the exact Better Auth version, plugins, storage
+      adapter, session mode/revocation behavior, and cookie configuration.
+- [ ] The Better Auth handler and client share the intended origin/base path,
+      and exact production `trustedOrigins` and redirect destinations are
+      enforced on the server.
+- [ ] `SOC_CONSOLE_PUBLIC_CONFIG` selects `application` mode with
+      `auth.required: true` before `app-config.js` executes.
+- [ ] The effective response/meta CSP permits only required application
+      connections; the inspection server and its `connect-src 'none'` policy are
+      not used as the production auth host.
+- [ ] Real client/server integration tests cover session read, selected login
+      methods, local and any upstream logout, expiry/revocation, denial, and
+      recovery/abuse controls. The injected bridge test is not substituted for
+      those tests.
+
+### OIDC deployments
+
+- [ ] A maintained server-side OIDC library owns discovery, PKCE, token
+      validation, and logout-token validation.
+- [ ] Authorization Code + PKCE `S256` is the only browser login flow.
+- [ ] Issuer, client ID/audience, redirect, and logout URIs are exact.
+- [ ] No OAuth/OIDC token or client credential reaches browser JavaScript or
+      browser storage.
+- [ ] State, nonce, and verifier are transaction-specific, server-side,
+      short-lived, and single-use.
+- [ ] `(issuer, sub)` is the external identity key.
+- [ ] Claim/role mapping is allowlisted and application authorization denies by
+      default at resource/action level.
+- [ ] RP-initiated and optional back-channel logout paths are tested when used.
+- [ ] Key rotation, stale JWKS, provider outage, replay, mix-up, open-redirect,
+      session fixation, and privilege-change cases are tested.
+
+## Standards baseline
+
+For an OIDC deployment, review the current versions of these standards when
+implementing the server:
+
+- OpenID Connect Core 1.0 and OpenID Connect Discovery 1.0
+- OpenID Connect RP-Initiated Logout 1.0
+- OpenID Connect Back-Channel Logout 1.0, when used
+- RFC 7636, Proof Key for Code Exchange
+- RFC 8414, Authorization Server Metadata
+- RFC 9207, Authorization Server Issuer Identification
+- RFC 9700, OAuth 2.0 Security Best Current Practice
+- RFC 10017, OAuth 2.0 for Browser-Based Applications
+
+The standards and maintained libraries define the cryptographic/protocol
+implementation. The files in this repository define only the integration and
+review boundary.

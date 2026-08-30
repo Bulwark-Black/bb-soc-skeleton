@@ -4,48 +4,100 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
-  <meta name="description" content="A synthetic, static security console interface scaffold.">
-  <title>SOC Console Skeleton</title>
-  <link rel="stylesheet" href="app.css">
-  <script src="app.js" defer></script>
+  <meta name="theme-color" content="#000000">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="description" content="The data-free Bulwark Black SOC interface skeleton, ready for application-owned data and authentication adapters.">
+  <title>bulwark&gt;soc · Interface Skeleton</title>
+  <link rel="icon" href="assets/favicon.ico?v=20260830-2" sizes="any">
+  <link rel="icon" type="image/png" href="assets/icon-32.png?v=20260830-2" sizes="32x32">
+  <link rel="apple-touch-icon" href="assets/icon-180.png?v=20260830-2">
+  <link rel="stylesheet" href="active-ui.css?v=20260830-1">
+  <link rel="stylesheet" href="app.css?v=20260830-2">
+  <script src="app-config.js?v=20260830-1" defer></script>
+  <script src="adapter-contract.js?v=20260830-1" defer></script>
+  <script src="auth-contract.js?v=20260830-1" defer></script>
+  <script src="connector-contract.js?v=20260830-1" defer></script>
+  <script src="administration-contract.js?v=20260830-1" defer></script>
+  <script src="application-bridge.js?v=20260830-1" defer></script>
+  <script src="technical-docs.js?v=20260830-1" defer></script>
+  <script src="ui-catalog.js?v=20260830-2" defer></script>
+  <script src="app.js?v=20260830-2" defer></script>
+  <script src="bootstrap.js?v=20260830-1" defer></script>
 </head>
-<body>
+<body id="soc-console" data-soc-console>
   <a class="skip-link" href="#content">Skip to content</a>
   <div class="app-shell">
-    <aside class="sidebar" aria-label="Primary navigation">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true">SC</span>
-        <span><strong>SOC Console</strong><small>interface skeleton</small></span>
-      </div>
-      <div class="demo-banner"><span class="status-dot"></span>Synthetic demo</div>
-      <nav id="side-navigation"></nav>
-      <p class="sidebar-note">No external systems are connected. Nothing on this page is operational.</p>
+    <aside class="sidebar sidenav" aria-label="Primary navigation">
+      <div id="circuit-pulses" class="pulse-clip" aria-hidden="true"></div>
+      <a class="brand logo" href="#/" aria-label="Bulwark Black SOC overview">
+        <img src="assets/mark.png" alt="Bulwark Black SOC" width="132" height="148">
+      </a>
+      <details class="estate-pick">
+        <summary>
+          <span class="estate-dot" data-empty="true" aria-hidden="true"></span>
+          <span class="estate-name">No estate selected</span>
+          <span class="estate-caret" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="estate-menu">
+          <a class="estate-opt" href="#/onboard"><span>Onboard an estate</span><span aria-hidden="true">→</span></a>
+          <div class="estate-hint">Estate names and scopes come from the integrating application.</div>
+        </div>
+      </details>
+      <nav id="side-navigation" class="side-nav-scroll" aria-label="Primary navigation" tabindex="0"></nav>
+      <p class="sidebar-foot side-foot">Bulwark Black LLC</p>
     </aside>
 
-    <div class="workspace">
-      <header class="topbar">
+    <div class="workspace main">
+      <header class="topbar searchbar">
+        <a id="auth-chip" class="user-chip userchip chip-local" href="#/access" title="Authentication state">
+          <span id="auth-avatar" class="user-avatar avatar" aria-hidden="true">—</span>
+          <span class="user-copy chip-text"><strong id="auth-name">Not signed in</strong><small id="auth-state" class="chip-level">auth optional</small></span>
+        </a>
         <label class="mobile-route">
           <span class="sr-only">Choose a page</span>
           <select id="route-select" aria-label="Choose a page"></select>
         </label>
-        <label class="nav-filter">
-          <span class="sr-only">Filter navigation</span>
-          <input id="nav-filter" type="search" autocomplete="off" placeholder="Filter demo pages">
+        <label class="page-filter">
+          <span class="sr-only">Filter this page</span>
+          <input id="page-filter" type="search" autocomplete="off" placeholder="Filter this page…" aria-controls="content" aria-describedby="page-filter-status">
         </label>
-        <span class="read-only-pill">Static · read only</span>
+        <span id="page-filter-status" class="page-filter-status" role="status" aria-live="polite" hidden></span>
+        <button id="timezone-toggle" class="topbar-button timerange" type="button" aria-label="Toggle display timezone">UTC</button>
+        <span id="auto-refresh-state" class="auto-refresh-pill timerange" data-active="false"><span class="status-dot"></span>Auto off</span>
+        <button id="refresh-view" class="topbar-button refreshbtn" type="button" aria-label="Refresh this view">↻</button>
+        <a id="agents-link" class="topbar-button agents-link" href="#/agents" aria-label="Open agent management">Agents</a>
+        <a id="technical-docs-link" class="topbar-button technical-docs-link" href="#/docs" aria-label="Open technical documentation">Docs</a>
+        <a class="topbar-button" href="#/settings" aria-label="Open settings">⚙</a>
+        <span id="connection-state" class="read-only-pill timerange">No data adapter</span>
       </header>
 
       <main id="content" tabindex="-1">
         <noscript>
           <section class="panel empty-state">
-            <h1>JavaScript is required for this static demonstration.</h1>
-            <p>The project contains no backend or live data connection.</p>
+            <h1>JavaScript is required for this interface skeleton.</h1>
+            <p>The repository contains no operational records or built-in data connection.</p>
           </section>
         </noscript>
       </main>
     </div>
   </div>
-  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <div id="toast" class="toast" hidden>
+    <span id="toast-message" role="status" aria-live="polite" aria-atomic="true"></span>
+    <button id="toast-dismiss" class="toast-dismiss" type="button">Dismiss</button>
+  </div>
+  <dialog id="command-dialog" class="command-dialog kmodal" aria-labelledby="command-title">
+    <div class="kbox">
+      <div class="command-head">
+        <div><small>Jump or investigate</small><h2 id="command-title">Search anything</h2></div>
+        <button id="command-close" class="topbar-button" type="button" aria-label="Close search">×</button>
+      </div>
+      <label class="command-search">
+        <span class="sr-only">Search an IP, CVE, host, case, rule, or page</span>
+        <input id="command-input" type="search" autocomplete="off" placeholder="Search anything: IP, CVE, host, rule, page…">
+      </label>
+      <div id="command-results" class="command-results" role="listbox" aria-label="SOC search destinations"></div>
+      <p class="command-hint khint">Try an IP, CVE id, hostname (timeline), or page name. <kbd>Enter</kbd> go · <kbd>Esc</kbd> close</p>
+    </div>
+  </dialog>
 </body>
 </html>

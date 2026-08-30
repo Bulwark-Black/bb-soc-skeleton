@@ -1,11 +1,23 @@
 {
   "name": "soc-console-skeleton",
   "version": "0.1.0",
-  "description": "A synthetic, read-only security operations console scaffold.",
+  "description": "A data-free SOC interface skeleton with versioned page, auth, connector, and ingest contracts.",
   "type": "commonjs",
   "scripts": {
+    "start": "node tools/serve.js",
+    "start:connectors": "node server/reference-control-plane.js",
+    "start:agent-mcp": "node tools/agent-mcp.js",
+    "dev": "node tools/serve.js",
+    "build:docs": "node tools/build-technical-docs.js",
+    "check:docs": "node tools/build-technical-docs.js --check",
     "test": "node --test",
-    "audit:public": "node tools/public-audit.js"
+    "audit:public": "node tools/public-audit.js",
+    "validate:connector": "node tools/validate-connector.js",
+    "validate:administration": "node tools/validate-administration.js",
+    "validate:ingest": "node tools/validate-ingest.js",
+    "validate:provider": "node tools/validate-provider.js",
+    "check": "npm run check:docs && npm test && npm run audit:public",
+    "verify": "npm run check"
   },
   "engines": {
     "node": ">=20"

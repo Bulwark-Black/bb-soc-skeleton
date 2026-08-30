@@ -1,0 +1,594 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "administration.v1.schema.json",
+  "title": "SOC Console administration contract v1",
+  "description": "Strict, domain-separated agent and governance administration documents. Agent snapshots carry prompt metadata only; prompt bodies require a separate request. One-time credential material is permitted only in a successful enrollment.issue result and must never appear in snapshots.",
+  "oneOf": [
+    { "$ref": "#/$defs/snapshotRequest" },
+    { "$ref": "#/$defs/agentSnapshot" },
+    { "$ref": "#/$defs/governanceSnapshot" },
+    { "$ref": "#/$defs/promptRequest" },
+    { "$ref": "#/$defs/prompt" },
+    { "$ref": "#/$defs/commandRequest" },
+    { "$ref": "#/$defs/commandResult" }
+  ],
+  "$defs": {
+    "resourceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "typeName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "^[a-z][a-z0-9._-]*$"
+    },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "nullableTimestamp": {
+      "oneOf": [
+        { "$ref": "#/$defs/timestamp" },
+        { "type": "null" }
+      ]
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": ".*\\S.*"
+    },
+    "capability": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "^[a-z][a-z0-9:._-]*$"
+    },
+    "capabilities": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/capability" }
+    },
+    "agentState": { "enum": ["active", "paused", "archived"] },
+    "agentKind": { "enum": ["interactive", "automation", "service"] },
+    "promptState": { "enum": ["draft", "active", "archived"] },
+    "enrollmentState": { "enum": ["issued", "connected", "revoked", "expired"] },
+    "attestationStatus": { "enum": ["draft", "pending", "attested", "expired", "archived"] },
+    "riskStatus": { "enum": ["open", "mitigating", "accepted", "closed", "archived"] },
+    "riskLevel": { "enum": ["low", "moderate", "high", "critical"] },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agentId", "displayName", "kind", "capabilities", "state", "activePromptId",
+        "lastSeenAt", "revision", "createdAt", "updatedAt"
+      ],
+      "properties": {
+        "agentId": { "$ref": "#/$defs/resourceId" },
+        "displayName": { "$ref": "#/$defs/displayName" },
+        "description": { "type": "string", "maxLength": 1000 },
+        "kind": { "$ref": "#/$defs/agentKind" },
+        "provider": { "$ref": "#/$defs/typeName" },
+        "model": { "type": "string", "maxLength": 120 },
+        "capabilities": { "$ref": "#/$defs/capabilities" },
+        "state": { "$ref": "#/$defs/agentState" },
+        "activePromptId": {
+          "oneOf": [
+            { "$ref": "#/$defs/resourceId" },
+            { "type": "null" }
+          ]
+        },
+        "lastSeenAt": { "$ref": "#/$defs/nullableTimestamp" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "createdAt": { "$ref": "#/$defs/timestamp" },
+        "updatedAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "promptMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["promptId", "agentId", "version", "title", "state", "revision", "createdAt", "updatedAt"],
+      "properties": {
+        "promptId": { "$ref": "#/$defs/resourceId" },
+        "agentId": { "$ref": "#/$defs/resourceId" },
+        "version": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": ".*\\S.*" },
+        "state": { "$ref": "#/$defs/promptState" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "createdAt": { "$ref": "#/$defs/timestamp" },
+        "updatedAt": { "$ref": "#/$defs/timestamp" }
+      },
+      "description": "Prompt metadata deliberately excludes body content."
+    },
+    "enrollment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enrollmentId", "agentId", "state", "issuedAt", "expiresAt", "connectedAt", "revokedAt", "revision"
+      ],
+      "properties": {
+        "enrollmentId": { "$ref": "#/$defs/resourceId" },
+        "agentId": { "$ref": "#/$defs/resourceId" },
+        "state": { "$ref": "#/$defs/enrollmentState" },
+        "issuedAt": { "$ref": "#/$defs/timestamp" },
+        "expiresAt": { "$ref": "#/$defs/timestamp" },
+        "connectedAt": { "$ref": "#/$defs/nullableTimestamp" },
+        "revokedAt": { "$ref": "#/$defs/nullableTimestamp" },
+        "revision": { "$ref": "#/$defs/revision" }
+      }
+    },
+    "attestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attestationId", "title", "status", "dueAt", "revision", "createdAt", "updatedAt"],
+      "properties": {
+        "attestationId": { "$ref": "#/$defs/resourceId" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": ".*\\S.*" },
+        "description": { "type": "string", "maxLength": 4000 },
+        "owner": { "type": "string", "maxLength": 160 },
+        "status": { "$ref": "#/$defs/attestationStatus" },
+        "dueAt": { "$ref": "#/$defs/nullableTimestamp" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "createdAt": { "$ref": "#/$defs/timestamp" },
+        "updatedAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "riskId", "title", "status", "likelihood", "impact", "reviewAt", "revision", "createdAt", "updatedAt"
+      ],
+      "properties": {
+        "riskId": { "$ref": "#/$defs/resourceId" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": ".*\\S.*" },
+        "description": { "type": "string", "maxLength": 4000 },
+        "owner": { "type": "string", "maxLength": 160 },
+        "status": { "$ref": "#/$defs/riskStatus" },
+        "likelihood": { "$ref": "#/$defs/riskLevel" },
+        "impact": { "$ref": "#/$defs/riskLevel" },
+        "reviewAt": { "$ref": "#/$defs/nullableTimestamp" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "createdAt": { "$ref": "#/$defs/timestamp" },
+        "updatedAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "agentChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changeId", "resourceType", "resourceId", "action", "status", "at"],
+      "properties": {
+        "changeId": { "$ref": "#/$defs/resourceId" },
+        "resourceType": { "enum": ["agent", "prompt", "enrollment"] },
+        "resourceId": { "$ref": "#/$defs/resourceId" },
+        "action": {
+          "enum": [
+            "agent.created", "agent.updated", "agent.paused", "agent.resumed", "agent.archived", "agent.restored", "agent.removed",
+            "prompt.revised", "prompt.activated", "prompt.archived", "enrollment.issued", "enrollment.revoked"
+          ]
+        },
+        "status": { "enum": ["succeeded", "failed", "rejected", "conflict"] },
+        "at": { "$ref": "#/$defs/timestamp" },
+        "message": { "type": "string", "maxLength": 500 }
+      }
+    },
+    "governanceChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changeId", "resourceType", "resourceId", "action", "status", "at"],
+      "properties": {
+        "changeId": { "$ref": "#/$defs/resourceId" },
+        "resourceType": { "enum": ["attestation", "risk"] },
+        "resourceId": { "$ref": "#/$defs/resourceId" },
+        "action": {
+          "enum": [
+            "attestation.created", "attestation.updated", "attestation.transitioned", "attestation.archived", "attestation.restored", "attestation.removed",
+            "risk.created", "risk.updated", "risk.transitioned", "risk.archived", "risk.restored", "risk.removed"
+          ]
+        },
+        "status": { "enum": ["succeeded", "failed", "rejected", "conflict"] },
+        "at": { "$ref": "#/$defs/timestamp" },
+        "message": { "type": "string", "maxLength": 500 }
+      }
+    },
+    "snapshotRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "documentType", "domain", "reason"],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "documentType": { "const": "administration-snapshot-request" },
+        "domain": { "enum": ["agents", "governance"] },
+        "reason": { "enum": ["initial", "refresh", "command"] },
+        "knownRevision": { "$ref": "#/$defs/revision" }
+      }
+    },
+    "agentSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "documentType", "domain", "revision", "agents", "prompts", "enrollments", "changes"],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "documentType": { "const": "agent-administration-snapshot" },
+        "domain": { "const": "agents" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "agents": { "type": "array", "maxItems": 1000, "items": { "$ref": "#/$defs/agent" } },
+        "prompts": { "type": "array", "maxItems": 5000, "items": { "$ref": "#/$defs/promptMetadata" } },
+        "enrollments": { "type": "array", "maxItems": 5000, "items": { "$ref": "#/$defs/enrollment" } },
+        "changes": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/agentChange" } }
+      },
+      "description": "Prompt bodies and credential values are forbidden by the exact nested shapes."
+    },
+    "governanceSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "documentType", "domain", "revision", "attestations", "risks", "changes"],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "documentType": { "const": "governance-administration-snapshot" },
+        "domain": { "const": "governance" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "attestations": { "type": "array", "maxItems": 5000, "items": { "$ref": "#/$defs/attestation" } },
+        "risks": { "type": "array", "maxItems": 5000, "items": { "$ref": "#/$defs/risk" } },
+        "changes": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/governanceChange" } }
+      }
+    },
+    "promptRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "documentType", "promptId"],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "documentType": { "const": "agent-prompt-request" },
+        "promptId": { "$ref": "#/$defs/resourceId" }
+      }
+    },
+    "prompt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion", "documentType", "promptId", "agentId", "version", "title", "state",
+        "body", "revision", "createdAt", "updatedAt"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "documentType": { "const": "agent-prompt" },
+        "promptId": { "$ref": "#/$defs/resourceId" },
+        "agentId": { "$ref": "#/$defs/resourceId" },
+        "version": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": ".*\\S.*" },
+        "state": { "$ref": "#/$defs/promptState" },
+        "body": { "type": "string", "minLength": 1, "maxLength": 32768, "pattern": ".*\\S.*" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "createdAt": { "$ref": "#/$defs/timestamp" },
+        "updatedAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "agentCreateInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["displayName", "kind", "capabilities"],
+      "properties": {
+        "displayName": { "$ref": "#/$defs/displayName" },
+        "description": { "type": "string", "maxLength": 1000 },
+        "kind": { "$ref": "#/$defs/agentKind" },
+        "provider": { "$ref": "#/$defs/typeName" },
+        "model": { "type": "string", "maxLength": 120 },
+        "capabilities": { "$ref": "#/$defs/capabilities" }
+      }
+    },
+    "agentUpdateInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentId"],
+      "minProperties": 2,
+      "properties": {
+        "agentId": { "$ref": "#/$defs/resourceId" },
+        "displayName": { "$ref": "#/$defs/displayName" },
+        "description": { "type": "string", "maxLength": 1000 },
+        "kind": { "$ref": "#/$defs/agentKind" },
+        "provider": { "$ref": "#/$defs/typeName" },
+        "model": { "type": "string", "maxLength": 120 },
+        "capabilities": { "$ref": "#/$defs/capabilities" }
+      }
+    },
+    "agentIdInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentId"],
+      "properties": { "agentId": { "$ref": "#/$defs/resourceId" } }
+    },
+    "promptReviseInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentId", "title", "body"],
+      "properties": {
+        "agentId": { "$ref": "#/$defs/resourceId" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": ".*\\S.*" },
+        "body": { "type": "string", "minLength": 1, "maxLength": 32768, "pattern": ".*\\S.*" },
+        "basePromptId": { "$ref": "#/$defs/resourceId" }
+      }
+    },
+    "promptIdInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["promptId"],
+      "properties": { "promptId": { "$ref": "#/$defs/resourceId" } }
+    },
+    "enrollmentIssueInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentId", "expiresInSeconds"],
+      "properties": {
+        "agentId": { "$ref": "#/$defs/resourceId" },
+        "expiresInSeconds": { "type": "integer", "minimum": 1, "maximum": 86400 }
+      }
+    },
+    "enrollmentIdInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enrollmentId"],
+      "properties": { "enrollmentId": { "$ref": "#/$defs/resourceId" } }
+    },
+    "attestationCreateInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": ".*\\S.*" },
+        "description": { "type": "string", "maxLength": 4000 },
+        "owner": { "type": "string", "maxLength": 160 },
+        "dueAt": { "$ref": "#/$defs/nullableTimestamp" }
+      }
+    },
+    "attestationUpdateInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attestationId"],
+      "minProperties": 2,
+      "properties": {
+        "attestationId": { "$ref": "#/$defs/resourceId" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": ".*\\S.*" },
+        "description": { "type": "string", "maxLength": 4000 },
+        "owner": { "type": "string", "maxLength": 160 },
+        "dueAt": { "$ref": "#/$defs/nullableTimestamp" }
+      }
+    },
+    "attestationTransitionInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attestationId", "status"],
+      "properties": {
+        "attestationId": { "$ref": "#/$defs/resourceId" },
+        "status": { "enum": ["draft", "pending", "attested", "expired"] },
+        "note": { "type": "string", "maxLength": 1000 }
+      }
+    },
+    "attestationIdInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attestationId"],
+      "properties": { "attestationId": { "$ref": "#/$defs/resourceId" } }
+    },
+    "riskCreateInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "likelihood", "impact"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": ".*\\S.*" },
+        "description": { "type": "string", "maxLength": 4000 },
+        "owner": { "type": "string", "maxLength": 160 },
+        "likelihood": { "$ref": "#/$defs/riskLevel" },
+        "impact": { "$ref": "#/$defs/riskLevel" },
+        "reviewAt": { "$ref": "#/$defs/nullableTimestamp" }
+      }
+    },
+    "riskUpdateInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["riskId"],
+      "minProperties": 2,
+      "properties": {
+        "riskId": { "$ref": "#/$defs/resourceId" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": ".*\\S.*" },
+        "description": { "type": "string", "maxLength": 4000 },
+        "owner": { "type": "string", "maxLength": 160 },
+        "likelihood": { "$ref": "#/$defs/riskLevel" },
+        "impact": { "$ref": "#/$defs/riskLevel" },
+        "reviewAt": { "$ref": "#/$defs/nullableTimestamp" }
+      }
+    },
+    "riskTransitionInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["riskId", "status"],
+      "properties": {
+        "riskId": { "$ref": "#/$defs/resourceId" },
+        "status": { "enum": ["open", "mitigating", "accepted", "closed"] },
+        "note": { "type": "string", "maxLength": 1000 }
+      }
+    },
+    "riskIdInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["riskId"],
+      "properties": { "riskId": { "$ref": "#/$defs/resourceId" } }
+    },
+    "commandRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "documentType", "requestId", "command", "requestedAt", "expectedRevision", "input"],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "documentType": { "const": "administration-command-request" },
+        "requestId": { "$ref": "#/$defs/resourceId" },
+        "command": {
+          "enum": [
+            "agent.create", "agent.update", "agent.pause", "agent.resume", "agent.archive", "agent.restore", "agent.remove",
+            "prompt.revise", "prompt.activate", "prompt.archive", "enrollment.issue", "enrollment.revoke",
+            "attestation.create", "attestation.update", "attestation.transition", "attestation.archive", "attestation.restore", "attestation.remove",
+            "risk.create", "risk.update", "risk.transition", "risk.archive", "risk.restore", "risk.remove"
+          ]
+        },
+        "requestedAt": { "$ref": "#/$defs/timestamp" },
+        "expectedRevision": { "$ref": "#/$defs/revision" },
+        "input": { "type": "object" }
+      },
+      "allOf": [
+        { "if": { "properties": { "command": { "const": "agent.create" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/agentCreateInput" } } } },
+        { "if": { "properties": { "command": { "const": "agent.update" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/agentUpdateInput" } } } },
+        { "if": { "properties": { "command": { "enum": ["agent.pause", "agent.resume", "agent.archive", "agent.restore", "agent.remove"] } } }, "then": { "properties": { "input": { "$ref": "#/$defs/agentIdInput" } } } },
+        { "if": { "properties": { "command": { "const": "prompt.revise" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/promptReviseInput" } } } },
+        { "if": { "properties": { "command": { "enum": ["prompt.activate", "prompt.archive"] } } }, "then": { "properties": { "input": { "$ref": "#/$defs/promptIdInput" } } } },
+        { "if": { "properties": { "command": { "const": "enrollment.issue" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/enrollmentIssueInput" } } } },
+        { "if": { "properties": { "command": { "const": "enrollment.revoke" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/enrollmentIdInput" } } } },
+        { "if": { "properties": { "command": { "const": "attestation.create" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/attestationCreateInput" } } } },
+        { "if": { "properties": { "command": { "const": "attestation.update" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/attestationUpdateInput" } } } },
+        { "if": { "properties": { "command": { "const": "attestation.transition" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/attestationTransitionInput" } } } },
+        { "if": { "properties": { "command": { "enum": ["attestation.archive", "attestation.restore", "attestation.remove"] } } }, "then": { "properties": { "input": { "$ref": "#/$defs/attestationIdInput" } } } },
+        { "if": { "properties": { "command": { "const": "risk.create" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/riskCreateInput" } } } },
+        { "if": { "properties": { "command": { "const": "risk.update" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/riskUpdateInput" } } } },
+        { "if": { "properties": { "command": { "const": "risk.transition" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/riskTransitionInput" } } } },
+        { "if": { "properties": { "command": { "enum": ["risk.archive", "risk.restore", "risk.remove"] } } }, "then": { "properties": { "input": { "$ref": "#/$defs/riskIdInput" } } } }
+      ]
+    },
+    "commandError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": {
+          "enum": [
+            "validation-failed", "not-authorized", "not-found", "already-exists", "revision-conflict",
+            "transition-invalid", "dependency-conflict", "provider-unavailable", "internal-error"
+          ]
+        },
+        "message": { "type": "string", "minLength": 1, "maxLength": 500, "pattern": ".*\\S.*" },
+        "field": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z][A-Za-z0-9.-]*$" },
+        "retryable": { "type": "boolean" }
+      }
+    },
+    "oneTimeCredential": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "expiresAt", "purpose"],
+      "properties": {
+        "value": { "type": "string", "minLength": 1, "maxLength": 1024, "pattern": ".*\\S.*" },
+        "expiresAt": { "$ref": "#/$defs/timestamp" },
+        "purpose": { "const": "agent-enrollment" }
+      }
+    },
+    "agentOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentId", "state", "revision"],
+      "properties": {
+        "agentId": { "$ref": "#/$defs/resourceId" },
+        "state": { "enum": ["active", "paused", "archived", "removed"] },
+        "revision": { "$ref": "#/$defs/revision" }
+      }
+    },
+    "promptOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["promptId", "agentId", "version", "state", "revision"],
+      "properties": {
+        "promptId": { "$ref": "#/$defs/resourceId" },
+        "agentId": { "$ref": "#/$defs/resourceId" },
+        "version": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "state": { "$ref": "#/$defs/promptState" },
+        "revision": { "$ref": "#/$defs/revision" }
+      }
+    },
+    "enrollmentIssueOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enrollmentId", "agentId", "state", "revision"],
+      "properties": {
+        "enrollmentId": { "$ref": "#/$defs/resourceId" },
+        "agentId": { "$ref": "#/$defs/resourceId" },
+        "state": { "const": "issued" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "oneTimeCredential": { "$ref": "#/$defs/oneTimeCredential" }
+      }
+    },
+    "enrollmentRevokeOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enrollmentId", "agentId", "state", "revision"],
+      "properties": {
+        "enrollmentId": { "$ref": "#/$defs/resourceId" },
+        "agentId": { "$ref": "#/$defs/resourceId" },
+        "state": { "const": "revoked" },
+        "revision": { "$ref": "#/$defs/revision" }
+      }
+    },
+    "attestationOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attestationId", "state", "revision"],
+      "properties": {
+        "attestationId": { "$ref": "#/$defs/resourceId" },
+        "state": { "enum": ["draft", "pending", "attested", "expired", "archived", "removed"] },
+        "revision": { "$ref": "#/$defs/revision" }
+      }
+    },
+    "riskOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["riskId", "state", "revision"],
+      "properties": {
+        "riskId": { "$ref": "#/$defs/resourceId" },
+        "state": { "enum": ["open", "mitigating", "accepted", "closed", "archived", "removed"] },
+        "revision": { "$ref": "#/$defs/revision" }
+      }
+    },
+    "commandResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "documentType", "requestId", "command", "status", "completedAt"],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "documentType": { "const": "administration-command-result" },
+        "requestId": { "$ref": "#/$defs/resourceId" },
+        "command": {
+          "enum": [
+            "agent.create", "agent.update", "agent.pause", "agent.resume", "agent.archive", "agent.restore", "agent.remove",
+            "prompt.revise", "prompt.activate", "prompt.archive", "enrollment.issue", "enrollment.revoke",
+            "attestation.create", "attestation.update", "attestation.transition", "attestation.archive", "attestation.restore", "attestation.remove",
+            "risk.create", "risk.update", "risk.transition", "risk.archive", "risk.restore", "risk.remove"
+          ]
+        },
+        "status": { "enum": ["succeeded", "failed", "rejected", "conflict"] },
+        "completedAt": { "$ref": "#/$defs/timestamp" },
+        "output": { "type": "object" },
+        "error": { "$ref": "#/$defs/commandError" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "succeeded" } } },
+          "then": { "required": ["output"], "not": { "required": ["error"] } },
+          "else": { "required": ["error"], "not": { "required": ["output"] } }
+        },
+        { "if": { "properties": { "command": { "enum": ["agent.create", "agent.update", "agent.pause", "agent.resume", "agent.archive", "agent.restore", "agent.remove"] }, "status": { "const": "succeeded" } }, "required": ["command", "status"] }, "then": { "properties": { "output": { "$ref": "#/$defs/agentOutput" } } } },
+        { "if": { "properties": { "command": { "enum": ["prompt.revise", "prompt.activate", "prompt.archive"] }, "status": { "const": "succeeded" } }, "required": ["command", "status"] }, "then": { "properties": { "output": { "$ref": "#/$defs/promptOutput" } } } },
+        { "if": { "properties": { "command": { "const": "enrollment.issue" }, "status": { "const": "succeeded" } }, "required": ["command", "status"] }, "then": { "properties": { "output": { "$ref": "#/$defs/enrollmentIssueOutput" } } } },
+        { "if": { "properties": { "command": { "const": "enrollment.revoke" }, "status": { "const": "succeeded" } }, "required": ["command", "status"] }, "then": { "properties": { "output": { "$ref": "#/$defs/enrollmentRevokeOutput" } } } },
+        { "if": { "properties": { "command": { "pattern": "^attestation\\." }, "status": { "const": "succeeded" } }, "required": ["command", "status"] }, "then": { "properties": { "output": { "$ref": "#/$defs/attestationOutput" } } } },
+        { "if": { "properties": { "command": { "pattern": "^risk\\." }, "status": { "const": "succeeded" } }, "required": ["command", "status"] }, "then": { "properties": { "output": { "$ref": "#/$defs/riskOutput" } } } }
+      ]
+    }
+  }
+}

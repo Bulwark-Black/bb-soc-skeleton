@@ -1,0 +1,96 @@
+{
+  "schemaVersion": "1",
+  "templateOnly": true,
+  "architecture": "server-side-oidc-bff",
+  "oidc": {
+    "issuer": "https://id.example.invalid/realms/soc-reference",
+    "clientId": "soc-console-server",
+    "expectedIdTokenAudience": "soc-console-server",
+    "redirectUri": "https://soc.example.invalid/auth/callback",
+    "postLogoutRedirectUri": "https://soc.example.invalid/auth/logged-out",
+    "backchannelLogoutUri": "https://soc.example.invalid/auth/backchannel-logout",
+    "responseType": "code",
+    "responseMode": "query",
+    "pkceMethod": "S256",
+    "scopes": [
+      "openid",
+      "profile",
+      "email"
+    ],
+    "clientAuthentication": {
+      "method": "client_secret_basic",
+      "credentialPresentInTemplate": false,
+      "loadCredentialFrom": "server-managed-secret-store"
+    },
+    "tokenValidation": {
+      "requireExactIssuer": true,
+      "requireExpectedAudience": true,
+      "requireNonce": true,
+      "allowedIdTokenAlgorithms": [
+        "RS256"
+      ],
+      "clockToleranceSeconds": 60
+    }
+  },
+  "loginTransaction": {
+    "storage": "server-side-expiring-single-use",
+    "state": "oidc-library-generated",
+    "nonce": "oidc-library-generated",
+    "pkceVerifier": "oidc-library-generated",
+    "lifetimeSeconds": 300
+  },
+  "session": {
+    "storage": "server-side",
+    "cookie": {
+      "name": "__Host-soc_session",
+      "secure": true,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "path": "/",
+      "domain": null
+    },
+    "idleTimeoutSeconds": 1800,
+    "absoluteTimeoutSeconds": 28800,
+    "rotateOn": [
+      "authentication",
+      "reauthentication",
+      "privilege-change"
+    ]
+  },
+  "identity": {
+    "externalKeyClaims": [
+      "iss",
+      "sub"
+    ],
+    "displayClaimInputs": [
+      "name",
+      "preferred_username",
+      "email",
+      "email_verified"
+    ],
+    "authorizationClaimInputs": [
+      "realm_access.roles",
+      "resource_access.soc-console-server.roles",
+      "acr",
+      "amr",
+      "auth_time"
+    ],
+    "claimValuesAreAuthorizationDecisions": false,
+    "applicationPolicyOwner": "application-server",
+    "unknownOrUnmappedDecision": "deny"
+  },
+  "logout": {
+    "localEndpoint": "/auth/logout",
+    "localMethod": "POST",
+    "requireCsrfProtection": true,
+    "rpInitiatedLogout": true,
+    "backchannelLogout": true,
+    "frontchannelLogout": false
+  },
+  "browserBoundary": {
+    "receivesOidcTokens": false,
+    "storesOidcTokens": false,
+    "canReadSessionCookie": false,
+    "receivesRawProviderClaims": false
+  }
+}

@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "connector-manifest.v1.schema.json",
+  "title": "SOC Console connector manifest contract v1",
+  "description": "A public, data-only description of one connector type. It declares versioned payloads, canonical record kinds, target routes and surfaces, non-secret configuration fields, credential-reference slots, and health policy. It never contains credential values or executable connector code.",
+  "$ref": "#/$defs/connectorManifest",
+  "$defs": {
+    "nonBlank120": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": ".*\\S.*"
+    },
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "nonSecretIdentifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^(?!.*(?:secret|password|passwd|token|apikey|privatekey|credential|credentials|authorization|cookie|sessionid|clientsecret|accesskey)$)[a-z][a-z0-9-]*$"
+    },
+    "typeName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[a-z][a-z0-9.-]*$"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]*$"
+    },
+    "route": {
+      "type": "string",
+      "maxLength": 180,
+      "pattern": "^/(?:[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*)?$"
+    },
+    "recordKind": {
+      "enum": [
+        "alert.delivery",
+        "asset.snapshot",
+        "audit.event",
+        "authentication.event",
+        "backup.status",
+        "case.record",
+        "compliance.record",
+        "database.schema",
+        "endpoint.event",
+        "evidence.receipt",
+        "file.integrity",
+        "finding",
+        "governance.attestation",
+        "governance.risk",
+        "honeypot.event",
+        "identity.access",
+        "intel.indicator",
+        "intel.sync",
+        "log.event",
+        "network.event",
+        "offboarding.record",
+        "phishing.report",
+        "remediation.record",
+        "retention.snapshot",
+        "rule.definition",
+        "scan.result",
+        "software.package",
+        "source.heartbeat",
+        "vulnerability.finding"
+      ]
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaId", "schemaVersion", "recordKinds", "lines", "content"],
+      "properties": {
+        "schemaId": { "$ref": "#/$defs/typeName" },
+        "schemaVersion": { "$ref": "#/$defs/version" },
+        "recordKinds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 29,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/recordKind" }
+        },
+        "lines": { "enum": ["required", "optional", "forbidden"] },
+        "content": { "enum": ["required", "optional", "forbidden"] }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["route", "surfaces", "recordKinds"],
+      "properties": {
+        "route": { "$ref": "#/$defs/route" },
+        "surfaces": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "recordKinds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 29,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/recordKind" },
+          "description": "Every entry must also appear in payload.recordKinds; the runtime and CLI enforce this cross-field invariant."
+        }
+      }
+    },
+    "enumOption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "label"],
+      "properties": {
+        "value": { "$ref": "#/$defs/identifier" },
+        "label": { "$ref": "#/$defs/nonBlank120" }
+      }
+    },
+    "configField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "label", "valueType", "required"],
+      "properties": {
+        "key": { "$ref": "#/$defs/nonSecretIdentifier" },
+        "label": { "$ref": "#/$defs/nonBlank120" },
+        "valueType": {
+          "enum": ["string", "integer", "number", "boolean", "duration-seconds", "endpoint-url", "enum"]
+        },
+        "required": { "type": "boolean" },
+        "description": { "type": "string", "maxLength": 500 },
+        "minimum": { "type": "number" },
+        "maximum": { "type": "number" },
+        "options": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/enumOption" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "valueType": { "const": "enum" } }, "required": ["valueType"] },
+          "then": { "required": ["options"] },
+          "else": { "not": { "required": ["options"] } }
+        },
+        {
+          "if": { "properties": { "valueType": { "enum": ["integer", "number", "duration-seconds"] } }, "required": ["valueType"] },
+          "else": {
+            "allOf": [
+              { "not": { "required": ["minimum"] } },
+              { "not": { "required": ["maximum"] } }
+            ]
+          }
+        }
+      ]
+    },
+    "credentialSlot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "label", "kind", "required"],
+      "properties": {
+        "key": { "$ref": "#/$defs/identifier" },
+        "label": { "$ref": "#/$defs/nonBlank120" },
+        "kind": {
+          "enum": ["api-key", "bearer-token", "basic-auth", "certificate", "oauth-client", "service-account", "ssh-key", "custom"]
+        },
+        "required": { "type": "boolean" },
+        "description": { "type": "string", "maxLength": 500 }
+      }
+    },
+    "healthPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deliveryMode", "expectedIntervalSeconds", "staleAfterSeconds", "offlineAfterSeconds", "emptyPayloadIsHealthy"],
+      "properties": {
+        "deliveryMode": { "enum": ["push", "poll"] },
+        "expectedIntervalSeconds": { "type": "integer", "minimum": 1, "maximum": 31536000 },
+        "staleAfterSeconds": { "type": "integer", "minimum": 1, "maximum": 31536000 },
+        "offlineAfterSeconds": { "type": "integer", "minimum": 1, "maximum": 31536000 },
+        "emptyPayloadIsHealthy": { "type": "boolean" }
+      },
+      "description": "The runtime and CLI additionally enforce expectedIntervalSeconds <= staleAfterSeconds <= offlineAfterSeconds."
+    },
+    "connectorManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "documentType",
+        "connectorType",
+        "connectorVersion",
+        "displayName",
+        "scope",
+        "supportedSourceKinds",
+        "payload",
+        "targets",
+        "configFields",
+        "credentialSlots",
+        "healthPolicy"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "documentType": { "const": "connector-manifest" },
+        "connectorType": { "$ref": "#/$defs/typeName" },
+        "connectorVersion": { "$ref": "#/$defs/version" },
+        "displayName": { "$ref": "#/$defs/nonBlank120" },
+        "description": { "type": "string", "maxLength": 1000 },
+        "scope": { "enum": ["application", "host", "service"] },
+        "supportedSourceKinds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/typeName" }
+        },
+        "payload": { "$ref": "#/$defs/payload" },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/target" },
+          "description": "Routes must be unique; the runtime and CLI enforce this relationship."
+        },
+        "configFields": {
+          "type": "array",
+          "maxItems": 40,
+          "items": { "$ref": "#/$defs/configField" },
+          "description": "Keys must be unique and distinct from credential slot keys; the runtime and CLI enforce both relationships."
+        },
+        "credentialSlots": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/credentialSlot" },
+          "description": "These describe references to adopter-owned secret storage. Connector manifests never contain credential values."
+        },
+        "healthPolicy": { "$ref": "#/$defs/healthPolicy" }
+      }
+    }
+  }
+}
