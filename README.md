@@ -1,4 +1,6 @@
-# Bulwark Black SOC interface skeleton
+# Bulwark Black SOC interface skeleton Beta
+
+## Still a work in progress, I am trying to take what I built privately and make it so that anyone can ingest sources as efficiently and monitor things as I do.
 
 A dependency-free, data-free browser skeleton for the Bulwark Black SOC
 interface. It preserves the exact committed product mark and visual system,
