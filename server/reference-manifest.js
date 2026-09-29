@@ -1,9 +1,10 @@
 "use strict";
 
-// These are deliberately data-only manifests. The reference server never loads
-// connector code, follows connector URLs, resolves the credential references,
-// or makes vendor requests. The scan entries are safe setup templates for an
-// adopter-supplied server driver; they are not claims that a driver is present.
+// Manifests are declarative data, never executable connector modules. The
+// reference server enables canonical-push; the private application additionally
+// enables the bundled trivy-report importer. The eleven *-template scan entries
+// still require adopter-reviewed drivers. Nothing here resolves credential
+// references, follows target URLs, executes scans, or makes vendor requests.
 
 function deepFreeze(value) {
   if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -85,8 +86,8 @@ const REFERENCE_CONNECTOR_MANIFEST = deepFreeze({
   connectorType: "canonical-push",
   connectorVersion: "1.0.0",
   displayName: "Canonical log push",
-  description: "Loopback-only reference admission for normalized log.event batches.",
-  scope: "host",
+  description: "Application-scoped admission for normalized log.event batches. A collector host is optional.",
+  scope: "application",
   supportedSourceKinds: ["log.event"],
   payload: {
     schemaId: "normalized-record.log-event",
@@ -111,6 +112,21 @@ const REFERENCE_CONNECTOR_MANIFEST = deepFreeze({
     offlineAfterSeconds: 900,
     emptyPayloadIsHealthy: false
   }
+});
+
+const TRIVY_REPORT_MANIFEST = deepFreeze({
+  schemaVersion: "1", documentType: "connector-manifest", connectorType: "trivy-report", connectorVersion: "1.0.0",
+  displayName: "Trivy JSON report import",
+  description: "Installed bounded importer for existing Trivy SchemaVersion 2 vulnerability reports. Never runs Trivy, fetches a target, or stores embedded secrets. Application scoped; optional collector host.",
+  scope: "application", supportedSourceKinds: ["trivy.scan"],
+  payload: { schemaId: "soc.canonical-records", schemaVersion: "1",
+    recordKinds: ["scan.result", "software.package", "vulnerability.finding"], lines: "forbidden", content: "required" },
+  targets: [{ route: "/scans", surfaces: ["trivy-operating-system-packages"],
+    recordKinds: ["scan.result", "software.package", "vulnerability.finding"] }],
+  configFields: [cadenceField("Expected seconds between report imports. Uploading a report is not a scheduled scan.")],
+  credentialSlots: [],
+  healthPolicy: { deliveryMode: "push", expectedIntervalSeconds: 86400, staleAfterSeconds: 129600,
+    offlineAfterSeconds: 259200, emptyPayloadIsHealthy: false }
 });
 
 const REFERENCE_SCAN_CONNECTOR_MANIFESTS = deepFreeze([
@@ -359,6 +375,7 @@ const REFERENCE_SCAN_CONNECTOR_MANIFESTS = deepFreeze([
 
 const REFERENCE_CONNECTOR_MANIFESTS = deepFreeze([
   REFERENCE_CONNECTOR_MANIFEST,
+  TRIVY_REPORT_MANIFEST,
   ...REFERENCE_SCAN_CONNECTOR_MANIFESTS
 ]);
 
@@ -381,6 +398,7 @@ function scaledHealthThresholds(connectorType, cadenceSeconds) {
 }
 
 module.exports = {
+  TRIVY_REPORT_MANIFEST,
   REFERENCE_CONNECTOR_MANIFEST,
   REFERENCE_CONNECTOR_MANIFESTS,
   REFERENCE_SCAN_CONNECTOR_MANIFESTS,

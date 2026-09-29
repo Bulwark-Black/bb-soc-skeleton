@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "source-registration.v1.schema.json",
   "title": "SOC Console connector registration and control contract v1",
-  "description": "Strict data shapes for source registrations, health snapshots, connector-control snapshots, and the closed connector lifecycle command protocol. Persistent shapes carry credential references only. One-time credentials are allowed solely in successful host-enrollment and source-activation results and are forbidden from snapshots and change records.",
+  "description": "Strict data shapes for source registrations, health snapshots, connector-control snapshots, and the closed connector lifecycle command protocol. Persistent shapes carry credential references only. One-time credentials are allowed solely in successful host-enrollment, source-activation, and source-rotation results and are forbidden from snapshots and change records.",
   "oneOf": [
     { "$ref": "#/$defs/sourceRegistration" },
     { "$ref": "#/$defs/sourceHealthSnapshot" },
@@ -156,7 +156,8 @@
         "sourceKind": { "$ref": "#/$defs/typeName" },
         "displayName": { "$ref": "#/$defs/displayName" },
         "hostId": { "$ref": "#/$defs/resourceId" },
-        "state": { "enum": ["draft", "configured", "tested", "active", "disabled"] },
+        "state": { "enum": ["draft", "configured", "tested", "active", "disabled", "paused", "archived", "removed"] },
+        "environment": { "$ref": "#/$defs/typeName" },
         "config": { "$ref": "#/$defs/config" },
         "credentialReferences": { "$ref": "#/$defs/credentialReferences" },
         "revision": { "$ref": "#/$defs/revision" },
@@ -175,7 +176,7 @@
         "displayName": { "$ref": "#/$defs/displayName" },
         "hosts": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
           "maxItems": 64,
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/resourceId" }
@@ -186,6 +187,7 @@
           "uniqueItems": true,
           "items": { "type": "string", "minLength": 1, "maxLength": 500, "pattern": "^https://" }
         },
+        "environments": { "type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": { "$ref": "#/$defs/typeName" } },
         "state": { "enum": ["registered", "disabled"] },
         "revision": { "$ref": "#/$defs/revision" },
         "createdAt": { "$ref": "#/$defs/timestamp" },
@@ -222,7 +224,7 @@
         "appId": { "$ref": "#/$defs/resourceId" },
         "connectorType": { "$ref": "#/$defs/typeName" },
         "displayName": { "$ref": "#/$defs/displayName" },
-        "state": { "enum": ["configured", "tested", "active", "disabled"] },
+        "state": { "enum": ["configured", "tested", "active", "disabled", "paused", "archived", "removed"] },
         "config": { "$ref": "#/$defs/config" },
         "credentialReferences": { "$ref": "#/$defs/credentialReferences" },
         "revision": { "$ref": "#/$defs/revision" },
@@ -242,7 +244,8 @@
           "enum": [
             "app.registered", "app.disabled", "host.enrolled", "host.disabled",
             "connector-instance.configured", "connector-instance.tested", "connector-instance.activated", "connector-instance.disabled",
-            "source.configured", "source.tested", "source.activated", "source.disabled"
+            "source.configured", "source.tested", "source.activated", "source.disabled",
+            "source.updated", "source.paused", "source.resumed", "source.archived", "source.removed", "source.revoked", "source.rotated"
           ]
         },
         "status": { "enum": ["succeeded", "failed", "rejected", "conflict"] },
@@ -254,16 +257,17 @@
     "appRegisterInput": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["displayName", "hosts", "publicPages"],
+      "required": ["displayName", "publicPages"],
       "properties": {
         "displayName": { "$ref": "#/$defs/displayName" },
         "hosts": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
           "maxItems": 64,
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/resourceId" }
         },
+        "environments": { "type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": { "$ref": "#/$defs/typeName" } },
         "publicPages": {
           "type": "array",
           "maxItems": 64,
@@ -288,6 +292,7 @@
       "properties": {
         "appId": { "$ref": "#/$defs/resourceId" },
         "hostId": { "$ref": "#/$defs/resourceId" },
+        "environment": { "$ref": "#/$defs/typeName" },
         "connectorType": { "$ref": "#/$defs/typeName" },
         "sourceKind": { "$ref": "#/$defs/typeName" },
         "displayName": { "$ref": "#/$defs/displayName" },
@@ -305,6 +310,36 @@
         "expectedRevision": { "$ref": "#/$defs/revision" }
       }
     },
+    "sourceTestInput": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sourceId", "connectorInstanceId", "expectedRevision"],
+      "properties": {
+        "sourceId": { "$ref": "#/$defs/resourceId" },
+        "connectorInstanceId": { "$ref": "#/$defs/resourceId" },
+        "expectedRevision": { "$ref": "#/$defs/revision" },
+        "sample": {
+          "type": "object", "additionalProperties": false, "required": ["message"],
+          "properties": {
+            "message": { "type": "string", "minLength": 1, "maxLength": 2000, "pattern": ".*\\S.*" },
+            "channel": { "type": "string", "minLength": 1, "maxLength": 120, "pattern": ".*\\S.*" },
+            "severity": { "enum": ["critical", "high", "medium", "low", "info", "unknown"] }
+          }
+        }
+      }
+    },
+    "sourceUpdateInput": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sourceId", "connectorInstanceId", "expectedRevision"],
+      "anyOf": [{ "required": ["displayName"] }, { "required": ["config"] }, { "required": ["credentialReferences"] }],
+      "properties": {
+        "sourceId": { "$ref": "#/$defs/resourceId" },
+        "connectorInstanceId": { "$ref": "#/$defs/resourceId" },
+        "expectedRevision": { "$ref": "#/$defs/revision" },
+        "displayName": { "$ref": "#/$defs/displayName" },
+        "config": { "$ref": "#/$defs/config" },
+        "credentialReferences": { "$ref": "#/$defs/credentialReferences" }
+      }
+    },
     "commandRequest": {
       "type": "object",
       "additionalProperties": false,
@@ -313,7 +348,7 @@
         "schemaVersion": { "const": "1" },
         "documentType": { "const": "connector-command-request" },
         "requestId": { "$ref": "#/$defs/resourceId" },
-        "command": { "enum": ["app.register", "host.enroll", "source.setup", "source.test", "source.activate"] },
+        "command": { "enum": ["app.register", "host.enroll", "source.setup", "source.test", "source.activate", "source.update", "source.pause", "source.resume", "source.archive", "source.remove", "source.revoke", "source.rotate"] },
         "requestedAt": { "$ref": "#/$defs/timestamp" },
         "input": { "type": "object" }
       },
@@ -331,8 +366,16 @@
           "then": { "properties": { "input": { "$ref": "#/$defs/sourceSetupInput" } } }
         },
         {
-          "if": { "properties": { "command": { "enum": ["source.test", "source.activate"] } }, "required": ["command"] },
+          "if": { "properties": { "command": { "enum": ["source.activate", "source.pause", "source.resume", "source.archive", "source.remove", "source.revoke", "source.rotate"] } }, "required": ["command"] },
           "then": { "properties": { "input": { "$ref": "#/$defs/sourceRevisionInput" } } }
+        },
+        {
+          "if": { "properties": { "command": { "const": "source.test" } }, "required": ["command"] },
+          "then": { "properties": { "input": { "$ref": "#/$defs/sourceTestInput" } } }
+        },
+        {
+          "if": { "properties": { "command": { "const": "source.update" } }, "required": ["command"] },
+          "then": { "properties": { "input": { "$ref": "#/$defs/sourceUpdateInput" } } }
         }
       ]
     },
@@ -411,6 +454,16 @@
         "oneTimeCredential": { "$ref": "#/$defs/oneTimeSourceCredential" }
       }
     },
+    "sourceLifecycleOutput": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sourceId", "connectorInstanceId", "revision", "state"],
+      "properties": {
+        "sourceId": { "$ref": "#/$defs/resourceId" },
+        "connectorInstanceId": { "$ref": "#/$defs/resourceId" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "state": { "enum": ["configured", "paused", "active", "archived", "removed"] }
+      }
+    },
     "commandError": {
       "type": "object",
       "additionalProperties": false,
@@ -435,7 +488,7 @@
         "schemaVersion": { "const": "1" },
         "documentType": { "const": "connector-command-result" },
         "requestId": { "$ref": "#/$defs/resourceId" },
-        "command": { "enum": ["app.register", "host.enroll", "source.setup", "source.test", "source.activate"] },
+        "command": { "enum": ["app.register", "host.enroll", "source.setup", "source.test", "source.activate", "source.update", "source.pause", "source.resume", "source.archive", "source.remove", "source.revoke", "source.rotate"] },
         "status": { "enum": ["succeeded", "failed", "rejected", "conflict"] },
         "completedAt": { "$ref": "#/$defs/timestamp" },
         "output": { "type": "object" },
@@ -464,8 +517,32 @@
           "then": { "properties": { "output": { "$ref": "#/$defs/sourceTestOutput" } } }
         },
         {
-          "if": { "properties": { "command": { "const": "source.activate" }, "status": { "const": "succeeded" } }, "required": ["command", "status"] },
+          "if": { "properties": { "command": { "enum": ["source.activate", "source.rotate"] }, "status": { "const": "succeeded" } }, "required": ["command", "status"] },
           "then": { "properties": { "output": { "$ref": "#/$defs/sourceActivateOutput" } } }
+        },
+        {
+          "if": { "properties": { "command": { "enum": ["source.update", "source.pause", "source.resume", "source.archive", "source.remove", "source.revoke"] }, "status": { "const": "succeeded" } }, "required": ["command", "status"] },
+          "then": { "properties": { "output": { "$ref": "#/$defs/sourceLifecycleOutput" } } }
+        },
+        {
+          "if": { "properties": { "command": { "const": "source.update" }, "status": { "const": "succeeded" } }, "required": ["command", "status"] },
+          "then": { "properties": { "output": { "properties": { "state": { "const": "configured" } } } } }
+        },
+        {
+          "if": { "properties": { "command": { "enum": ["source.pause", "source.revoke"] }, "status": { "const": "succeeded" } }, "required": ["command", "status"] },
+          "then": { "properties": { "output": { "properties": { "state": { "const": "paused" } } } } }
+        },
+        {
+          "if": { "properties": { "command": { "const": "source.resume" }, "status": { "const": "succeeded" } }, "required": ["command", "status"] },
+          "then": { "properties": { "output": { "properties": { "state": { "const": "active" } } } } }
+        },
+        {
+          "if": { "properties": { "command": { "const": "source.archive" }, "status": { "const": "succeeded" } }, "required": ["command", "status"] },
+          "then": { "properties": { "output": { "properties": { "state": { "const": "archived" } } } } }
+        },
+        {
+          "if": { "properties": { "command": { "const": "source.remove" }, "status": { "const": "succeeded" } }, "required": ["command", "status"] },
+          "then": { "properties": { "output": { "properties": { "state": { "const": "removed" } } } } }
         }
       ]
     },
@@ -515,7 +592,7 @@
           "items": {
             "allOf": [
               { "$ref": "#/$defs/sourceRegistration" },
-              { "properties": { "state": { "enum": ["active", "disabled"] } } }
+              { "properties": { "state": { "enum": ["active", "disabled", "paused", "archived"] } } }
             ]
           }
         },

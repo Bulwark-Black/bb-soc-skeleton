@@ -2,19 +2,70 @@
 
 This guide is for teams that want to take the public interface skeleton from a
 source checkout, place it in an existing stack, and supply authorized SOC page
-models. The repository supplies the browser shell, all 38 active SOC route
-paths, one shell-owned technical documentation route, the product's committed
+models, or run the included private Node application. The repository supplies
+the browser shell, all 38 SOC route paths, a document library, one shell-owned
+technical documentation route, the product's committed
 visual language, empty/failure states, and versioned page, auth,
 connector-control, administration, and canonical-ingest contracts. The
-invariant is **38 SOC routes plus one local `/docs` utility**. It supplies no
-committed page data or
-production security backend.
+invariant is **38 SOC routes plus `/documents` plus local `/docs`: 40 paths**.
+The private starter includes real sign-in, indexed telemetry, scoped service
+access, Trivy report import, and durable document storage but no
+committed operational data or all-purpose production security backend.
+
+## Start with the private application
+
+Use Node.js 22.13 or newer, run `npm ci`, choose a persistent owner-only
+canonical directory outside the checkout, and follow this sequence:
+
+```sh
+npm run account -- create --state-dir /absolute/private/bb-soc-state --email operator@example.invalid --name "SOC operator"
+npm start -- --state-dir /absolute/private/bb-soc-state
+```
+
+Replace the example identity locally. The password is entered with terminal
+echo disabled and must be 15–128 characters. Open `http://127.0.0.1:8080`, sign
+in, register an application/environment without inventing a host, configure a
+canonical event source, test a bounded sample, activate it, and send a real
+authorized event through the ingest contract. Then verify the event in Logs,
+Overview, Analytics, Sources, and Health. Configuration alone does not create
+health or data. The separate Trivy report importer accepts supported JSON from
+a scanner you run yourself; the application does not execute scans.
+
+Use Govern → Documents to upload a document, inspect its hash/version history,
+change its review metadata, and archive/restore it. Restart with the same state
+directory and verify the account, source state, document bytes, and history
+remain. Authentication, documents, service credentials, and private telemetry
+use SQLite. Private telemetry uses indexed queries, bounded retention, and
+atomic record/receipt/control commits; agent/governance state remains a bounded
+reference store. This is a single-process private starter, not an unbounded or
+distributed SIEM, and it does not populate every SOC page.
+
+In Scans → Trivy, configure an application/environment-scoped Trivy JSON source,
+test and activate it, then upload a supported report. Accepted reports populate
+Trivy and Patch first views; API automation uses that source's ingest credential,
+not a service-agent credential. In Agents → Service Access, issue a read-only
+service identity, save its one-time value to an owner-only external file, and
+connect MCP with `--base-url` and `--token-file`. Add exact write scopes only when
+needed. See technical manual [section 52](../public/technical-reference.md#52-storage-limits-reliability-acceptance-and-remaining-parity-work)
+for storage, [section 53](../public/technical-reference.md#53-private-service-identities-and-authenticated-mcp-setup)
+for service access, and [section 54](../public/technical-reference.md#54-trivy-report-import-from-a-users-own-scanner)
+for Trivy's supported inputs and limits.
+
+All operators have full access to this deployment. There is no per-app user
+authorization or read-only role. For private sharing, keep the listener on
+`127.0.0.1`, configure Tailscale Serve (not Funnel), restrict ACLs/grants, and
+pass your exact Tailnet HTTPS origin through `--origin`. Account recovery,
+consistent backups, session behavior, and restrictions are in
+[AUTHENTICATION.md](AUTHENTICATION.md#shipped-private-application).
+
+The remaining integration sections describe embedding/custom backends. They
+are not prerequisites for merely starting this included application.
 
 ## What you are adopting
 
 The repository has five deliberately separate browser layers:
 
-1. **Presentation:** the Bulwark Black SOC shell, 29 primary SOC routes, nine
+1. **Presentation:** the Bulwark Black SOC shell, 30 primary routes including Documents, nine
    adapter-addressable detail/utility routes, the separate local `#/docs`
    utility, responsive behavior, accessibility behavior, and exact default
    brand assets/colors.
@@ -33,8 +84,8 @@ The repository has five deliberately separate browser layers:
    authorization engine.
 
 With no injected page or connector adapter, every known SOC route renders an
-empty state and source-management actions remain disabled. In the default
-optional-auth shell, the local `#/docs` manual remains available; under every
+empty state and source-management actions remain disabled. In the optional-auth
+static inspection shell, the local `#/docs` manual remains available; under every
 auth configuration it calls no page, connector, or administration provider
 method (`readPage`, `getSnapshot`, `getPrompt`, or `execute`).
 The checked-in bridge and empty provider/template perform no I/O and supply no
@@ -42,10 +93,10 @@ records, counts, identities, timestamps, or operational values.
 
 ## Prerequisites
 
-- Node.js 20 or newer for the local server and verification commands.
+- Node.js 22.13 or newer for the private runtime and verification commands.
 - An HTTP origin for deployment so response headers, routing, and assets are
   exercised accurately.
-- An adopter-owned BFF for any real deployment. It authenticates the operator,
+- The included single-tenant private BFF, or an adopter-owned BFF for a custom deployment. It authenticates the operator,
   holds the server session and any OIDC tokens, enforces authorization, obtains
   operational data, and reduces it to the documented browser contracts.
 - A Tailscale tailnet or equivalently controlled private overlay for shared
@@ -58,19 +109,18 @@ handlers inside that stack. Use Keycloak when a separately administered identity
 service must support several products or technology stacks. The console contract
 stays provider-neutral in either case.
 
-There is no package-install or client-application bundle step. The project has
-no runtime npm dependencies. The documentation-only generation step is required
+Run `npm ci` for pinned Better Auth and SQLite runtime dependencies. No
+client-application bundler is required. The documentation generation step is required
 when its Markdown source changes: `npm run build:docs` refreshes the committed
 browser artifact.
 
 ## Inspect the empty skeleton
 
 ```sh
-npm start
+npm run start:static
 ```
 
-Open `http://127.0.0.1:8080`. The server binds to loopback only. `npm run dev`
-starts the same dependency-free server.
+Open `http://127.0.0.1:8080`. This inspection server binds to loopback only.
 
 Open `http://127.0.0.1:8080/#/docs`, or use the shell's **Docs** control, for the
 agent-readable technical implementation manual. Its canonical source is
@@ -86,18 +136,22 @@ integration must be served by the adopter application with an intentionally
 reviewed connection policy.
 
 The repository also includes a separate loopback-only connector/administration
-workbench. It accepts local state changes and canonical records, so it is never started by
-`npm start`; use the explicit command and state-directory instructions in
+workbench. It accepts disposable local state changes and canonical records;
+`npm start` instead runs the authenticated private application. Use the separate
+workbench command and state-directory instructions in
 [CONNECTORS.md](CONNECTORS.md#loopback-reference-workbench). The workbench is a
 contract and UI integration aid, not a deployment base.
 
-For a local MCP-capable implementation agent, leave the workbench on its
-loopback/private origin and run `npm run start:agent-mcp`. The reference stdio
-process exposes checked-in documentation/contracts and exactly five fixed
+For a private MCP-capable implementation agent, issue a scoped credential from
+Agents → Service Access and run `npm run --silent start:agent-mcp -- --base-url http://127.0.0.1:8080 --token-file /absolute/private/agent-credential` using its
+protected external file. The stdio process exposes checked-in documentation/contracts and exactly five fixed
 connector/administration tools; it refuses credential issuance, arbitrary URLs,
 shell/SQL/filesystem access, telemetry, and secret retrieval. See
-[AGENTS.md](AGENTS.md#optional-mcp-facade). A production MCP service remains an
-adopter-owned private client of the same API/RBAC boundary.
+[AGENTS.md](AGENTS.md#optional-mcp-facade). Private service routes enforce the
+issued scopes server-side and never accept browser cookies. Without a token
+file, MCP retains only its legacy loopback workbench mode (default port 8787);
+it cannot authorize private application requests. Never extract browser cookies
+for an agent or expose the unauthenticated workbench through a private proxy.
 
 Establish a clean boundary before integrating:
 
@@ -188,7 +242,8 @@ Before implementing an integration, open `#/docs` or read
 entry point for engineers and agents covering contracts, registration,
 ingestion, projection, authentication, optional MCP administration, failure
 modes, and verification. It is local reference content, not a 37th provider
-surface.
+surface. Documents is a separate private file service, not a generic telemetry
+page projector.
 
 ### 1. Preserve the empty baseline
 
@@ -198,11 +253,12 @@ validated page envelopes, not by committing records into this skeleton.
 
 ### 2. Inventory all 38 SOC routes
 
-Review [FEATURES.md](FEATURES.md). Map the 29 primary SOC routes and nine
+Review [FEATURES.md](FEATURES.md). Map the original 29 primary SOC routes and nine
 adapter-addressable detail/utility routes to an intentional provider result.
 Do not include the local `/docs` utility in that provider map. A SOC route can
 remain `empty`, `unavailable`, or `forbidden` until its server boundary is
-ready; do not silently redirect it to Overview or manufacture placeholder
+ready; separately account for the Documents service and its upload/download
+authorization. Do not silently redirect a missing route to Overview or manufacture placeholder
 values.
 
 ### 3. Implement the page provider
@@ -276,9 +332,9 @@ authentication there. See [AUTHENTICATION.md](AUTHENTICATION.md).
 For a same-origin TypeScript/Node application, use the executable
 [Better Auth reference bridge](../examples/better-auth-reference/README.md). It
 adapts `authClient.getSession()`, `authClient.signOut()`, and an adopter-supplied
-login function without adding Better Auth to this repository. It is a browser
-boundary example, not a Better Auth server, login UI, database/session setup, or
-end-to-end package integration. The
+login function. This optional embedding bridge is separate from the included
+private service, which already supplies Better Auth, sign-in UI and SQLite
+sessions. The
 [Keycloak reference](../examples/keycloak-reference/README.md) remains the
 better fit for centralized multi-product identity.
 
@@ -306,15 +362,22 @@ Use `SOC_CONSOLE_CONNECTORS` for source-management control only. Its version-1
 provider exposes `getSnapshot(request)` and `execute(request)`. The UI currently
 supports this closed sequence:
 
-1. `app.register` creates an `appId` and declared `hostId` values.
-2. `host.enroll` issues a connection-check credential that is displayed once;
-   after a valid proof, the host is eligible for source testing.
+1. `app.register` creates an `appId`, declared environments, and optional `hostId` values.
+2. For a host-backed integration only, `host.enroll` issues a connection-check
+   credential displayed once; after a valid proof, the host is eligible for
+   source testing. Application-scoped canonical push needs no host enrollment.
 3. `source.setup` selects an installed `connectorType` and one of that
    manifest's `supportedSourceKinds`, then creates independent stable
    `connectorInstanceId` and `sourceId` values.
-4. `source.test` verifies the configured path without creating telemetry.
+4. `source.test` verifies the configured path without creating telemetry;
+   hostless canonical push requires a bounded message sample.
 5. `source.activate` enables the source and may return a distinct one-time
    source-ingest credential.
+6. Maintain sources with `source.update`, `source.pause`, `source.resume`,
+   `source.archive`, `source.remove`, `source.revoke`, and `source.rotate`, using
+   the current expectedRevision. Update invalidates prior testing/credentials;
+   remove requires archive and keeps a tombstone and admitted records. Section
+   51 of the technical manual lists exact allowed transitions.
 
 Manifest configuration fields and credential slots drive the form. Only
 credential references belong in setup documents; plaintext secret values do
@@ -340,10 +403,13 @@ See [CONNECTORS.md](CONNECTORS.md) for exact version-1 shapes, the local
 workbench, projection targets, and production replacement requirements.
 
 For every Scans tab, follow the scan-specific recipes in
-[CONNECTORS.md](CONNECTORS.md#scan-connector-implementation-guide). Trivy,
-Patch First, file integrity, EOL, exposure, IOC, urlscan.io, dependencies,
-ClamAV, quarantine, and remediation are structural targets, not shipped vendor
-drivers. Provide a reviewed manifest, server driver, opaque credential-
+[CONNECTORS.md](CONNECTORS.md#scan-connector-implementation-guide). Private mode
+adds a working `trivy-report` importer, separate from the eleven legacy setup
+templates. It projects Trivy and Patch first from supported vulnerability reports;
+it does not run Trivy, patch packages, or activate the legacy `trivy-template`.
+File integrity, EOL, exposure, IOC, urlscan.io, dependencies, ClamAV, quarantine,
+remediation, and independent Patch First acquisition still require integrations.
+Provide a reviewed manifest, server driver, opaque credential-
 reference flow, normalizer, health policy, durable records, and idempotent
 projector for each one you enable.
 
@@ -361,9 +427,11 @@ re-read after every command.
 Keep prompt text, assignments, one-time enrollment output, evidence, risk
 history, and removal policy on the server. One-time values are displayed once
 and only digests/references persist. Prefer archive; hard removal is dependency-
-and retention-aware. An optional MCP facade calls this same service under the
-same principal and cannot carry telemetry, plaintext keys, arbitrary execution,
-or direct database writes.
+and retention-aware. The shipped MCP facade calls these same runtimes through
+separately scoped service identities, with attributable service actors. It cannot
+carry telemetry, plaintext keys, arbitrary execution, direct database writes,
+credential issuance, agent privilege expansion, or prompt activation. Those
+human-only operations remain in the protected operator flow.
 
 ### 8. Preserve or intentionally fork the product design
 

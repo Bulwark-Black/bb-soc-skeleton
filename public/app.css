@@ -2548,3 +2548,11 @@ kbd { padding: 1px 5px; border: 1px solid #33373b; border-radius: 4px; color: #9
 
   .circuit-pulse { display: none; }
 }
+/* Private application controls reuse the product palette and form treatments. */
+.private-sign-in { max-width: 520px; margin: 5vh auto; padding: 24px; }
+.private-sign-in > .brand { display: block; margin: 0 auto 24px; width: 132px; }
+.private-account-form { display: grid; gap: 18px; margin: 24px 0; }
+.private-account-form label { display: grid; gap: 8px; }
+.private-account-form [hidden] { display: none; }
+.private-account-form input { width: 100%; box-sizing: border-box; }
+.document-library input, .document-library select, .document-library textarea { max-width: 100%; }

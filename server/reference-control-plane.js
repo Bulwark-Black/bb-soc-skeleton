@@ -395,14 +395,15 @@ function createRequestHandler(options) {
   const getPort = typeof options.getPort === "function" ? options.getPort : () => options.port;
   const publicRoot = path.resolve(options.publicRoot || PUBLIC_ROOT);
   const staticEnabled = options.serveStatic !== false;
-  const browserSource = Buffer.from(buildBrowserProviderSource(API_PREFIX), "utf8");
+  const browserSource = Buffer.from(options.browserSource || buildBrowserProviderSource(API_PREFIX), "utf8");
 
   return async function referenceRequestHandler(request, response) {
     addSecurityHeaders(response);
     try {
       const parsed = parseRequestUrl(request.url || "/");
       const method = request.method || "";
-      validateAuthority(request, getPort(), method === "POST");
+      if (options.validateAuthority) options.validateAuthority(request, getPort(), method === "POST");
+      else validateAuthority(request, getPort(), method === "POST");
 
       if (method === "GET" && parsed.pathname === API_PREFIX + "/control/snapshot") {
         const query = exactQuery(parsed.searchParams, ["reason", "knownRevision"]);
@@ -643,5 +644,6 @@ module.exports = {
   parseArguments,
   parsePort,
   startReferenceServer,
-  validateAuthority
+  validateAuthority,
+  addSecurityHeaders, parseRequestUrl, distinctHeader, readJsonBody, sendJson, sendBuffer, serveStatic
 };

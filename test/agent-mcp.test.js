@@ -344,6 +344,12 @@ test("credential-issuing commands are rejected before HTTP and remote error text
     fetchImpl: async () => { fetchCount += 1; return response({}); }
   });
   await assert.rejects(() => blockedClient.connectorCommand(connectorCommandRequest("host.enroll")), /credential-issuing/i);
+  for (const command of ["source.activate", "source.rotate"]) {
+    await assert.rejects(() => blockedClient.connectorCommand({
+      schemaVersion: "1", documentType: "connector-command-request", requestId: "request-credential-block", command,
+      requestedAt: AT, input: { sourceId: "source-one", connectorInstanceId: "connector-one", expectedRevision: 1 }
+    }), /credential-issuing/i);
+  }
   await assert.rejects(() => blockedClient.administrationCommand(administrationCommandRequest("enrollment.issue")), /credential-issuing/i);
   assert.equal(fetchCount, 0);
 
@@ -361,8 +367,11 @@ test("credential-issuing commands are rejected before HTTP and remote error text
   assert.doesNotMatch(result.result.content[0].text, new RegExp(marker));
 });
 
-test("stdio executable emits newline-delimited JSON-RPC only and no startup banner", async (t) => {
-  const child = spawn(process.execPath, [path.join(ROOT, "tools", "agent-mcp.js")], {
+for (const [label, executable, args] of [
+  ["direct stdio executable", process.execPath, [path.join(ROOT, "tools", "agent-mcp.js")]],
+  ["documented silent npm launcher", "npm", ["run", "--silent", "start:agent-mcp"]]
+]) test(`${label} emits newline-delimited JSON-RPC only and no startup banner`, { timeout: 10000 }, async (t) => {
+  const child = spawn(executable, args, {
     cwd: ROOT,
     env: { ...process.env, SOC_AGENT_MCP_BASE_URL: DEFAULT_BASE_URL },
     stdio: ["pipe", "pipe", "pipe"]

@@ -17,6 +17,7 @@ Implementation status language is deliberate throughout this manual:
 | Label | Meaning |
 | --- | --- |
 | Shipped browser contract | Checked-in, validated interface that an adopter can integrate now |
+| Shipped private starter | Runnable single-tenant application with real sign-in and durable operator-created state; bounded and not a complete production SOC |
 | Loopback reference behavior | Executable local example for contract testing; never a production service |
 | Adopter-required production work | Capability the integrating stack must design, secure, operate, and test |
 | Proposed | Recommended future boundary or vocabulary that is not shipped or callable |
@@ -35,7 +36,7 @@ An implementation agent should use this manual in the following order:
    production storage, or external networks.
 5. Run every check in sections 32 through 34 before calling an integration
    complete.
-6. Read sections 37 through 47 before deploying privately, enabling agent or
+6. Read sections 37 through 54 before deploying privately, enabling agent or
    governance administration, connecting a scanner, or operating any route.
 
 **Non-negotiable invariants**
@@ -81,6 +82,12 @@ An implementation agent should use this manual in the following order:
 | Administration runtime | public/administration-contract.js |
 | Administration schema | contracts/administration.v1.schema.json |
 | Reference administration modules | server/reference-administration-runtime.js and server/reference-administration-store.js |
+| Private application host | server/private-application.js |
+| Private authentication and account CLI | server/private-auth.js and tools/private-account.js |
+| Versioned document storage | server/document-store.js |
+| Private indexed telemetry | server/sqlite-telemetry-store.js |
+| Scoped service access | server/service-access.js and public/service-access.js |
+| Trivy report import and projection | server/scanner-ingest.js and server/scanner-pages.js |
 
 When an agent changes a contract, it must update the executable validator, JSON
 Schema, this manual, any narrower UI constraint, provider examples, and tests in
@@ -94,7 +101,10 @@ boundaries. It includes:
 - the complete structural route and panel catalog;
 - the active Bulwark Black product styling and assets;
 - a closed page-provider contract for authorized read models;
-- a closed authentication projection and provider boundary;
+- a closed authentication projection and provider boundary, plus a runnable
+  private Better Auth/SQLite service with locally provisioned operators;
+- a SQLite document library with immutable file versions, checksums, metadata,
+  review status, history, and archive/restore;
 - a closed connector manifest, source, health, command, snapshot, and provider
   contract;
 - a closed, domain-separated agent/governance administration contract and
@@ -104,7 +114,8 @@ boundaries. It includes:
   refused;
 - JSON Schemas and command-line validators;
 - UI workflows for application registration, host enrollment, source setup,
-  source testing, and source activation;
+  source testing, activation, update, pause/resume, archive/remove, and
+  credential revoke/rotate;
 - a loopback-only reference control plane;
 - hashed one-time host and source credentials in reference mode;
 - bounded canonical ingest for one preinstalled canonical log push connector;
@@ -114,28 +125,37 @@ boundaries. It includes:
 
 The repository does **not** provide the following production systems:
 
-- production authentication, session storage, CSRF handling, or
-  resource-level authorization;
+- multi-tenant, per-resource operator roles, MFA, passkeys, SMTP recovery, or
+  configured enterprise SSO; all private starter operators have full access;
 - a connector package marketplace or browser command that installs arbitrary
   connector manifests;
 - vendor drivers, webhook signature implementations, pull schedulers, OTLP or
   syslog listeners, or a deployable host agent;
 - a write-only secret-provisioning service or managed secret store;
-- a transactional production database, migrations, queue, worker leases,
-  dead-letter handling, or multi-process coordination;
+- a high-volume transactional telemetry database, queue, worker leases,
+  dead-letter handling, or multi-process collector coordination;
 - projectors for every canonical record kind and every screen;
 - a production MCP server;
-- production TLS, rate limiting, abuse controls, observability, backup,
-  restore, retention, deletion, or disaster-recovery procedures; or
-- connector disable, rotate, revoke, delete, reinstall, upgrade, rollback, or
-  sync-now commands in the version-1 browser command vocabulary.
+- automatically configured Tailnet TLS/ACLs, managed observability, automated
+  backups, retention deletion, or disaster recovery; or
+- connector package installation, reinstall, upgrade, rollback, or sync-now
+  commands in the browser command vocabulary.
 
 The current UI can create applications, hosts, connector instances, and sources
 only from connector types already installed in the server-owned manifest
-registry. In reference mode that registry contains only canonical-push. An
+registry. That registry contains executable canonical-push plus eleven
+data-only scan templates. An
 adopter that wants a catalog of integrations must implement the reviewed
 manifest installation process described in section 10. Do not imply that the
 current browser can download or execute an arbitrary third-party connector.
+
+There are 40 registered paths: the original 38 SOC routes plus Documents and
+Technical Docs. Of the 39 non-docs routes, 30 are primary and nine are linked
+details. The private service populates five canonical-log read surfaces plus
+its source, agent/governance, and document management workflows. Other screens
+remain structural until their real record producers and projectors are built.
+See section 48 for the capability matrix and sections 49–52 for setup,
+documents, web-app sources, and remaining performance/parity work.
 
 ## 03. Architecture and trust planes
 
@@ -204,6 +224,7 @@ The relationship is:
 
 ~~~text
 app
+  +-- one or more declared environments
   +-- zero or more declared hosts
   +-- zero or more connector instances
           +-- one or more independently identified sources
@@ -218,6 +239,9 @@ identity model does not require that limitation in a future version.
 - A host belongs to one app. A source and its connector instance must belong to
   the same app.
 - A host-scoped connector source must reference a host owned by that app.
+- A source selects an environment declared by its app. The default environment
+  is `default`; environment is a source configuration selector, not a tenant
+  isolation boundary or a mandatory host.
 - sourceId and connectorInstanceId must be different values.
 - IDs use 1 through 128 characters and the contract identifier alphabet.
 - Names, URLs, kinds, or provider event content must not be used as database
@@ -258,12 +282,18 @@ revision for the current administration registry revision.
 | contracts | Portable JSON Schemas | Validate non-JavaScript producers and generated documents |
 | tools/build-technical-docs.js | Manual validator and deterministic browser-artifact generator | Run build:docs after editing the Markdown and check:docs in verification |
 | tools | Local validators, public audit, local static server | Include in developer and release checks |
-| tools/agent-mcp.js | Narrow stdio documentation/connector/administration reference client | Use locally or replace with a private identity-aware production service |
-| server/reference-manifest.js | Canonical log manifest plus eleven data-only scan connection templates | Review/replace templates and install production drivers in a controlled registry |
-| server/reference-runtime.js | Local lifecycle and ingest behavior | Use as a contract reference, not a production server |
+| tools/agent-mcp.js | Narrow stdio documentation/control client with private service authentication | Configure an owner-only token file and least-privilege scopes; tokenless mode is loopback workbench-only |
+| server/reference-manifest.js | Canonical log and Trivy import manifests plus eleven data-only templates | Use shipped importers or implement reviewed drivers for templates |
+| server/reference-runtime.js | Shared source lifecycle and ingest behavior | Private host injects indexed storage and installed driver policy; the reference host remains disposable |
 | server/reference-store.js | Single-process bounded local state | Replace with transactional durable storage |
 | server/reference-pages.js | Canonical log and registry projections | Add production projectors per kind and screen |
 | server/reference-control-plane.js | Loopback HTTP workbench | Replace entirely in production |
+| server/private-application.js | Authenticated private starter wrapping current services | Keep loopback listener; configure exact Tailnet HTTPS origin for sharing |
+| server/private-auth.js | Better Auth and SQLite sessions, private secret, local operator operations | Protect and back up the external state directory |
+| server/document-store.js | Immutable document versions and audited lifecycle in SQLite | Honor quotas, backup/integrity, and untrusted-file limits |
+| server/sqlite-telemetry-store.js | Private indexed admission, replay, audit, retention and bounded queries | Preserve pinned policy, migration inputs and backups; measure real workload capacity |
+| server/service-access.js | Scoped service identity and fixed private machine endpoints | Issue only needed installation-wide scopes and rotate/revoke deliberately |
+| server/scanner-ingest.js and server/scanner-pages.js | Trivy JSON normalization and scan projection | Supply an approved bounded report from your scanner; do not imply scan execution |
 | server/reference-administration-runtime.js and store.js | Local agent/governance lifecycle and owner-only persistence modules | Exercise the contract locally; replace for production |
 | examples | Provider and authentication integration examples | Copy into the adopter application and pin dependencies |
 
@@ -276,8 +306,9 @@ Implement in this order so later layers depend on validated earlier layers:
 
 1. **Choose the application boundary.** Define app or estate ownership and the
    authorization model.
-2. **Implement production authentication.** Establish a same-origin
-   server-side session and resource/action authorization.
+2. **Establish authentication.** Use the shipped private service for one
+   all-operator deployment, or add the custom resource/tenant roles required by
+   the adopting stack. Sections 48–49 give the runnable path.
 3. **Create the manifest registry.** Accept only reviewed, signed or
    administrator-approved connector packages from a controlled source.
 4. **Implement the control database.** Persist apps, hosts, manifests,
@@ -319,8 +350,9 @@ Onboarding through the estate picker or the route chooser to register an
 application:
 
 1. Enter the application display name.
-2. Enter one or more host display labels separated by commas.
-3. Optionally enter public HTTPS pages separated by commas.
+2. Select the application's environments; host display labels are optional.
+3. Optionally enter public HTTPS pages separated by commas. This is not
+   permission for a scan and does not create a scanner.
 4. Submit Register app.
 5. Record the returned appId and the server-issued hostIds from the refreshed
    registry.
@@ -590,8 +622,10 @@ Every command request has exactly:
 }
 ~~~
 
-The command is one of app.register, host.enroll, source.setup, source.test, or
-source.activate. Input is command-specific and closed.
+The command is one of app.register, host.enroll, source.setup, source.test,
+source.activate, source.update, source.pause, source.resume, source.archive,
+source.remove, source.revoke, or source.rotate. Input is command-specific and
+closed; section 51 gives the additional lifecycle transitions.
 
 Every result has the same requestId and command, a completedAt timestamp, and
 one status: succeeded, failed, rejected, or conflict. A succeeded result has
@@ -664,7 +698,8 @@ app.register input contains:
 | Field | Rule |
 | --- | --- |
 | displayName | Non-empty text, at most 120 characters |
-| hosts | One through 64 unique host labels or identifiers |
+| hosts | Optional; zero through 64 unique host labels or identifiers |
+| environments | Optional; one through 32 unique normalized identifiers, default `["default"]` |
 | publicPages | Zero through 64 unique absolute HTTPS URLs |
 
 ~~~json
@@ -752,7 +787,7 @@ that a vendor API is reachable or that telemetry is arriving.
 
 ## 14. Source setup, test, and activation
 
-source.setup input contains appId, optional hostId, connectorType, sourceKind,
+source.setup input contains appId, optional hostId, optional environment, connectorType, sourceKind,
 displayName, non-secret config, and credentialReferences.
 
 ~~~json
@@ -781,7 +816,11 @@ source kind, every configuration key and value, and every required credential
 slot. It creates independent sourceId and connectorInstanceId values in
 configured state.
 
-source.test input contains sourceId, connectorInstanceId, and expectedRevision.
+source.test input contains sourceId, connectorInstanceId, expectedRevision, and
+an optional sample object. Hostless canonical-push requires sample.message
+(1–2,000 characters); optional channel is at most 120 characters and severity
+is critical, high, medium, low, info, or unknown. The sample is shape-checked,
+not persisted as telemetry, and does not make source health healthy.
 A production test is server-side and bounded. Depending on the connector it may
 resolve credential references, validate permissions, inspect a schema, perform
 a narrow health call, or verify local receiver configuration. It must not
@@ -832,15 +871,16 @@ number locally.
 State sequence:
 
 ~~~text
-draft -> configured -> tested -> active -> disabled
-             |            |
-             +-- failure -+--> remain at the prior valid state
+draft -> configured -> tested -> active <-> paused
+             |            |        |          |
+             +------------+--------+----------+--> archived -> removed
 ~~~
 
-Version 1 exposes configured, tested, active, and disabled records but does not
-expose every lifecycle mutation as a browser command. Production extensions
-for disable, re-enable, rotate, retest, resync, upgrade, and delete need
-versioned commands, authorization, idempotency, revision checks, and audit.
+The expanded version-1 contract also exposes paused, archived, and removed
+states and the lifecycle commands in section 51. Source update invalidates old
+testing/credentials and requires retest/activation. Removed is a retained
+tombstone, not deletion of admitted evidence. Resync and connector-package
+upgrade/rollback remain unimplemented.
 
 ## 15. Control snapshot and registry invariants
 
@@ -851,7 +891,7 @@ A connector-control-snapshot contains:
 - hosts;
 - connectorInstances;
 - setups in draft, configured, or tested state;
-- sources in active or disabled state;
+- sources in active, disabled, paused, archived, or removed state;
 - recent safe changes; and
 - a monotonically increasing registry revision.
 
@@ -1284,8 +1324,11 @@ screen appear populated.
 ## 25. Authentication, Better Auth, and authorization
 
 For a single TypeScript or Node application, Better Auth is the recommended
-direct application-session integration. The repository supplies a client-side
-bridge but does not install or configure the Better Auth server.
+direct application-session integration. The private starter installs pinned
+Better Auth + SQLite with closed signup and locally provisioned operators.
+It includes real sign-in/session enforcement; the optional client-side bridge
+is for embedding the UI into a separately configured application. Section 49
+documents the shipped authentication behavior and limitations.
 
 Production shape:
 
@@ -1297,8 +1340,7 @@ browser -> same-origin application server -> Better Auth handler and session
                                       +-> page read service
 ~~~
 
-The browser auth provider exposes getSession, login, logout, and optional
-dispose. getSession returns only:
+The browser auth provider exposes getSession, login, and logout. getSession returns only:
 
 ~~~json
 {
@@ -1341,10 +1383,16 @@ calls fixed connector/administration endpoints on the same canonical API/RBAC
 boundary as the browser. It is not a second registry, an agent runner, a secret
 broker, or a telemetry transport.
 
+For the private starter, issue an expiring scoped credential in Agents → Service
+Access and configure an owner-only external token file as described in section
+53. Tokenless mode is only for the disposable loopback workbench. Do not extract
+browser cookies, weaken private authentication, or expose that workbench
+through Serve.
+
 Start the loopback reference workbench, then run:
 
 ~~~sh
-npm run start:agent-mcp
+npm run --silent start:agent-mcp
 ~~~
 
 The default API origin is `http://127.0.0.1:8787`. Override it with
@@ -1359,12 +1407,12 @@ The exact five tools are:
 | Tool | Arguments | Safety boundary |
 | --- | --- | --- |
 | connector_snapshot | `{ reason?: "initial"/"refresh"/"command", knownRevision?: integer >= 0 }` | Fixed connector snapshot endpoint and validated result |
-| connector_command | `{ request: connector-command-request }` | Refuses credential-issuing host.enroll and source.activate before HTTP |
+| connector_command | `{ request: connector-command-request }` | Refuses credential-issuing host.enroll, source.activate, and source.rotate before HTTP |
 | administration_snapshot | `{ domain: "agents"/"governance", reason?: "initial"/"refresh"/"command", knownRevision?: integer >= 0 }` | Fixed administration snapshot endpoint and validated result |
 | administration_prompt | `{ promptId: stable-id }` | One separately authorized literal prompt; no bulk export |
 | administration_command | `{ request: administration-command-request }` | Refuses credential-issuing enrollment.issue before HTTP |
 
-Credential-issuing `host.enroll`, `source.activate`, and `enrollment.issue`
+Credential-issuing `host.enroll`, `source.activate`, `source.rotate`, and `enrollment.issue`
 must use the protected operator UI or an equivalently reviewed non-MCP
 ceremony. The reference facade has no fallback that returns those one-time
 values.
@@ -1383,8 +1431,10 @@ The process supports the 2026-07-28 discovery/meta flow and legacy initialize-
 era clients. It has no generic fetch, arbitrary URL, shell, SQL, filesystem-path,
 secret retrieval/echo, credential resource, raw log, or telemetry tool.
 Credential issuance is deliberately unavailable through the reference facade.
-MCP service identity/authentication remains adopter-owned; the downstream API
-authorizes tenant, resource, field, and action. Human approval remains required
+Private service authentication and exact operation scopes are shipped; these
+scopes cover the single installation, not a tenant, individual app or record.
+More granular tenant/resource/field authorization remains adopter work.
+Human approval remains required
 for destructive, privilege-expanding, prompt-activation, and production-impact
 commands even when the tool schema accepts them.
 
@@ -1400,7 +1450,7 @@ The reference workbench is for local contract testing only. It binds to
 127.0.0.1, requires an explicit state directory, and defaults to port 8787.
 
 ~~~sh
-soc_reference_state="$(mktemp -d)"
+soc_reference_state="$(node -e 'const fs=require("node:fs"),os=require("node:os"),path=require("node:path"); process.stdout.write(fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()),"bb-soc-workbench-")))')"
 npm run start:connectors -- --state-dir "$soc_reference_state"
 ~~~
 
@@ -1937,8 +1987,10 @@ bind the application to an explicitly selected private interface or keep it on
 loopback behind a reverse proxy that is itself reachable only on the tailnet.
 Do not use a wildcard listener unless host firewall and proxy rules make the
 private restriction independently enforceable and tested. Do not turn the
-checked-in static server or reference workbench into a remote server; replace
-them with an adopter-owned application service.
+checked-in static server or reference workbench into a remote server. Use the
+private starter behind Tailscale Serve (never Funnel) with the exact Tailnet
+HTTPS origin, or deploy an independently reviewed custom BFF. The starter
+listener remains `127.0.0.1`; it has no public/wildcard bind flag.
 
 Apply tailnet ACLs or grants by role and service identity. Normal operator
 devices should reach the UI/BFF, not databases, queues, secret stores, or raw
@@ -2082,8 +2134,8 @@ include source attempts/accepted deliveries, queue/projector lag, detection run
 facts, bounded component failures, and drill state. A source is added through a
 manifest-backed setup/test/activate flow, but only accepted observations can
 make it healthy. Update cadence/health policy in the source/manifest service,
-not in a page row. Disable/archive/remove requires a separately implemented
-source lifecycle extension; connector v1 does not pretend to provide it.
+not in a page row. Use the shipped source pause/archive/remove lifecycle in
+section 51; these preserve retained records and do not create detection data.
 Empty feeds mean no authorized feed rows, not healthy collection. Unavailable
 diagnostics remain unavailable rather than being converted to empty.
 
@@ -2342,10 +2394,9 @@ app/host and installed connector/source kind, renders manifest-owned non-secret
 config and credential-reference slots, and performs setup/test/activate.
 Registry Changes is the safe audit ledger. Register the app and enroll/prove its
 host first when required. Test does not ingest or establish health; activation
-does not become healthy until an accepted observation. The current connector v1
-does not provide general update/disable/archive/remove commands; a downstream
-version must define authorization, revision, dependency, record-retention,
-credential revocation, health, and audit behavior before enabling them. With no
+does not become healthy until an accepted observation. Use the shipped
+update/pause/resume/archive/remove/revoke/rotate commands described in section
+51. With no
 connector provider or installed compatible manifest, controls stay disabled.
 
 **Agent Management (`#/agents`).** Agents, Add Agent, Prompts, Enrollment, and
@@ -2392,7 +2443,11 @@ previous operational status. Restore rechecks references and permissions. Hard
 removal is exceptional and dependency aware. Empty register means no authorized
 records, not zero risk.
 
-**Access (`#/access`).** Who projects identity/owner/visitor/device/auditor
+**Access (`#/access`).** In the private starter, Who shows current-session
+context, the exact provisioned-account count, and the first 200 operator display
+names with full authority. It does not invent visitors, tailnet devices, or a
+read-only auditor role. Other Access tabs remain unconnected. In a fuller
+integration, Who projects identity/owner/visitor/device/auditor
 access; Refusals and Chain preserve denied-request and certification evidence;
 Offboarding shows summary/run records and selected detail; How to use explains
 the workflow. Populate from identity, device, entitlement, application-owner,
@@ -2402,6 +2457,14 @@ resource-specific commands and current authorization. Page rows never grant or
 revoke access. Archive completed certifications/offboarding runs under evidence
 retention; removal cannot erase chain/refusal history. Empty Who or Offboarding
 is not proof that there are no identities or outstanding access.
+
+**Documents (`#/documents`).** Upload approved files to the private versioned
+library, inspect hash/version/history, edit owner/status/review metadata, and
+archive/restore while retaining evidence. Adding a version appends immutable
+bytes; it does not overwrite the old version. App/risk/attestation/case/policy
+links are metadata pointers, not evidence approval or imported governance rows.
+All starter operators can access this library. The detailed human workflow,
+HTTP API, quotas, and untrusted-file limitations are in section 50.
 
 ## 45. Human operating guide: shell and linked routes
 
@@ -2599,5 +2662,762 @@ transition a risk merely because a clock elapsed; a scheduled policy worker may
 create an audited transition or due-state fact. Archive/remove must invalidate
 and replay affected projectors. Empty groups mean no authorized matching
 records, not zero organizational risk.
+
+## 48. Runnable private starter and capability status
+
+The default `npm start` is now a real private application, not the static visual
+preview. It serves the original product UI behind Better Auth sign-in and
+mounts the source, administration, document, and supported read services.
+Everything starts empty. The operator supplies their own approved app records,
+sources, logs, prompts, governance records, and documents; none are seeded or
+committed to the public repository.
+
+Choose the mode deliberately:
+
+| Command | Purpose | Identity and state |
+| --- | --- | --- |
+| npm start -- --state-dir /absolute/private/bb-soc-state | Private single-tenant starter | Real operator accounts and sessions; persistent external state; full-access operators |
+| npm run start:static | Empty UI inspection | No API, auth server, uploads, or persistent writes; loopback only |
+| npm run start:connectors -- --state-dir /absolute/private/disposable-state | Disposable connector/administration contract workbench | Synthetic local operator; never expose remotely or use as a deployment |
+| npm run --silent start:agent-mcp | Narrow stdio integration tooling | Private service client with --token-file and --base-url; tokenless loopback workbench mode |
+
+The private service always binds to `127.0.0.1`. Its default local origin is
+`http://127.0.0.1:8080`. For sharing, put private Tailscale Serve in front of the
+listener and pass the exact HTTPS machine origin through `--origin`. That origin
+must end in `.ts.net`. Never use Tailscale Funnel, public ingress, or a wildcard
+bind. A successful HTTPS connection is not enough: verify ACL/grant denial and
+failure to reach the service from outside the tailnet. Keep exact Host and
+Origin values intact through the proxy.
+
+**Current capability matrix**
+
+| Area | Implemented now | Not implied |
+| --- | --- | --- |
+| Sign-in | Better Auth email/password, SQLite sessions, hidden-input local account CLI, closed signup, sign-out, expiry and session revocation | MFA, SSO, mail delivery, tenant isolation, operator-specific roles |
+| Access → Who | Current-session explanation, exact account total, first 200 provisioned operator display names and full authority | Access-event telemetry, refused-write/device/offboarding feeds, or a read-only auditor role |
+| Sources | Web-app/environment registration, optional hosts, canonical event setup/test/activation, lifecycle/credential maintenance | Arbitrary vendor installation, secret manager, pull scheduler, OTLP/syslog receiver |
+| Telemetry | Indexed SQLite admission, transactional receipts/health/audit, bounded indexed reads and explicit retention | Unlimited SIEM scale, all record kinds/every screen, detection/notification engine |
+| Documents | Upload/download, immutable versions, SHA-256 verification, metadata/status/review date, archive/restore and audit history | Antivirus, OCR, document search, automatic content classification, legal hold/purge, risk Markdown import |
+| Agent management | Registrations, prompt versions, enrollment proof and lifecycle | Running agents, task scheduling, run leases, result queues, observed job health |
+| Agent service access | Human-only credential issuance, exact scopes, expiry, rotate/revoke, durable rate windows and stdio MCP authentication | Per-app RBAC, tenant isolation, remote MCP/OAuth listener, agent execution |
+| Governance | Flat attestation/risk records and audited lifecycle commands | Attestation programs/checklists, verified legal acknowledgement receipts, evidence approval automation |
+| Scan surfaces | Working Trivy report import and projection plus eleven legacy setup templates | Scanner execution, vendor API polling; the legacy templates still fail test/activation closed |
+| Other routes | Full structural navigation/design and page contracts | Actual source coverage or populated panels without an implemented projector |
+
+Canonical log push currently feeds Overview, Sources, Logs, Analytics, and SOC
+Health. The document library and administration workflows use their own service
+state rather than pretending a log entry is a document, prompt, attestation, or
+risk. The 40-path catalog consists of 38 SOC paths, Documents, and Technical
+Docs; 30 are primary destinations, nine are linked details, and Docs is local
+implementation guidance.
+
+**First-use acceptance sequence**
+
+1. Install dependencies and provision the operator using section 49.
+2. Start with a new persistent external directory and confirm there are no
+   accounts other than the locally provisioned operator and no operational data.
+3. Sign in, register a web application with an environment and no host, and
+   configure canonical-push with the intended cadence.
+4. Test the bounded sample, activate after approval, and transfer the one-time
+   ingest credential to the approved sender without placing it in a transcript.
+5. Submit one authorized real event through the ingest contract, confirm its
+   receipt, and inspect the five supported projections. Do not fabricate a
+   log merely to make a screen look populated.
+6. Upload an approved document; inspect the saved hash and immutable version;
+   change metadata and archive/restore without changing the file bytes.
+7. Stop and restart with the same directory. Confirm account/session validity,
+   source state, records, receipts, document bytes, versions, and audit history.
+8. Verify anonymous denial, sign-out/revocation, stale revisions, source pause
+   and revoked credentials, document quota handling, and a private backup restore.
+
+## 49. Private account setup, authentication, and recovery
+
+Use Node.js 22.13 or newer. Install exactly the dependency versions in the
+lockfile. Better Auth and SQLite run inside this service; an external identity
+server and SMTP provider are not required.
+
+~~~sh
+npm ci
+npm run account -- create --state-dir /absolute/private/bb-soc-state --email operator@example.invalid --name "SOC operator"
+npm start -- --state-dir /absolute/private/bb-soc-state
+~~~
+
+Replace the example identity and state path locally. The state path must be
+absolute, outside the checkout, owned by the service account, and canonical
+with no symbolic-link ancestors. The application creates/tightens the directory
+to mode 0700 and private auth files to 0600. On macOS, `/tmp` and `/var` can be
+aliases; use their resolved paths. For a deployment, choose persistent storage,
+not a temporary workbench directory. Restart with the same path; pointing to a
+new empty directory creates a different empty deployment, not a recovery.
+
+The account command requests a hidden password and confirmation. Passwords must
+contain 15–128 characters with no control characters. Generate a unique password
+with a password manager. Email is the login identifier; the starter does not
+send messages or verify mailbox ownership. There are no default credentials and
+no public sign-up endpoint. Running create again adds another approved operator;
+duplicate emails fail without overwriting an account.
+
+The optional `--password-stdin` accepts one bounded password line for an
+authorized password-manager pipe. It does not permit password arguments,
+password environment variables, automatic password generation into logs, or
+copying a person's browser cookies into an agent. Do not construct the pipe with
+a shell command containing a literal password. An agent can arrange deployment,
+but credential custody remains with the operator and their password facility.
+
+All accounts have full operator authority over this one deployment. There are
+no reader/administrator roles, app-specific memberships, or multiple tenants.
+Do not invite a person who should see only part of the estate until that
+authorization model is implemented. Private network membership also does not
+grant app access: the browser still needs a current application session.
+
+Access → Who shows the current-session explanation, total provisioned account
+count, and the first 200 operator display names with full read/write authority.
+Names are display labels and may not be unique. This bounded account projection
+does not populate other Access views, refused-write history, tailnet devices,
+or offboarding records. Those still need their own telemetry integrations; an
+empty structural auditor panel does not mean a read-only auditor role exists.
+
+**Authentication mechanics**
+
+Better Auth hashes passwords with scrypt. The application generates a 32-byte
+secret and stores it in `auth-secret`; accounts, password hashes, sessions,
+throttle state, and local account-management audit live in `auth.sqlite`.
+SQLite uses WAL and `synchronous=FULL`. The secret is not in environment-facing
+browser configuration. Existing auth data with a missing or corrupt secret
+fails startup; the service does not silently replace its signing identity.
+
+Sessions last a fixed eight hours without sliding refresh or a cookie-cache
+authorization fallback. Cookies are host-only, HttpOnly, SameSite=Strict, and
+Secure on Tailnet HTTPS. Local loopback HTTP omits Secure intentionally.
+Successful browser auth JSON has its session token removed. The console auth
+projection contains only authenticated state, approved display name/initials,
+and presentation capability hints. Every protected API call rechecks the
+server session, not a browser flag.
+
+The auth HTTP allowlist contains only POST sign-in/email, sign-out,
+change-password, and GET get-session under `/api/auth/`. Other library routes,
+including signup, reset-email, arbitrary user updates, and administrative user
+creation, are not exposed. Auth JSON is capped at 16 KiB. Cookie-authenticated
+mutations require the exact configured Origin; Host and Fetch Metadata are
+checked too. The private application also offers GET `/api/v1/session` for the
+closed console projection.
+
+Persistent rate limits permit ten sign-in attempts per minute per connecting
+socket address, five password changes, and a general auth limit of 100.
+Forwarded IP headers are not trusted. A loopback proxy can cause multiple
+operators to share a bucket; document this conservative behavior before a
+larger deployment. This is not a per-user lockout or an MFA replacement.
+
+**Recovery and revocation**
+
+~~~sh
+npm run account -- reset-password --state-dir /absolute/private/bb-soc-state --email operator@example.invalid
+npm run account -- revoke-sessions --state-dir /absolute/private/bb-soc-state --email operator@example.invalid
+~~~
+
+Reset changes the hash and revokes all sessions atomically. Revoke-sessions
+leaves the password unchanged. Both require local state-directory authority and
+write a transactionally linked account-management audit record. Web password
+change requires the current password and revokes other sessions. Sign-out
+revokes the current application session; there is no upstream SSO provider to
+log out in this configuration.
+
+For backup, stop the application and account CLI writers before copying the
+whole external state directory securely. Include auth-secret, every SQLite
+database and any WAL/SHM files, document versions, connector/administration state
+and audit, and receipts. Copying a live main database alone can omit committed
+WAL transactions. Encrypt backups and test restore under the same ownership and
+restrictive modes in a separate private directory. Preserve the compatible code
+and package-lock revision. Never fix corruption, a missing secret, an incomplete
+audit operation, or a lock by deleting state. Inspect and recover deliberately.
+
+## 50. Documents: human workflow and HTTP integration
+
+Govern → Documents (`#/documents`) is the private file library. Use it for
+policies, compliance evidence, case material, or other approved documents the
+SOC must retain. It is separate from telemetry about files uploaded to a
+monitored application. An application upload event, AV result, or quarantine
+record remains telemetry and does not automatically copy that user's file into
+this library.
+
+**Human workflow**
+
+1. Open Documents while signed in. Supply a title, choose the approved local
+   file, and optionally add app ID, owner, status, review date, and a linked
+   record kind/ID. Upload creates document revision 1 and immutable file version 1.
+2. Open the saved document to inspect size, SHA-256, uploader identity, saved
+   time, versions, and recent audit history. Download a specific version to
+   retrieve its original bytes; no browser preview executes the file.
+3. Edit metadata with the current document revision. Status is draft, current,
+   needs-review, or retired. A review date is a real YYYY-MM-DD date. These are
+   operator assertions, not automatic compliance or malware verdicts.
+4. Upload a replacement as a new version of the same document. It appends bytes
+   and history; old versions cannot be overwritten. Metadata updates are a
+   separate operation, so a version upload cannot silently relabel the record.
+5. Archive a document to remove it from the active view while retaining all
+   bytes, versions, links, and history. Restore it before editing or adding a
+   version. Archive state is separate from the review status retired.
+6. Refresh after a revision conflict, inspect the intervening change, and make
+   a deliberate new request. Never increment a revision blindly to overwrite
+   another operator. There is no permanent-delete UI or automatic quota purge.
+
+Document links accept risk, attestation, case, or policy plus an opaque stable
+record ID. App and linked-record IDs are metadata pointers in this first slice:
+the document store validates their shape but does not check another service's
+foreign keys or enforce relationship-specific permissions. All operators can
+access all documents. Linking a file to a risk does not close that risk, approve
+its evidence, populate a case-attachment panel, or import a risk-register table.
+Those richer cross-service workflows remain future integration work.
+
+**Private HTTP surface**
+
+All endpoints require a current operator session. Mutations require the exact
+same-origin request controls; actor identity is derived on the server, never
+accepted from an upload metadata field.
+
+| Method and path | Request and result |
+| --- | --- |
+| GET /api/v1/documents | List with optional archived=active/archived/all, appId, offset, limit; default 50 and maximum 100 rows |
+| GET /api/v1/documents/{id} | Document metadata, newest-first immutable versions, and up to 200 newest audit entries |
+| POST /api/v1/documents/upload | Raw application/octet-stream bytes plus bounded X-Document-Metadata header; returns saved document/history |
+| PATCH /api/v1/documents/{id} | JSON expectedRevision and patch of permitted metadata fields |
+| POST /api/v1/documents/{id}/archive | JSON expectedRevision and optional reason |
+| POST /api/v1/documents/{id}/restore | JSON expectedRevision and optional reason |
+| GET /api/v1/documents/{id}/versions/{version}/download | Validated original bytes as an attachment plus X-Content-SHA256 |
+
+The upload header is `encodeURIComponent(JSON.stringify(value))`, capped at
+8 KiB. A new document uses this header shape:
+
+~~~json
+{
+  "expectedRevision": 0,
+  "filename": "policy.md",
+  "mime": "text/markdown",
+  "metadata": {
+    "title": "Application policy",
+    "appId": null,
+    "owner": "",
+    "status": "draft",
+    "reviewAt": null,
+    "linkKind": null,
+    "linkId": null
+  }
+}
+~~~
+
+Supply the selected file bytes as the body, not a filesystem path, base64 JSON,
+HTML form string, or multipart body. Empty files and compressed HTTP request
+bodies are rejected. For a new immutable version, use documentId,
+expectedRevision, filename, and mime, with no metadata field. Use the current
+server-issued revision. A metadata PATCH uses
+`{ expectedRevision, patch: { title, owner, status, reviewAt, appId, linkKind, linkId } }`
+with only fields intentionally changing. Link kind and ID must be both present
+or both cleared. Lifecycle reasons are optional bounded text.
+
+Titles are at most 200 characters; owner 160; filenames 180 with no path
+separators; IDs 128; review dates must be calendar-valid. Supported filename
+extensions cover PDF, text/Markdown/log/CSV/TSV, Office files, common raster
+images, JSON, ZIP, email and PCAP. MIME metadata and a permitted extension are
+not proof that content is safe. Files are not parsed or executed by the service.
+Treat downloaded files as untrusted. This starter has no antivirus scanner,
+content disarm, OCR, indexing, full-text search, or automatic quarantine.
+
+**Durability, integrity, and limits**
+
+Document metadata, versions, bytes and audit commit together in
+`documents.sqlite`, using WAL and full synchronization. Version and audit rows
+are immutable through the service and protected against update/delete by SQLite
+triggers. A download rechecks byte length and SHA-256; inconsistent bytes cause
+a failure instead of returning a corrupt file. This detects corruption, not a
+malicious administrator with unrestricted database/filesystem access. Retain
+independent protected backups for that stronger threat model.
+
+Limits are 10 MiB per nonempty file, 512 MiB total stored file bytes, 1,000
+documents, 10,000 versions, and 100,000 audit entries. SQLite/WAL overhead means
+disk needs more capacity than the file-byte budget. At most two upload requests
+are admitted concurrently. Full capacity fails without saving the requested
+mutation; archival does not reclaim bytes. Plan an approved export/retention
+migration before these limits, rather than deleting files behind the service.
+No high-volume document throughput or legal-records compliance guarantee is
+claimed.
+
+## 51. Web-app sources, environments, and lifecycle maintenance
+
+The primary ownership model is application → environment → source. Host or
+collector identity is optional for a web-app push integration and required only
+when the installed connector manifest calls for it. Do not invent a server just
+to register a SaaS app, containerless application, or hosted web frontend.
+
+Register an app with displayName, optional hosts (zero through 64), optional
+environments (one through 32 unique normalized identifiers), and publicPages.
+Without environments, the server uses default. A source selects one declared
+environment and remains bound to its immutable app/source/connector IDs. The
+environment is configuration metadata, not separate tenant authorization.
+Changing app/environment topology after registration is not a general editing
+feature yet; plan it deliberately rather than rewriting private state files.
+
+**Connect one web application**
+
+1. Onboard the app with environments such as development or production that
+   match your own deployment. Omit hosts if there is no host collector.
+2. In Sources, select that app/environment and the application-scoped
+   canonical-push manifest with log.event. Choose a descriptive source name and
+   expected collection cadence. A public page URL is descriptive scope, not a
+   scan authorization or an ingest endpoint.
+3. Test using a bounded message sample with optional channel/severity. A
+   hostless canonical source requires this sample. Testing validates shape and
+   configuration; it never adds the sample to Logs or marks health healthy.
+4. Activate from tested state using the current expectedRevision. Save the
+   one-time source-ingest credential into the sender's approved secret facility.
+   It cannot be recovered by replaying the command. Do not paste it into a
+   document, prompt, Git file, screenshot, or technical support transcript.
+5. Implement the sender's bounded canonical batches to POST /api/v1/ingest,
+   using the issued source identity and separate Bearer transport credential.
+   Validate against the ingest contract before sending. Retries keep receiptId
+   and exact content unchanged; changed content needs a new receipt.
+6. Verify the accepted receipt, source scope, first event and five supported
+   projections. Healthy means a real admitted delivery within cadence, not that
+   the whole application is secure or that every expected log source exists.
+
+Keep the receiver private. An Internet-only SaaS webhook cannot reach a private
+tailnet endpoint by wishful configuration. Use an approved tailnet-capable
+sender, private relay, or a reviewed poller design. Do not enable public ingress
+to make a vendor webhook work. The starter does not supply that relay/poller.
+
+**Maintenance commands**
+
+Every command below carries sourceId, connectorInstanceId, and the exact
+current expectedRevision in the standard command envelope. The server checks
+the lifecycle, commits audit/history, and increments revision. Browser labels
+or cached rows are not authority. Refresh after each operation.
+
+| Command | Allowed starting state | Outcome |
+| --- | --- | --- |
+| source.update | configured, tested, active, paused | Change displayName, config, or credentialReferences; revoke old credentials; return to configured; retest/activate |
+| source.pause | active | Stop accepting ingest; retain credential/history for controlled resume |
+| source.resume | paused with a live credential | Return active/pending; require a new accepted delivery for health |
+| source.revoke | active or paused | Revoke all current ingest credentials and leave source paused |
+| source.rotate | active or paused | Revoke prior credentials, issue one new one-time value, return active/pending |
+| source.archive | configured, tested, active, paused | Stop collection, revoke credentials, retain record/history |
+| source.remove | archived | Retain a removed tombstone and admitted records; no data purge |
+
+source.update requires at least one permitted changed field and validates the
+complete result against the installed manifest. A config object or credential
+reference list replaces that whole field; do not send a partial object unless
+the intended full value passes the manifest. App, environment, connector type,
+source kind and ownership IDs are not freely reassigned by update. There is no
+source restore command in this slice; archive only when intended. A replacement
+source gets a new identity, and removal does not free record/receipt quotas.
+
+Expired or revoked credentials prevent resume; rotate through the protected UI
+and update the sender. The MCP reference refuses source.rotate along with other
+credential-issuing actions. Pausing/stopping a source affects collection, not
+the immutable truth of historical admitted records. Document that distinction
+when interpreting old Logs/Analytics rows after removal.
+
+The eleven legacy scan manifests remain host-scoped connection templates. Their fields
+allow operators to describe Trivy, Patch First, File Integrity, End of Life and
+the other scan integrations, including opaque credential references. They do
+not execute scanners or resolve an API key. An agent must not bypass their
+connector-unavailable test result or falsely claim success. See section 46 for
+the per-template design and implement each reviewed driver/normalizer/projector
+as a separate vertical integration.
+
+The separate `trivy-report` application-scoped importer is implemented in the
+private application. It has no vendor-key slot because the SOC never connects
+to a registry or scanner vendor for this workflow. Section 54 describes its
+actual upload, source authorization and Scans projection behavior.
+
+## 52. Storage limits, reliability acceptance, and remaining parity work
+
+The private application uses `SqliteTelemetryStore` for connector metadata,
+canonical records, replay receipts, source health and connector audit. SQLite
+WAL with synchronous FULL commits these changes in one transaction before an
+admission receipt is returned. Only bounded control metadata is cloned; ingest
+does not load or rewrite the retained event history. SQL indexes cover source,
+kind, event time and retention time; triggers maintain exact retained counters.
+The public static mode has no store. The disposable workbench retains its
+8 MiB JSON state, 50 MiB audit and 10,000-record/receipt limits. Administration
+still uses its bounded reference store. One runtime owns a state directory;
+do not start replicas against it or infer multi-process coordination from WAL.
+
+**Default private telemetry limits**
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| maxRecords | 100000 | Retained canonical payloads, across log and scan kinds |
+| maxRecordBytes | 268435456 | 256 MiB of serialized record payloads, not total database size |
+| recordDays | 30 | Payload age measured from server admission time |
+| replayDays | 7 | Receipt/fingerprint replay protection and maximum batch sentAt age |
+| maxReceipts | 100000 | Retained source/batch receipt identities |
+| maxRecordIdentities | 1000000 | Retained source/record fingerprints, including pruned payloads |
+| maxAuditRows | 1000000 | Connector audit commits; exhaustion refuses mutations |
+
+After successful state mutations, payloads beyond the count/byte/age bounds
+are pruned oldest-admitted first. There is no idle background purge. Pruning
+does not erase source health's cumulative accepted counts, fabricate a fresh
+scan, or remove an unexpired receipt/fingerprint. Payload eviction is not a
+backup, legal hold, compliance guarantee or secure filesystem erasure. SQLite
+pages/WAL, indexes, audit and other application stores require additional disk.
+A new batch that alone exceeds the record-count or payload-byte capacity is
+refused with 507 before any pruning, records, receipt, source-health, credential
+usage or audit changes are committed. Split oversized deliveries upstream;
+the Trivy importer never silently truncates or splits a report.
+
+Receipts and pruned-payload fingerprints remain through the replay window.
+Exhausting their capacities fails with 507 instead of silently shortening the
+window. A batch whose original `sentAt` is older than that window is refused,
+even if its payload or receipt previously existed. Retrying inside the window
+must retain its exact receipt ID/body. Changing the timestamp and IDs is a new
+delivery, not a retry. Stable record IDs with conflicting content are rejected.
+There is no promise of global deduplication forever after identities expire.
+
+Retention settings are pinned in `telemetry.sqlite`. An omitted configuration
+reloads the stored policy; a changed explicit configuration is refused rather
+than silently changing replay guarantees. Embedders may supply validated
+`telemetryRetention` options to `startPrivateApplication` when creating a new
+deployment. Existing-policy changes require a deliberate migration design.
+The normal CLI uses the documented defaults or stored policy.
+
+In **Retention → Policy**, operators can inspect this actual configured policy.
+**Retention → Reality** shows retained record bytes/counts, receipt count and
+fingerprint count from the database. It does not invent free disk, per-source
+coverage, archive integrity or an analyst review. The same authenticated
+read-only data is available from `GET /api/v1/telemetry/storage`.
+
+Logs use bounded newest-first indexed selection (at most 200 rows), with the
+matched count and omitted-row notice. Indexed text search requires at least
+three characters and uses SQLite's trigram text search; this is not arbitrary
+SQL or a full SIEM query language. Source IDs and application/environment labels
+remain searchable/filterable. Analytics aggregate the selected bounded time
+window in SQL instead of materializing all events in JavaScript. A diagnostic
+`getState()` can still export retained history for tests; it is not a browser or
+machine endpoint and is not used by hot request paths.
+
+**Existing private state upgrade**
+
+Stop the old process and take a consistent whole-directory backup first.
+Startup acquires the existing writer lock, validates the old state and audit,
+and transactionally imports them into the new database. The original
+`state.json` and `audit.jsonl` remain as frozen migration inputs; their digest
+must still match on restart. Never edit/delete them or restart the reference
+workbench against an upgraded directory. Existing data exceeding configured
+migration bounds, changed inputs, unknown schemas, corruption and ambiguous
+locks cause explicit refusal. Do not delete the new database to downgrade:
+restore the complete pre-upgrade backup to a separate stopped deployment if
+rollback is required. Preserve both the SQLite state and frozen inputs in
+future backups.
+
+Capacity, corruption, an incomplete transaction, or a conflicting process lock
+must surface as an actionable failure. Never label these failures empty or
+healthy, acknowledge undurable data, discard evidence silently, or remove state
+to restore a green indicator. Admission retries must preserve their idempotent
+receipt contract. Whole-directory backup/restore is described in section 49.
+
+**Next implementation steps, not current capabilities**
+
+1. Extend beyond the shipped indexed store with workload-tested capacity,
+   incremental projections and operational export/retention tooling.
+2. Share cached read work and incremental projectors with explicit versions,
+   generation checks, checkpoints, lag and completeness. Preserve last-known
+   good data only with honest stale/partial labels.
+3. Add worker claims, heartbeats, deadlines, safe retry/backoff, dead letters and
+   crash recovery. Reject stale job completions and retain durable decisions.
+4. Add web availability/TLS observations, independently verified evidence
+   backups, legal acknowledgement receipts and retention coverage. These are
+   separate normalized facts, not inferred from a successful upload or push.
+5. Combine editable agent definitions/prompts with observed run state and
+   freshness. A registered or enrolled agent is not a running healthy agent.
+6. Add attestation program/checklist relationships, risk progress independent
+   of verified closure, and versioned risk Markdown import/export. Storing a
+   Markdown file in Documents does not parse or reconcile its risk records.
+7. Extend the shipped scoped service access only when required with resource-
+   specific authorization and richer identity policy. Keep credential issuance,
+   arbitrary execution and telemetry outside MCP.
+
+For each implementation slice, preserve the original brand/CSS and empty-state
+truth while adding actual service behavior and tests. Do not copy private
+prompts, real hosts, policies, inventory, records, credentials, source values,
+or deployment configuration from an operational instance into this repository.
+
+**Verification must distinguish correctness from performance**
+
+Run `npm run check` to validate generated documentation, runtime contracts,
+functional tests and the public-content boundary. Private auth tests exercise
+real sign-in, wrong passwords, closed signup, sessions across restart, expiry,
+revocation, bounded inputs, restrictive filesystem state and concurrent durable
+rate limits. Document/source tests exercise their own transactions, revisions,
+lifecycles and integrity. Passing those tests is not a throughput benchmark or
+proof of deployment readiness.
+
+Run the informational private-runtime benchmark separately:
+
+~~~sh
+npm run benchmark:private -- --records 20000 --batch-size 100 --queries 30
+~~~
+
+Its p50/p95 measurements concern direct runtime operations, not HTTP throughput,
+browser latency, a pass/fail service-level objective, or production hardware.
+Keep workload parameters and machine/runtime context with any comparison.
+The benchmark uses private indexed telemetry, not the JSON workbench. The
+workbench's 10,000-record bound remains unchanged.
+
+The committed-state recovery test kills a child process after source, agent,
+and document writes. The reference store locks intentionally refuse immediate
+restart. Automatic stale-lock recovery is not implemented: first verify the
+recorded process is no longer alive and no writer owns the directory, then
+deliberately remove only the confirmed stale lock files under the documented
+recovery procedure. Retain state and audit. The test verifies recovery of those
+committed records after this explicit step; it is not actual power-loss testing,
+automatic dangling-audit repair, or permission to remove an unexplained lock.
+
+Before raising capacities, run reproducible workloads for concurrent ingest,
+Logs queries, document operations, agent work and navigation. Record hardware,
+dataset size, p50/p95 latency, event-loop delay, peak memory and storage work.
+Test append/rotation during read, malformed or truncated input, retry after
+lost acknowledgement, conflicting revisions, cancelled navigation, and crash
+points around commits. Demonstrate bounded bytes/operations, not only one fast
+timing. Distinguish a killed process from actual power-loss testing and state
+which was exercised. No performance figure or resilience guarantee is implied
+by importing a design pattern from another deployment.
+
+CI, GitHub workflows, branch protections and release automation remain outside
+this work. This manual concerns the runnable app and adopter integration path.
+
+## 53. Private service identities and authenticated MCP setup
+
+**What this is.** Service Access gives an external agent process its own
+expiring permission to the private app's existing control services. An agent
+registration/prompt describes a managed agent; it does not grant API access.
+An enrollment proof proves a connection; it does not grant every tool. A source
+credential admits telemetry for one source. A service credential grants selected
+control operations across this single installation. These identities are not
+interchangeable. Creating any of them does not start a model or agent process.
+
+**Human setup through the app**
+
+1. Sign in and open **Agents → Service Access**.
+2. Give the connection a recognizable non-secret name. Choose its lifetime:
+   the UI offers one hour, 24 hours, seven days or 30 days. The API accepts
+   five minutes through 30 days; 24 hours is the default.
+3. Keep the default `connector:read`, `agents:read`, `governance:read` scopes
+   unless the job needs more. These expose installation metadata, not telemetry
+   streams or document bytes. Prompt bodies need separate `prompts:read`.
+4. Expand optional write grants only if required. Each grant is an exact
+   command, never a wildcard. Read the prompt and approve impactful operations
+   in the external agent host too; a token scope does not replace human review.
+5. Issue once, save the one-time credential directly into an approved external
+   secret file (owner-only mode 0600), and clear the credential panel. Do not
+   put it in prompts, transcripts, command arguments, browser storage, Documents
+   or source control. Neither list nor audit can retrieve it later.
+6. Configure the agent's MCP host to launch the stdio client with a private
+   origin and the file path. It does not need an operator password or cookie.
+
+~~~sh
+npm run --silent start:agent-mcp -- --base-url http://127.0.0.1:8080 --token-file /absolute/private/mcp-service-token
+~~~
+
+Set the MCP host's working directory to the repository. Keep `--silent`: npm's
+ordinary startup banners would corrupt the stdout JSON-RPC stream. A direct
+`node /absolute/path/to/repository/tools/agent-mcp.js` invocation with the same
+client options is also supported.
+
+For Tailnet use, select your deployment's exact private HTTPS origin instead
+of loopback. The alternative environment setting `SOC_AGENT_MCP_TOKEN_FILE`
+contains the path, never the token. `SOC_AGENT_MCP_BASE_URL` contains the
+approved private origin. The token file must be a canonical absolute regular
+file outside the repository, owned by the user, without symlinks/hardlinks or
+group/world access. It contains one issued token with an optional trailing
+newline. The MCP client rereads the file on each request, supporting rotation
+without host restart. It refuses redirects and remote tokenless operation.
+
+**Exact optional command grants**
+
+Connector scope names use the prefix `connector:` followed by one of:
+`app.register`, `source.setup`, `source.test`, `source.update`, `source.pause`,
+`source.resume`, `source.archive`, `source.remove`, `source.revoke`.
+
+Administration scope names use `administration:` followed by one of:
+`agent.pause`, `agent.archive`, `agent.remove`, `prompt.revise`, `prompt.archive`,
+`enrollment.revoke`, `attestation.create`, `attestation.update`,
+`attestation.transition`, `attestation.archive`, `attestation.restore`,
+`attestation.remove`, `risk.create`, `risk.update`, `risk.transition`,
+`risk.archive`, `risk.restore`, `risk.remove`.
+
+Credential issuance and privilege expansion are permanently unavailable:
+`host.enroll`, `source.activate`, `source.rotate`, `enrollment.issue`,
+`agent.create`, `agent.update`, `agent.resume`, `agent.restore`, and
+`prompt.activate`. The server denies these before idempotency lookup, even if
+a modified MCP client sends them. A human operator performs those steps in the
+protected UI. An approved setup agent can register/configure/test a source;
+activation and transfer of its ingest credential remain explicit human steps.
+
+All grants are **installation-wide**. They are not per-app, per-agent, per-record
+or per-tenant restrictions. Do not grant a scope if its installation-wide reach
+is broader than the job should have. RBAC for human operator accounts remains
+out of this slice: every locally provisioned operator still has full access.
+
+**Management and machine HTTP contracts**
+
+Human management requires the same-origin operator session and rejects a bearer
+header, even when a valid cookie is also present:
+
+| Endpoint | Input and output |
+| --- | --- |
+| GET /api/v1/service-access | Optional offset and limit (1–100); identities, scope catalog, limits and last 100 audit entries; no secret or digest |
+| POST /api/v1/service-access | name, optional scopes and expiresInSeconds; returns safe service metadata plus oneTimeCredential once |
+| POST /api/v1/service-access/:id/rotate | expectedRevision; new one-time credential, immediate invalidation of previous token, unchanged expiry |
+| POST /api/v1/service-access/:id/revoke | expectedRevision; permanent revocation with incremented revision |
+
+Machine calls require `Authorization: Bearer …`, reject cookies and retain
+Host/Origin checks. Origin is optional for non-browser clients; a supplied
+Origin must match. Endpoint paths are fixed:
+
+| Service path | Required authority |
+| --- | --- |
+| GET /api/v1/service/control/snapshot | connector:read |
+| GET /api/v1/service/administration/snapshot?domain=agents | agents:read |
+| GET /api/v1/service/administration/snapshot?domain=governance | governance:read |
+| GET /api/v1/service/administration/prompts?promptId=ID | prompts:read |
+| POST /api/v1/service/control/commands | Exact permitted connector command scope |
+| POST /api/v1/service/administration/commands | Exact permitted administration command scope |
+
+Command bodies remain the existing version-1 contracts, including request ID,
+timestamps and expected revisions. The service path calls the same runtime,
+not a second registry. The separate operator, document, storage and telemetry
+endpoints do not accept service tokens. MCP continues to expose exactly the
+five tools in section 26; it gains authentication, not arbitrary HTTP access.
+
+**Rotation, failure and custody**
+
+Rotation invalidates the old token immediately; update the external file using
+an approved secure operation before expecting the agent to reconnect. It does
+not extend expiry or modify scopes. To change scopes or renew expiry, issue a
+new identity, switch the client and revoke the old identity. Revocation is not
+undoable. Lost issue/rotation responses cannot be read back; use the management
+list to identify the outcome, then rotate again or revoke and replace it.
+401 indicates invalid/expired/revoked authentication; 403 indicates a denied
+scope; 409 indicates a revision/lifecycle conflict; 429 indicates the identity's
+durable 120-request/minute fixed window. Refresh after a revision conflict and
+review the current state instead of retrying with a guessed revision.
+The rate counter runs only after endpoint/input validation. Malformed requests,
+unknown endpoints and invalid credentials do not reach that counter; rate-limit
+refusals are not audit entries. This is not comprehensive ingress throttling or
+failure logging.
+
+`service-access.sqlite` stores only token digests, safe lifecycle metadata and
+audits. Its local limits are 1,000 retained identities (including revoked and
+expired), 10,000 recent audit events and 100 displayed recent events. List
+pagination is 50 by default and at most 100. Identity capacity fails explicitly;
+there is no destructive purge button. Authorization/lifecycle audit and actual
+connector/administration commit audit are separate transactions. A service
+authorization entry alone is not proof that its command committed.
+
+## 54. Trivy report import from a user's own scanner
+
+This is a working importer, not scanner execution or vendor API polling. Run
+Trivy in your own approved build, deployment or scanner environment; export its
+vulnerability-only JSON report. The SOC never starts a shell, downloads an image,
+reads your scanner API key or retrieves an arbitrary URL in this workflow.
+The separate `trivy-template` remains design-only; select **Trivy JSON report
+import** (`trivy-report`) for the implemented path.
+
+**UI sequence and population**
+
+1. Register the application and environment in Onboarding/Sources. No host is
+   required. An explicitly attached collector still needs its connection proof.
+2. In Sources → Add a source choose `trivy-report`, source kind `trivy.scan`,
+   a display name and expected cadence. There are no API-key fields because the
+   importer does not make vendor requests.
+3. Test the installed local importer and activate the source. This verifies
+   configuration, not scanner execution or live coverage. Health remains
+   awaiting-first-delivery until a valid report is admitted.
+4. Open Scans → Trivy, select the active source, choose the completed JSON file
+   and import. The signed-in operator may upload without exposing the source's
+   one-time ingest credential to the form. For an automated sender, transfer
+   that credential to the sender's secret store instead.
+5. Inspect the report timestamp, application/environment, reported package and
+   vulnerability counts, advisories and fixed-version information. The page
+   selects the latest retained report per source, not the last upload time.
+6. Retry an uncertain upload with the same file. Canonical identities and its
+   receipt are deterministic; replay does not add duplicate records or pretend
+   a new scan happened. Correct a source's cadence/name through normal source
+   lifecycle actions; pause/revoke/archive stops machine admission.
+
+**Accepted report shape and bounds**
+
+- Trivy JSON `SchemaVersion: 2`, a valid original `CreatedAt`, an `ArtifactName`
+  and an allowed artifact type: container_image, filesystem, repository,
+  rootfs or sbom. SBOM means a Trivy vulnerability report of an SBOM, not a raw
+  CycloneDX/SPDX document.
+- One through 64 Results groups, each with Target, Type and Class equal to
+  os-pkgs or lang-pkgs. Missing/empty Results, explicit scanner errors,
+  unsupported secret/config/license-only results and malformed fields fail
+  before admission. Export a supported vulnerability-only report, not SARIF.
+- At most 8 MiB of HTTP JSON and 1,000 total normalized records per report.
+  The summary, each unique package and each unique vulnerability count toward
+  that bound. Imports are atomic, never silently truncated or split. Divide
+  scans by application artifact upstream when a report is too large.
+- Original CreatedAt maps to observedAt and batch sentAt, normalized to UTC
+  milliseconds. It must fit the deployment's replay window (seven days by
+  default) and cannot be more than five minutes in the future. Historical
+  out-of-window import is not implemented. Never change an old timestamp just
+  to make stale findings appear fresh.
+
+Only bounded package/version/advisory/severity/fixed-version fields and scan
+summary metadata are retained. Original report bytes, artifact/target names and
+paths, image environment, secret findings, descriptions and external links are
+not stored. Artifact and target identities are hashes, not reversible labels;
+hashing is minimization, not anonymization of guessable values. Package names
+and versions can themselves be sensitive, so keep the deployment private.
+
+Normalization produces one `scan.result`, zero or more `software.package` and
+zero or more `vulnerability.finding` records. The exact source/application
+binding is enforced server-side; callers cannot select a different estate.
+Generic `/api/v1/ingest` refuses records for this scanner source so arbitrary
+canonical JSON cannot skip the report normalizer. The report endpoint validates
+the source credential before reading the report; human uploads require the
+operator session and matching Origin. A service/MCP credential is not accepted.
+
+**Automated source sender**
+
+`POST /api/v1/scanners/trivy/import?sourceId=ID` accepts `application/json` raw
+Trivy JSON with the source-bound Bearer credential. It returns a
+`scanner-import-result` containing the canonical ingest receipt and safe report
+counts. The helper CLI sends an existing local file, takes the source credential
+only from stdin, refuses redirects and limits destinations to loopback HTTP or
+private Tailnet HTTPS:
+
+~~~sh
+npm run import:trivy -- --file /absolute/private/trivy-report.json --source-id SOURCE_ID --credential-stdin --base-url http://127.0.0.1:8080
+~~~
+
+Pipe stdin from an approved credential manager; this command deliberately has
+no plaintext credential argument or interactive echoing password prompt. Replace
+SOURCE_ID with the source identifier from Sources. The report file is input,
+never committed to this repository. The CLI prints only safe receipt/count
+metadata and does not execute Trivy. A scheduled sender remains your own worker;
+setting cadence in the SOC does not create a schedule.
+
+**Interpretation and failure handling**
+
+Zero reported vulnerabilities is not proof of complete coverage or a clean app.
+Without complete package inventory, the package table may list only vulnerable
+packages. A fixed-version value is an upstream recommendation, not verified
+remediation. Imports do not close cases, risks or attestations automatically.
+Collection health means report delivery, not an absence of vulnerabilities.
+The view retains source lifecycle labels, including archived/removed histories.
+At most 200 latest source summaries and bounded detail rows are selected; every
+table displays at most 200 rows, with totals and omission notices. Record
+retention may evict detail while a summary remains, so report totals can exceed
+currently visible rows. No finding disappearance should be treated as a fix.
+
+For a rejected report, inspect its safe error reason, correct the report shape,
+reduce its scope or correct the source identity. No partial findings or success
+health are committed on failed admission. For timeouts, retry unchanged within
+the replay window. For expired/revoked source credentials, rotate through the
+human source flow and update the sender; do not substitute an operator cookie or
+service credential. Patch First, File Integrity, End of Life and the other
+legacy templates still require their own reviewed driver and projector.
 
 End of version-1 technical implementation manual.

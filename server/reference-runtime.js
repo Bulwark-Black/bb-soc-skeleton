@@ -2,13 +2,14 @@
 
 const crypto = require("node:crypto");
 const ConnectorContract = require("../public/connector-contract");
-const { validateIngestBatch, validateTimestamp } = require("../tools/ingest-contract");
+const { validateIngestBatch, validateNormalizedRecord, validateTimestamp } = require("../tools/ingest-contract");
+const { currentOperator } = require("./operator-context");
 const {
   REFERENCE_CONNECTOR_MANIFESTS,
   getReferenceManifest,
   scaledHealthThresholds
 } = require("./reference-manifest");
-const { createPageEnvelope } = require("./reference-pages");
+const { createPageEnvelope, createIndexedPageEnvelope } = require("./reference-pages");
 const {
   MAX_RECORDS, MAX_RECEIPTS, ReferenceStateStore, clone, generateCredential,
   hashCredential, secureEqualHex, stableId
@@ -119,6 +120,9 @@ function commandTarget(request) {
   if (request.command === "host.enroll") return { type: "host", id: input.hostId, action: "host.enrolled" };
   if (request.command === "source.test") return { type: "source", id: input.sourceId, action: "source.tested" };
   if (request.command === "source.activate") return { type: "source", id: input.sourceId, action: "source.activated" };
+  const lifecycleActions = { update: "updated", pause: "paused", resume: "resumed", archive: "archived", remove: "removed", revoke: "revoked", rotate: "rotated" };
+  const action = lifecycleActions[request.command.slice(7)];
+  if (action) return { type: "source", id: input.sourceId, action: "source." + action };
   return { type: "source", id: request.requestId, action: "source.configured" };
 }
 
@@ -165,6 +169,8 @@ class ReferenceControlPlane {
       throw new TypeError("Reference ingest TTL must be from one minute through one year.");
     }
     this.manifests = REFERENCE_CONNECTOR_MANIFESTS.map(ConnectorContract.validateConnectorManifest);
+    this.enabledConnectorTypes = new Set(options.enabledConnectorTypes || ["canonical-push"]);
+    if ([...this.enabledConnectorTypes].some((type) => !["canonical-push", "trivy-report"].includes(type))) throw new TypeError("An unimplemented connector driver cannot be enabled.");
     this.store = options.store || new ReferenceStateStore({ directory: options.stateDirectory, clock: this.clock });
   }
 
@@ -176,9 +182,13 @@ class ReferenceControlPlane {
     return this.store.snapshot();
   }
 
+  controlState() {
+    return typeof this.store.controlSnapshot === "function" ? this.store.controlSnapshot() : this.store.snapshot();
+  }
+
   getSnapshot(request) {
     ConnectorContract.validateControlRequest(request);
-    const state = this.store.snapshot();
+    const state = this.controlState();
     const now = dateAt(this.clock);
     const hosts = state.hosts.map((host) => {
       const projected = clone(host);
@@ -215,7 +225,7 @@ class ReferenceControlPlane {
       hosts,
       connectorInstances: state.connectorInstances,
       setups: projectedSources.filter((source) => source.state === "configured" || source.state === "tested"),
-      sources: projectedSources.filter((source) => source.state === "active"),
+      sources: projectedSources.filter((source) => ["active", "paused", "archived"].includes(source.state)),
       changes: state.changes,
       revision: state.revision
     };
@@ -223,7 +233,9 @@ class ReferenceControlPlane {
   }
 
   readPage(route, query) {
-    return createPageEnvelope(route, query || {}, this.store.snapshot(), dateAt(this.clock));
+    return typeof this.store.logQuery === "function"
+      ? createIndexedPageEnvelope(route, query || {}, this.store, dateAt(this.clock))
+      : createPageEnvelope(route, query || {}, this.store.snapshot(), dateAt(this.clock));
   }
 
   execute(requestValue) {
@@ -237,7 +249,7 @@ class ReferenceControlPlane {
       throw new TypeError("connector command request.requestedAt may not be more than five minutes in the future.");
     }
     const requestHash = canonicalHash(request);
-    const prior = this.store.snapshot().commandResults.find((entry) => entry.requestId === request.requestId);
+    const prior = this.controlState().commandResults.find((entry) => entry.requestId === request.requestId);
     if (prior) {
       if (prior.requestHash !== requestHash) {
         return this.failureResult(request, new ReferenceControlError("already-exists", "requestId was already used for a different command.", { status: 409 }), false);
@@ -251,9 +263,11 @@ class ReferenceControlPlane {
       else if (request.command === "host.enroll") result = this.enrollHost(request, requestHash);
       else if (request.command === "source.setup") result = this.setupSource(request, requestHash);
       else if (request.command === "source.test") result = this.testSource(request, requestHash);
-      else result = this.activateSource(request, requestHash);
+      else if (request.command === "source.activate") result = this.activateSource(request, requestHash);
+      else result = this.changeSource(request, requestHash);
       return ConnectorContract.validateCommandResult(result, request);
     } catch (error) {
+      if (error.name === "TelemetryStoreError") throw new ReferenceControlError(error.code, error.message, { status: error.status });
       if (!(error instanceof ReferenceControlError)) throw error;
       return this.failureResult(request, error, true, requestHash);
     }
@@ -280,7 +294,7 @@ class ReferenceControlPlane {
       const target = commandTarget(request);
       this.store.transact({
         action: request.command,
-        actor: "loopback:operator",
+        actor: currentOperator(),
         targetType: target.type,
         targetId: target.id,
         detail: "command completed with " + error.code
@@ -300,7 +314,7 @@ class ReferenceControlPlane {
     if (new Set(normalizedHosts).size !== normalizedHosts.length) {
       throw new ReferenceControlError("already-exists", "Host display names must be unique without regard to case.", { status: 409, field: "input.hosts" });
     }
-    const duplicateHost = this.store.snapshot().hosts.find((host) =>
+    const duplicateHost = this.controlState().hosts.find((host) =>
       request.input.hosts.some((name) => name.toLocaleLowerCase() === host.displayName.toLocaleLowerCase()));
     if (duplicateHost) throw new ReferenceControlError("already-exists", "A host with that display name is already registered.", { status: 409, field: "input.hosts" });
     const result = {
@@ -309,11 +323,12 @@ class ReferenceControlPlane {
       output: { appId, state: "registered" }
     };
     this.store.transact({
-      action: "app.register", actor: "loopback:operator", targetType: "app", targetId: appId,
+      action: "app.register", actor: currentOperator(), targetType: "app", targetId: appId,
       detail: "registered application and declared hosts"
     }, (state) => {
       state.apps.push({
         appId, displayName: request.input.displayName, hosts: hostIds, publicPages: request.input.publicPages,
+        environments: request.input.environments || ["default"],
         state: "registered", revision: 1, createdAt: now, updatedAt: now
       });
       request.input.hosts.forEach((displayName, index) => state.hosts.push({
@@ -327,7 +342,7 @@ class ReferenceControlPlane {
   }
 
   enrollHost(request, requestHash) {
-    const snapshot = this.store.snapshot();
+    const snapshot = this.controlState();
     const app = snapshot.apps.find((entry) => entry.appId === request.input.appId);
     const host = snapshot.hosts.find((entry) => entry.hostId === request.input.hostId);
     if (!app || !host || host.appId !== app.appId) throw new ReferenceControlError("not-found", "The requested host was not found.", { status: 404 });
@@ -345,7 +360,7 @@ class ReferenceControlPlane {
       }
     };
     this.store.transact({
-      action: "host.enroll", actor: "loopback:operator", targetType: "host", targetId: host.hostId,
+      action: "host.enroll", actor: currentOperator(), targetType: "host", targetId: host.hostId,
       detail: "issued one-time connection-check credential"
     }, (state) => {
       state.enrollments.forEach((entry) => {
@@ -367,11 +382,15 @@ class ReferenceControlPlane {
   }
 
   setupSource(request, requestHash) {
-    const state = this.store.snapshot();
+    const state = this.controlState();
     const app = state.apps.find((entry) => entry.appId === request.input.appId);
     const host = state.hosts.find((entry) => entry.hostId === request.input.hostId);
-    if (!app || !host || host.appId !== app.appId) throw new ReferenceControlError("not-found", "The requested application or host was not found.", { status: 404 });
-    if (host.state !== "enrolled") throw new ReferenceControlError("activation-blocked", "Enroll the host before configuring a source.", { status: 422 });
+    const manifest = getReferenceManifest(request.input.connectorType);
+    if (!app || (request.input.hostId !== undefined && (!host || host.appId !== app.appId))) throw new ReferenceControlError("not-found", "The requested application or optional collector was not found.", { status: 404 });
+    if (manifest.scope === "host" && !host) throw new ReferenceControlError("activation-blocked", "This scanner requires an enrolled collector.", { status: 422 });
+    if (host && host.state !== "enrolled") throw new ReferenceControlError("activation-blocked", "Enroll the selected collector before configuring a source.", { status: 422 });
+    const environment = request.input.environment || (app.environments || ["default"])[0];
+    if (!(app.environments || ["default"]).includes(environment)) throw new ReferenceControlError("validation-failed", "Choose an environment declared by this application.", { field: "input.environment" });
     const connectorInstanceId = stableId("connector");
     const sourceId = stableId("source");
     const now = laterTimestamp(this.clock, request.requestedAt);
@@ -381,7 +400,7 @@ class ReferenceControlPlane {
       output: { appId: app.appId, sourceId, connectorInstanceId, revision: 1, state: "configured" }
     };
     this.store.transact({
-      action: "source.setup", actor: "loopback:operator", targetType: "source", targetId: sourceId,
+      action: "source.setup", actor: currentOperator(), targetType: "source", targetId: sourceId,
       detail: "configured manifest-backed source"
     }, (next) => {
       next.connectorInstances.push({
@@ -391,7 +410,7 @@ class ReferenceControlPlane {
       });
       const source = {
         schemaVersion: "1", documentType: "source-registration", sourceId, connectorInstanceId,
-        appId: app.appId, hostId: host.hostId, connectorType: request.input.connectorType,
+        appId: app.appId, ...(host ? { hostId: host.hostId } : {}), environment, connectorType: request.input.connectorType,
         sourceKind: request.input.sourceKind, displayName: request.input.displayName, state: "configured",
         config: request.input.config, credentialReferences: request.input.credentialReferences,
         revision: 1, createdAt: now, updatedAt: now
@@ -406,7 +425,7 @@ class ReferenceControlPlane {
   }
 
   testSource(request, requestHash) {
-    const state = this.store.snapshot();
+    const state = this.controlState();
     const source = state.sources.find((entry) => entry.sourceId === request.input.sourceId);
     const connector = state.connectorInstances.find((entry) => entry.connectorInstanceId === request.input.connectorInstanceId);
     if (!source || !connector || source.connectorInstanceId !== connector.connectorInstanceId) {
@@ -414,7 +433,7 @@ class ReferenceControlPlane {
     }
     if (source.revision !== request.input.expectedRevision) throw new ReferenceControlError("revision-conflict", "Source revision changed; refresh and retry.", { status: 409 });
     if (source.state !== "configured" || connector.state !== "configured") throw new ReferenceControlError("test-failed", "Only a configured source can be tested.", { status: 422 });
-    if (source.connectorType !== "canonical-push") {
+    if (!this.enabledConnectorTypes.has(source.connectorType)) {
       throw new ReferenceControlError(
         "connector-unavailable",
         "This installed scan manifest is a data-only connection template. Install its reviewed server driver before testing or activation.",
@@ -425,8 +444,18 @@ class ReferenceControlPlane {
     const proofAge = host && host.lastProvenAt
       ? dateAt(this.clock).getTime() - Date.parse(host.lastProvenAt)
       : Number.POSITIVE_INFINITY;
-    if (!host || host.connectionState !== "proven" || proofAge < 0 || proofAge > CONNECTION_STALE_MS) {
+    if (source.hostId && (!host || host.connectionState !== "proven" || proofAge < 0 || proofAge > CONNECTION_STALE_MS)) {
       throw new ReferenceControlError("test-failed", "Complete the one-time connection check before testing this source.", { status: 422 });
+    }
+    if (source.connectorType === "canonical-push" && !source.hostId && !request.input.sample) throw new ReferenceControlError("test-failed", "Paste a real, redacted log sample before activating this application source.", { status: 422 });
+    if (request.input.sample) {
+      try {
+        validateNormalizedRecord({ schemaVersion: "1", documentType: "normalized-record", recordId: request.requestId,
+          sourceId: source.sourceId, estateId: source.appId, kind: "log.event", observedAt: request.requestedAt,
+          payload: { title: "Source validation sample", state: "unknown", ...request.input.sample } });
+      } catch {
+        throw new ReferenceControlError("test-failed", "The redacted sample does not match the canonical log payload contract.", { status: 422 });
+      }
     }
     const revision = source.revision + 1;
     const now = laterTimestamp(this.clock, request.requestedAt);
@@ -436,7 +465,7 @@ class ReferenceControlPlane {
       output: { sourceId: source.sourceId, connectorInstanceId: connector.connectorInstanceId, revision, state: "tested" }
     };
     this.store.transact({
-      action: "source.test", actor: "loopback:operator", targetType: "source", targetId: source.sourceId,
+      action: "source.test", actor: currentOperator(), targetType: "source", targetId: source.sourceId,
       detail: "completed local structural source test without vendor egress"
     }, (next) => {
       const mutableSource = next.sources.find((entry) => entry.sourceId === source.sourceId);
@@ -457,7 +486,7 @@ class ReferenceControlPlane {
   }
 
   activateSource(request, requestHash) {
-    const state = this.store.snapshot();
+    const state = this.controlState();
     const source = state.sources.find((entry) => entry.sourceId === request.input.sourceId);
     const connector = state.connectorInstances.find((entry) => entry.connectorInstanceId === request.input.connectorInstanceId);
     if (!source || !connector || source.connectorInstanceId !== connector.connectorInstanceId) {
@@ -465,7 +494,7 @@ class ReferenceControlPlane {
     }
     if (source.revision !== request.input.expectedRevision) throw new ReferenceControlError("revision-conflict", "Source revision changed; refresh and retry.", { status: 409 });
     if (source.state !== "tested" || connector.state !== "tested") throw new ReferenceControlError("activation-blocked", "Only a successfully tested source can be activated.", { status: 422 });
-    if (source.connectorType !== "canonical-push") {
+    if (!this.enabledConnectorTypes.has(source.connectorType)) {
       throw new ReferenceControlError("connector-unavailable", "A data-only connection template cannot be activated without its reviewed server driver.", { status: 422 });
     }
     const revision = source.revision + 1;
@@ -484,7 +513,7 @@ class ReferenceControlPlane {
       }
     };
     this.store.transact({
-      action: "source.activate", actor: "loopback:operator", targetType: "source", targetId: source.sourceId,
+      action: "source.activate", actor: currentOperator(), targetType: "source", targetId: source.sourceId,
       detail: "activated source and issued source-bound ingest credential"
     }, (next) => {
       const mutableSource = next.sources.find((entry) => entry.sourceId === source.sourceId);
@@ -508,11 +537,75 @@ class ReferenceControlPlane {
     return result;
   }
 
+  changeSource(request, requestHash) {
+    const state = this.controlState();
+    const source = state.sources.find((entry) => entry.sourceId === request.input.sourceId);
+    const connector = state.connectorInstances.find((entry) => entry.connectorInstanceId === request.input.connectorInstanceId);
+    if (!source || !connector || source.connectorInstanceId !== connector.connectorInstanceId || source.state === "removed") {
+      throw new ReferenceControlError("not-found", "The requested source was not found.", { status: 404 });
+    }
+    if (source.revision !== request.input.expectedRevision) throw new ReferenceControlError("revision-conflict", "Source revision changed; refresh and retry.", { status: 409 });
+    const action = request.command.slice(7);
+    const allowed = {
+      update: ["configured", "tested", "active", "paused"], pause: ["active"], resume: ["paused"],
+      archive: ["configured", "tested", "active", "paused"], remove: ["archived"],
+      revoke: ["active", "paused"], rotate: ["active", "paused"]
+    };
+    if (!allowed[action] || !allowed[action].includes(source.state)) throw new ReferenceControlError("activation-blocked", "This source lifecycle transition is not available in its current state.", { status: 409 });
+    const now = laterTimestamp(this.clock, request.requestedAt);
+    if (action === "resume" && !state.sourceCredentials.some((item) => item.sourceId === source.sourceId && item.revokedAt === null && Date.parse(item.expiresAt) > Date.parse(now))) {
+      throw new ReferenceControlError("activation-blocked", "This source has no live ingest credential. Rotate its credential to reconnect it.", { status: 409 });
+    }
+    const states = { update: "configured", pause: "paused", resume: "active", archive: "archived", remove: "removed", revoke: "paused", rotate: "active" };
+    const nextState = states[action];
+    const revision = source.revision + 1;
+    if (action === "update") {
+      try {
+        ConnectorContract.validateSourceRegistration({ ...source,
+          ...(request.input.displayName !== undefined ? { displayName: request.input.displayName } : {}),
+          ...(request.input.config !== undefined ? { config: request.input.config } : {}),
+          ...(request.input.credentialReferences !== undefined ? { credentialReferences: request.input.credentialReferences } : {})
+        }, getReferenceManifest(source.connectorType));
+      } catch {
+        throw new ReferenceControlError("validation-failed", "The source changes do not match the installed connector manifest.", { status: 422 });
+      }
+    }
+    const credential = action === "rotate" ? generateCredential() : null;
+    const expiresAt = credential ? credentialExpiry(new Date(now), this.ingestTtlMs) : null;
+    const result = { schemaVersion: "1", documentType: "connector-command-result", requestId: request.requestId,
+      command: request.command, status: "succeeded", completedAt: now,
+      output: { sourceId: source.sourceId, connectorInstanceId: connector.connectorInstanceId, revision, state: nextState } };
+    if (credential) result.output.oneTimeCredential = { value: credential, expiresAt, purpose: "source-ingest" };
+    this.store.transact({ action: request.command, actor: currentOperator(), targetType: "source", targetId: source.sourceId,
+      detail: "changed source lifecycle and retained source history" }, (next) => {
+      const mutableSource = next.sources.find((item) => item.sourceId === source.sourceId);
+      const mutableConnector = next.connectorInstances.find((item) => item.connectorInstanceId === connector.connectorInstanceId);
+      if (action === "update") for (const key of ["displayName", "config", "credentialReferences"]) {
+        if (request.input[key] !== undefined) mutableSource[key] = mutableConnector[key] = clone(request.input[key]);
+      }
+      mutableSource.state = mutableConnector.state = nextState;
+      mutableSource.revision = revision;
+      mutableConnector.revision += 1;
+      mutableSource.updatedAt = mutableConnector.updatedAt = now;
+      mutableSource.health = makeHealth(mutableSource, now, ["active", "configured"].includes(nextState) ? "pending" : "disabled",
+        ["active", "configured"].includes(nextState) ? "awaiting-first-delivery" : "disabled", { nextExpectedAt: null });
+      if (["update", "archive", "remove", "revoke", "rotate"].includes(action)) next.sourceCredentials.forEach((item) => {
+        if (item.sourceId === source.sourceId && item.revokedAt === null) item.revokedAt = now;
+      });
+      if (credential) next.sourceCredentials.push({ credentialId: stableId("credential"), sourceId: source.sourceId,
+        hash: hashCredential(credential), createdAt: now, expiresAt, lastUsedAt: null, revokedAt: null });
+      addChange(next, "source", source.sourceId, commandTarget(request).action, "succeeded", now,
+        action === "remove" ? "Source removed; its tombstone and admitted records are retained." : "Source lifecycle updated.");
+      cacheCommand(next, request, requestHash, result, next.revision + 1, now);
+    });
+    return result;
+  }
+
   proveConnection(documentValue, credentialValue) {
     const document = validateConnectionCheck(documentValue);
     const presentedHash = hashCredential(credentialValue);
     if (!presentedHash) throw new ReferenceControlError("not-authorized", "Connection-check credential is invalid.", { status: 401 });
-    const state = this.store.snapshot();
+    const state = this.controlState();
     const enrollment = state.enrollments.find((entry) => secureEqualHex(entry.hash, presentedHash));
     const nowDate = dateAt(this.clock);
     if (!enrollment || enrollment.appId !== document.appId || enrollment.hostId !== document.hostId
@@ -544,14 +637,57 @@ class ReferenceControlPlane {
   }
 
   ingest(batchValue, credentialValue, bodyHash) {
+    try { return this.admitBatch(batchValue, credentialValue, bodyHash, false); }
+    catch (error) {
+      if (error.name === "TelemetryStoreError") throw new ReferenceControlError(error.code, error.message, { status: error.status });
+      throw error;
+    }
+  }
+
+  ingestAsOperator(batchValue, bodyHash) {
+    try { return this.admitBatch(batchValue, null, bodyHash, true, true); }
+    catch (error) {
+      if (error.name === "TelemetryStoreError") throw new ReferenceControlError(error.code, error.message, { status: error.status });
+      throw error;
+    }
+  }
+
+  ingestScanner(batchValue, credentialValue, bodyHash) {
+    try { return this.admitBatch(batchValue, credentialValue, bodyHash, false, true); }
+    catch (error) {
+      if (error.name === "TelemetryStoreError") throw new ReferenceControlError(error.code, error.message, { status: error.status });
+      throw error;
+    }
+  }
+
+  authorizeScannerSource(sourceId, credentialValue) {
+    const presentedHash = hashCredential(credentialValue);
+    const state = this.controlState();
+    const credential = presentedHash && state.sourceCredentials.find((entry) => secureEqualHex(entry.hash, presentedHash));
+    if (!credential || credential.revokedAt !== null || Date.parse(credential.expiresAt) <= dateAt(this.clock).getTime()) {
+      throw new ReferenceControlError("not-authorized", "Source ingest credential is invalid or expired.", { status: 401 });
+    }
+    if (credential.sourceId !== sourceId) throw new ReferenceControlError("not-authorized", "Credential is not bound to this source.", { status: 403 });
+    const source = state.sources.find((entry) => entry.sourceId === sourceId);
+    if (!source || source.connectorType !== "trivy-report" || !this.enabledConnectorTypes.has("trivy-report")) {
+      throw new ReferenceControlError("not-authorized", "Credential is not bound to an installed report source.", { status: 403 });
+    }
+    if (source.state !== "active") throw new ReferenceControlError("activation-blocked", "Source is not active.", { status: 409 });
+    return clone(source);
+  }
+
+  admitBatch(batchValue, credentialValue, bodyHash, operatorImport, scannerImport = false) {
+    if (operatorImport && !currentOperator().startsWith("operator:")) {
+      throw new ReferenceControlError("not-authorized", "An authenticated operator is required for report imports.", { status: 403 });
+    }
     const batch = validateIngestBatch(batchValue);
-    if (batch.records.some((record) => record.kind !== "log.event")) {
+    if (!this.enabledConnectorTypes.has("trivy-report") && batch.records.some((record) => record.kind !== "log.event")) {
       throw new ReferenceControlError("validation-failed", "Reference mode accepts only canonical log.event records.", { status: 422, field: "records.kind" });
     }
     if (typeof bodyHash !== "string" || !/^[a-f0-9]{64}$/.test(bodyHash)) throw new TypeError("A SHA-256 body hash is required.");
     const presentedHash = hashCredential(credentialValue);
-    if (!presentedHash) throw new ReferenceControlError("not-authorized", "Source ingest credential is invalid.", { status: 401 });
-    const state = this.store.snapshot();
+    if (!operatorImport && !presentedHash) throw new ReferenceControlError("not-authorized", "Source ingest credential is invalid.", { status: 401 });
+    const state = this.controlState();
     const sourceCredential = state.sourceCredentials.find((entry) => secureEqualHex(entry.hash, presentedHash));
     const nowDate = dateAt(this.clock);
     const latestAllowedEventTime = nowDate.getTime() + 5 * 60 * 1000;
@@ -559,19 +695,29 @@ class ReferenceControlPlane {
         || batch.records.some((record) => Date.parse(record.observedAt) > latestAllowedEventTime)) {
       throw new ReferenceControlError("validation-failed", "Batch and record timestamps may not be more than five minutes in the future.", { status: 422, field: "sentAt" });
     }
-    if (!sourceCredential || sourceCredential.revokedAt !== null || Date.parse(sourceCredential.expiresAt) <= nowDate.getTime()) {
+    if (!operatorImport && (!sourceCredential || sourceCredential.revokedAt !== null || Date.parse(sourceCredential.expiresAt) <= nowDate.getTime())) {
       throw new ReferenceControlError("not-authorized", "Source ingest credential is invalid or expired.", { status: 401 });
     }
-    if (sourceCredential.sourceId !== batch.sourceId) throw new ReferenceControlError("not-authorized", "Credential is not bound to this source.", { status: 403 });
+    if (!operatorImport && sourceCredential.sourceId !== batch.sourceId) throw new ReferenceControlError("not-authorized", "Credential is not bound to this source.", { status: 403 });
     const source = state.sources.find((entry) => entry.sourceId === batch.sourceId);
     if (!source || source.state !== "active") throw new ReferenceControlError("activation-blocked", "Source is not active.", { status: 409 });
-    if (source.connectorType !== "canonical-push" || source.sourceKind !== "log.event") {
+    if (!this.enabledConnectorTypes.has(source.connectorType)) {
       throw new ReferenceControlError("connector-unavailable", "Reference ingest is available only to the canonical log push driver.", { status: 422 });
     }
+    const allowedKinds = source.connectorType === "canonical-push" ? ["log.event"] : ["scan.result", "software.package", "vulnerability.finding"];
+    if (batch.records.some((record) => !allowedKinds.includes(record.kind))) {
+      throw new ReferenceControlError("validation-failed", "Record kind is not implemented by this source's driver.", { status: 422, field: "records.kind" });
+    }
+    if (operatorImport && source.connectorType !== "trivy-report") throw new ReferenceControlError("not-authorized", "Operator import is restricted to the installed report driver.", { status: 403 });
+    if (source.connectorType === "trivy-report" && !scannerImport) throw new ReferenceControlError("validation-failed", "Trivy sources require the validated report-import endpoint.", { status: 422 });
+    if (scannerImport && source.connectorType !== "trivy-report") throw new ReferenceControlError("validation-failed", "Report-import credentials must belong to a Trivy report source.", { status: 422 });
     if (batch.records.some((record) => record.estateId !== source.appId)) {
       throw new ReferenceControlError("not-authorized", "Record estateId does not match the source application.", { status: 403, field: "records.estateId" });
     }
-    const priorReceipt = state.receipts.find((entry) => entry.sourceId === source.sourceId && entry.receiptId === batch.receiptId);
+    if (typeof this.store.assertReplayWindow === "function") this.store.assertReplayWindow(batch.sentAt, nowDate.toISOString());
+    const priorReceipt = typeof this.store.findReceipt === "function"
+      ? this.store.findReceipt(source.sourceId, batch.receiptId)
+      : state.receipts.find((entry) => entry.sourceId === source.sourceId && entry.receiptId === batch.receiptId);
     if (priorReceipt) {
       if (priorReceipt.bodyHash !== bodyHash) throw new ReferenceControlError("already-exists", "receiptId was already used for a different body.", { status: 409 });
       return {
@@ -580,11 +726,18 @@ class ReferenceControlPlane {
         duplicates: priorReceipt.duplicates, receivedAt: priorReceipt.receivedAt, replay: true
       };
     }
-    if (state.receipts.length >= MAX_RECEIPTS) throw new ReferenceControlError("connector-unavailable", "Reference receipt capacity is exhausted.", { status: 507 });
+    if (!this.store.findReceipt && state.receipts.length >= MAX_RECEIPTS) throw new ReferenceControlError("connector-unavailable", "Reference receipt capacity is exhausted.", { status: 507 });
     const existingRecords = new Map(state.records.filter((record) => record.sourceId === source.sourceId).map((record) => [record.recordId, record]));
     const newRecords = [];
     let duplicates = 0;
     batch.records.forEach((record) => {
+      if (typeof this.store.findRecordHash === "function") {
+        const existingHash = this.store.findRecordHash(source.sourceId, record.recordId);
+        if (!existingHash) { newRecords.push(record); return; }
+        if (existingHash !== canonicalHash(record)) throw new ReferenceControlError("already-exists", "recordId was already used with different content.", { status: 409, field: "records.recordId" });
+        duplicates += 1;
+        return;
+      }
       const existing = existingRecords.get(record.recordId);
       if (!existing) {
         newRecords.push(record);
@@ -600,29 +753,32 @@ class ReferenceControlPlane {
       }
       duplicates += 1;
     });
-    if (state.records.length + newRecords.length > MAX_RECORDS) throw new ReferenceControlError("connector-unavailable", "Reference record capacity is exhausted.", { status: 507 });
+    if (!this.store.findRecordHash && state.records.length + newRecords.length > MAX_RECORDS) throw new ReferenceControlError("connector-unavailable", "Reference record capacity is exhausted.", { status: 507 });
     const now = nowDate.toISOString();
     const nextExpectedAt = new Date(nowDate.getTime() + source.config["cadence-seconds"] * 1000).toISOString();
     this.store.transact({
-      action: "ingest.accept", actor: "loopback:source", targetType: "source", targetId: source.sourceId,
-      detail: "durably accepted bounded canonical log event batch"
+      action: "ingest.accept", actor: operatorImport ? currentOperator() : "loopback:source", targetType: "source", targetId: source.sourceId,
+      detail: "durably accepted bounded normalized record batch"
     }, (next) => {
       newRecords.forEach((record) => next.records.push({
-        ...clone(record), connectorInstanceId: source.connectorInstanceId, hostId: source.hostId, receivedAt: now
+        ...clone(record), connectorInstanceId: source.connectorInstanceId,
+        ...(source.hostId ? { hostId: source.hostId } : {}), receivedAt: now
       }));
       next.receipts.push({
         sourceId: source.sourceId, receiptId: batch.receiptId, bodyHash, receivedAt: now,
         accepted: newRecords.length, duplicates
       });
-      const mutableCredential = next.sourceCredentials.find((entry) => entry.credentialId === sourceCredential.credentialId);
-      mutableCredential.lastUsedAt = now;
+      if (!operatorImport) {
+        const mutableCredential = next.sourceCredentials.find((entry) => entry.credentialId === sourceCredential.credentialId);
+        mutableCredential.lastUsedAt = now;
+      }
       const mutableSource = next.sources.find((entry) => entry.sourceId === source.sourceId);
       mutableSource.revision += 1;
       mutableSource.updatedAt = now;
       mutableSource.health = makeHealth(mutableSource, now, "healthy", "none", {
         lastAttemptAt: now, lastSuccessAt: now, nextExpectedAt,
         attempts: 1, successfulAttempts: 1, receivedRecords: batch.records.length,
-        acceptedRecords: newRecords.length, message: "A canonical log.event batch was durably accepted."
+        acceptedRecords: newRecords.length, message: "A normalized record batch was durably accepted."
       });
     });
     return {

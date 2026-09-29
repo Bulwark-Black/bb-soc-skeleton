@@ -4,6 +4,51 @@ Browser configuration is intentionally small, versioned, data-free, and public.
 It selects presentation/integration behavior; it is not a secret, identity, or
 authorization-policy mechanism.
 
+## Server launch configuration
+
+`npm start` runs the private application, not the static preview. It requires
+Node.js 22.13 or newer, `npm ci`, an operator provisioned through `npm run account`,
+and an absolute persistent state directory outside this checkout. Follow
+[AUTHENTICATION.md](AUTHENTICATION.md) for the complete first-account procedure.
+
+| Server setting | CLI alternative | Purpose |
+| --- | --- | --- |
+| `SOC_STATE_DIR` | `--state-dir` | Required external owner-only state directory; canonical paths without symlink ancestors |
+| `SOC_PORT` | `--port` | Loopback listener port, default `8080` |
+| `SOC_BASE_URL` | `--origin` | Exact application origin; defaults to the matching loopback URL; use the configured private HTTPS origin behind Tailnet Serve |
+
+The listener remains on `127.0.0.1`. Prefer private tailnet access and never
+Tailnet Funnel or public ingress. These server settings are not additions to
+`SOC_CONSOLE_PUBLIC_CONFIG`. The private server supplies application mode,
+required authentication, and the reviewed same-origin integration bridge.
+All provisioned operators currently have full access; this is not per-role or
+per-tenant authorization. State includes Better Auth, Documents, service-access,
+and indexed telemetry SQLite stores, plus bounded administration JSON state and
+audit. Back up the whole directory as a consistent stopped-service unit and test
+restoration. Existing valid reference connector state is migrated atomically to
+private telemetry; legacy files remain untouched and cannot be used to run the
+reference writer against the migrated directory.
+
+Private telemetry defaults to 100,000 retained records, 256 MiB of canonical
+record JSON, and 30 days; the replay window is seven days. Count, byte, age,
+receipt, identity, and audit limits are separate. A programmatic
+`startPrivateApplication({ telemetryRetention: ... })` override is validated and
+pinned when initialized; it is not a browser option, CLI flag, or live retention
+editor. Retention pruning runs on successful state mutations, not a background
+timer. Review actual counters in Retention → Policy/Reality and the detailed
+limits and migration rules in [technical manual section 52](../public/technical-reference.md#52-storage-limits-reliability-acceptance-and-remaining-parity-work).
+
+Private mode installs `canonical-push` and `trivy-report`; the eleven legacy
+scanner setup templates remain non-executing. Trivy import is under Scans →
+Trivy and `/api/v1/scanners/trivy/import?sourceId=...`, using an operator session
+or source-bound bearer, never a service-agent credential. The importer does not
+need a vendor API key or run a scan; it accepts an already-produced supported
+report. See [technical manual section 54](../public/technical-reference.md#54-trivy-report-import-from-a-users-own-scanner).
+
+`npm run start:static` serves the dependency-free, data-free preview without
+authentication, document APIs, or installed source providers. The separate
+`npm run start:connectors` workbench is for local development only.
+
 ## Load order
 
 The deployment composes classic scripts in this order:
@@ -18,6 +63,9 @@ optional adopter public configuration
   -> public/application-bridge.js or adopter integration bridge
   -> public/technical-docs.js
   -> public/ui-catalog.js
+  -> public/document-library.js
+  -> public/service-access.js
+  -> public/scanner-import.js
   -> public/app.js
   -> public/bootstrap.js
 ```
@@ -88,10 +136,11 @@ reconfigure a mounted application.
 Unknown keys and unsupported schema versions are errors. Nested values must be
 plain objects. Logo paths reject absolute paths, traversal, backslashes, query,
 and fragments. Default routes reject query/fragment/traversal and must match one
-of the 39 registered paths when the application is created. Misspelled keys fail
+of the 40 registered paths when the application is created. Misspelled keys fail
 visibly rather than being ignored. The catalog contains the 38 SOC paths plus
-the shell-owned `/docs` utility; `/docs` is a valid default route but never
-causes a page-provider or connector-provider read.
+the application-owned `/documents` library and shell-owned `/docs` utility.
+Neither local route calls the page adapter. `/docs` never reads control
+providers; `/documents` uses its own authenticated document API in private mode.
 
 The default brand values and `public/assets/mark.png` are product-matched. Keep
 them unchanged when exact parity is required. See
@@ -99,14 +148,16 @@ them unchanged when exact parity is required. See
 
 ## Mode behavior
 
-`mode: "skeleton"` is the default data-free inspection mode. Known routes remain
+`mode: "skeleton"` is the checked-in static configuration's data-free inspection mode. Known routes remain
 registered and render empty without a page provider.
 
 `mode: "application"` states that an adopter intends to inject page/auth/control
 integrations. It does not enable networking, OIDC, commands, uploads,
 subscriptions, persistence, or authorization by itself. Those capabilities
 remain application-owned and server-enforced; a connector provider must still
-be installed explicitly.
+be installed explicitly. The `npm start` private server installs these
+integrations and overrides the static defaults with `mode: "application"` and
+`auth.required: true` before validation; setting the mode alone does not do so.
 
 Refresh cadence is not a version-1 public configuration key. The controller
 uses the committed 300,000-ms interval only for an injected provider, plus
@@ -175,8 +226,8 @@ credentials, API keys, evidence bodies, or authorization policy. One-time
 enrollment values may appear only in the correlated successful issuance result
 and must never appear in a snapshot or public configuration.
 
-See [AGENTS.md](AGENTS.md) for lifecycle and optional MCP boundaries. An MCP
-facade, when an adopter supplies one, calls this same service; it is not
+See [AGENTS.md](AGENTS.md) for lifecycle and MCP boundaries. The shipped MCP
+facade calls the same runtime through scoped private service routes; it is not
 configured through the public object and must not become a second authorization
 or secret path.
 
@@ -201,14 +252,17 @@ Its exact shape is:
 ```
 
 `getSnapshot({ schemaVersion, reason, knownRevision? })` returns the installed
-connector manifests, apps, hosts, connector instances, staged setups, active
-sources, change entries, and registry revision. `execute(request)` accepts only
-`app.register`, `host.enroll`, `source.setup`, `source.test`, and
-`source.activate`. The connector runtime validates request and result shape and
+connector manifests, apps/environments, optional hosts, connector instances,
+staged setups, active/paused/archived sources, change entries, and registry
+revision. `execute(request)` accepts only `app.register`, `host.enroll`,
+`source.setup`, `source.test`, `source.activate`, `source.update`, `source.pause`,
+`source.resume`, `source.revoke`, `source.rotate`, `source.archive`, and
+`source.remove`. The connector runtime validates request and result shape and
 correlation before the UI uses them.
 
-The default bridge installs no provider, so Onboarding and Sources controls stay
-disabled. A host integration should make both provider methods thin clients of
+The checked-in static bridge installs no provider, so preview Onboarding and
+Sources controls stay disabled. The private application generates an installed
+bridge instead. A custom host integration should make both provider methods thin clients of
 one same-origin authenticated command service. Do not place endpoints,
 credential values, transport tokens, or authorization policy in public config;
 only the provider global name is configuration. See
@@ -283,12 +337,23 @@ Sensitive-key-name rejection is a guardrail, not a secret scanner. Review values
 as well as names. Load private material from server-side secret management and
 expose only the closed browser integration objects.
 
-The reference MCP process has a separate server-side/CLI setting,
-`SOC_AGENT_MCP_BASE_URL` (or `--base-url`), for its fixed control origin. It is
-not a browser public-config key. The reference validator permits plain HTTP only
-for exact loopback and restricts HTTPS to loopback/private IPs or the validated
-private-overlay DNS suffix; tool arguments never accept URLs. Production service identity and
-authentication remain adopter-owned and must not be embedded in public config.
+The MCP process has separate server-side/CLI settings, never browser config:
+
+| Setting | CLI | Purpose |
+| --- | --- | --- |
+| `SOC_AGENT_MCP_BASE_URL` | `--base-url` | Fixed origin; use the private app's matching origin with service access; defaults to the legacy loopback workbench at port 8787 |
+| `SOC_AGENT_MCP_TOKEN_FILE` | `--token-file` | Canonical absolute path to an owner-only regular file outside the repository containing the issued service credential |
+
+Issue the credential through Agents → Service Access, not MCP. The client reads
+the file for every request so it can pick up rotation; neither the environment
+nor arguments contain the raw credential. No token file means unauthenticated
+legacy loopback workbench mode only; remote private origins require a token
+file. The URL validator permits HTTP only for exact loopback and HTTPS only for
+approved private destinations; the private server still requires its own exact
+configured origin. Tool arguments never accept URLs or cookies. Service scopes,
+expiry, rotation/revocation and limits are detailed in
+[technical manual section 53](../public/technical-reference.md#53-private-service-identities-and-authenticated-mcp-setup)
+and [AGENTS.md](AGENTS.md).
 
 ## Environment-specific public configuration
 
@@ -310,12 +375,14 @@ compatible application/contract runtime.
 
 The empty skeleton declares `connect-src 'none'`, so browser connections are
 blocked even if an injected object attempts them. This is the correct static
-public baseline. The opt-in loopback workbench serves a reviewed same-origin
-bridge and a correspondingly narrow response policy only for local testing.
+public baseline. The private application serves a reviewed same-origin bridge
+and response CSP for its authenticated APIs; the opt-in development workbench
+also serves a same-origin bridge with its own narrow policy.
 
-That baseline also blocks a same-origin Better Auth client. The dependency-free
-local server accepts only static `GET`/`HEAD` requests and does not mount an auth
-handler. It is an inspection host, not a starting point for live authentication.
+The static baseline would block a same-origin Better Auth client. The
+dependency-free `start:static` server accepts only static `GET`/`HEAD` requests
+and mounts no auth handler. Use the private application for working sessions
+rather than weakening the preview policy.
 
 For an application-hosted integration:
 
@@ -355,8 +422,8 @@ validate, or make cross-origin credentials safe.
 - [ ] The administration global name matches the host object when the
       administration runtime is installed; its absence otherwise fails closed.
 - [ ] `auth.required` matches the deployment's gating requirement.
-- [ ] `routing.defaultRoute` is one of the 39 registered routes, including the
-      local `/docs` utility when intentionally selected.
+- [ ] `routing.defaultRoute` is one of the 40 registered routes, including the
+      local `/docs` or `/documents` page when intentionally selected.
 - [ ] Effective response CSP permits only required BFF connections and denies
       framing.
 - [ ] Config, UI, page adapter, browser auth, connector control, canonical

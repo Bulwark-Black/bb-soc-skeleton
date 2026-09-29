@@ -2,16 +2,15 @@
 
 ## Still a work in progress, I am trying to take what I built privately and make it so that anyone can ingest sources as efficiently and monitor things as I do.
 
-A dependency-free, data-free browser skeleton for the Bulwark Black SOC
-interface. It preserves the exact committed product mark and visual system,
-registers all 38 active SOC paths plus a shell-owned Technical Docs utility, supplies responsive/accessibility behavior,
-and defines versioned page, browser-authentication, connector-control, and
-canonical-ingest contracts for an adopter-owned stack.
+A data-free, self-hosted private application starter for the Bulwark Black SOC
+interface. It preserves the committed product mark and visual system, includes
+the 38 SOC paths, a Documents library, and Technical Docs, and gives adopters
+versioned integration contracts for monitoring their own web applications.
 
-> The default static mode is an empty presentation layer and does not collect
-> telemetry. The opt-in loopback workbench accepts only local canonical test
-> records; neither mode detects threats, delivers alerts, administers
-> infrastructure, or provides a production security control.
+> `npm start` runs the private application with real Better Auth sign-in and
+> persistent operator-created data. No accounts, demo records, telemetry, or
+> documents are seeded. This is a bounded single-tenant starter, not a complete
+> detection platform or a claim of production readiness. Keep it private.
 
 ## What is included
 
@@ -20,13 +19,17 @@ canonical-ingest contracts for an adopter-owned stack.
 - A 38-route SOC registry: 29 primary surfaces (27 grouped navigation pages
   plus Onboarding and Settings) and nine linked detail paths, plus a separate
   shell-owned `/docs` implementation manual that is never adapter-hydrated.
-- A synchronized 47-chapter in-app and raw Markdown technical reference for
+- An additional `/documents` library for file upload, immutable versions,
+  hashes, metadata, review status, history, downloads, and archive/restore.
+- A synchronized in-app and raw Markdown technical reference for
   operators, connector authors, platform engineers, and automation agents.
 - Honest loading, empty, unavailable, forbidden, error, and not-found states.
 - A version-1 request/page-envelope contract with strict data-only validation.
 - A mountable application factory plus default browser bootstrap.
 - A browser-side authentication integration contract that exposes only a closed
   session projection and login/logout entry points.
+- A runnable Better Auth + SQLite private session backend, closed public
+  registration, locally provisioned operators, and password/session recovery CLI.
 - A connector manifest, source registry, health snapshot, and closed lifecycle
   command contract for the Onboarding and Sources screens.
 - A separate domain-scoped administration contract for managed agents, prompt
@@ -37,12 +40,20 @@ canonical-ingest contracts for an adopter-owned stack.
   contracts plus five fixed connector/administration tools. It rejects
   credential issuance, arbitrary URLs, shell/SQL/filesystem access, telemetry,
   and secret retrieval.
+- Private service access with expiring, scoped credentials, human-only issuance,
+  rotation/revocation, audit history, and a token-file-backed MCP client.
+- Indexed SQLite telemetry admission and bounded page reads in the private app,
+  with explicit record retention and replay limits rather than whole-history
+  JSON rewrites.
+- An application-scoped Trivy JSON report importer and populated Trivy scan
+  summaries. It accepts reports from your scanner; it does not execute scans.
 - A bounded canonical-record and idempotent ingest-batch contract, plus a
   loopback-only reference workbench for exercising one honest push-to-screen
   path without external integrations.
 - An empty provider template, portable page-model JSON Schema, and local
   validators for page, connector, and ingest documents.
-- Dependency-free local serving, route/contract/boundary tests, and a strict
+- Separate static inspection and disposable integration-test modes,
+  route/contract/boundary tests, and a strict
   public-content audit.
 
 ## Data-free public boundary
@@ -54,31 +65,52 @@ but no operational records or page data. Specifically, it contains:
   policies, evidence, configuration values, or operational verdicts;
 - no credentials, customer records, real host inventory, private policy,
   detection logic, or deployment configuration;
-- no active browser network client, persistent writes, uploads, subscriptions,
-  command provider, telemetry collection, or environment discovery;
-- no external database, queue, scheduler, collector, webhook, notification
+- no committed runtime databases, document bytes, operational secrets, or
+  deployment-specific values; private application state lives outside the checkout;
+- no external queue, scheduler, collector, webhook, notification
   client, vendor client, or infrastructure client;
-- no OIDC token processing, browser token storage, or server session
-  implementation.
+- no OIDC token processing or browser token storage.
 
-Without injected page/connector providers, known routes render an explicit empty
-skeleton. Visible controls expose product structure only and do not submit or
-mutate. The opt-in reference workbench stores only data entered during that
-local run; no operational values are committed to the repository.
+Static inspection has no providers or writes. The private application installs
+authenticated providers and stores only operator-supplied information in the
+external state directory. A visible screen does not imply that its external
+connector or projector is implemented; see the capability matrix below.
 
 ## Run locally
 
-Requirements: Node.js 20 or newer. There is no dependency-install or build step.
+Requirements: Node.js 22.13 or newer and npm. Install the pinned dependencies:
 
 ```sh
-npm start
+npm ci
 ```
 
-Open `http://127.0.0.1:8080`. The dependency-free server binds to loopback only
-and sends the empty-skeleton security headers. `npm run dev` starts the same
-server. This starts the data-free interface only: the server mounts no auth/API
-handler, accepts no state-changing requests, and its `connect-src 'none'` policy
-intentionally blocks live browser integrations.
+Choose a persistent, owner-only directory **outside this checkout**, using its
+absolute canonical path. For example, replace `/absolute/private/bb-soc-state`
+with a location owned by your account. The application creates it with mode
+0700 and stores authentication/database files with mode 0600. Symbolic-link
+ancestors are rejected: on macOS, resolve `/tmp` or `/var` aliases before use.
+Do not use a temporary directory for a deployment you intend to keep.
+
+```sh
+npm run account -- create --state-dir /absolute/private/bb-soc-state --email operator@example.invalid --name "SOC operator"
+npm start -- --state-dir /absolute/private/bb-soc-state
+```
+
+Replace the example email/name locally. Password entry is hidden and confirmed;
+there is no default account and no public signup. Open `http://127.0.0.1:8080`,
+sign in, and use Onboarding, Sources, Documents, and Docs. All provisioned
+operators have full access to this one deployment; there are no read-only roles,
+tenant isolation, MFA, or email reset service in this starter. Stop with Ctrl-C.
+Restart with the **same** directory to retain accounts, sessions, registry,
+documents, histories, and ingest receipts.
+
+For recovery, use `reset-password` or `revoke-sessions` with the same `--state-dir`
+and `--email`. The account CLI accepts an explicit `--password-stdin` for a
+password-manager pipe, never a password argument or password environment value.
+See [authentication and recovery](docs/AUTHENTICATION.md#shipped-private-application).
+
+To inspect only the empty interface, use `npm run start:static`. It binds to
+loopback, mounts no API, accepts no writes, and uses `connect-src 'none'`.
 
 Verify the complete checked-in boundary:
 
@@ -97,7 +129,7 @@ running it. It must remain bound to loopback and must not receive production
 credentials or telemetry.
 
 ```sh
-soc_reference_state="$(mktemp -d)"
+soc_reference_state="$(node -e 'const fs=require("node:fs"),os=require("node:os"),path=require("node:path"); process.stdout.write(fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()),"bb-soc-workbench-")))')"
 npm run start:connectors -- --state-dir "$soc_reference_state"
 ```
 
@@ -108,14 +140,25 @@ With that loopback workbench running, an MCP-capable local agent can start the
 separate reference process:
 
 ```sh
-npm run start:agent-mcp
+npm run --silent start:agent-mcp
 ```
 
-It connects to `http://127.0.0.1:8787` by default. Use
-`SOC_AGENT_MCP_BASE_URL` or `--base-url` only for an explicitly approved private
-HTTPS IP or the validated private-overlay DNS suffix. It is a narrow client of
-the same API/RBAC boundary, not a
-server deployment or credential/telemetry channel. See
+Without a token file it connects to the disposable workbench at
+`http://127.0.0.1:8787`. To use your private application, sign in and open
+**Agents → Service Access**, issue a least-privilege credential, and place its
+one-time value in an owner-only external file using your approved secret tool.
+Then configure the MCP process with `--base-url` and `--token-file`:
+
+```sh
+npm run --silent start:agent-mcp -- --base-url http://127.0.0.1:8080 --token-file /absolute/private/mcp-service-token
+```
+
+The file is a secret, not a report attachment or source-controlled setting.
+Never copy browser cookies into the client or expose the workbench. Private
+service requests use separate authenticated, server-scoped endpoints; a source
+ingest key is not a service access credential. Remote origins must be approved
+private HTTPS destinations. This client is not an agent runner or telemetry
+channel. See
 [the agent guide](docs/AGENTS.md#optional-mcp-facade) for exact resources,
 tools, and refusal rules.
 
@@ -123,9 +166,10 @@ tools, and refusal rules.
 
 Keep an adopted SOC private. The recommended shared deployment is reachable
 only over a Tailscale tailnet (or an equivalently controlled private overlay),
-with no public Internet ingress and no public DNS record. Local services bind to
-loopback; shared services bind to an explicitly selected private interface or
-sit behind a private reverse proxy. Apply tailnet ACLs/grants and tagged service
+with no public Internet ingress. The private starter always binds to
+`127.0.0.1`; put Tailscale **Serve**, never **Funnel**, in front of it for shared
+private HTTPS access. Start it with `--origin` set to your exact HTTPS machine
+origin ending in `.ts.net`. Apply tailnet ACLs/grants and tagged service
 identities so operator browsers, agents, scanners, and administrators can reach
 only their required private endpoints. Use private TLS/mTLS and rotate service
 identities.
@@ -136,7 +180,36 @@ rate limits, tenant binding, or managed secrets. Never make the checked-in
 static server or loopback reference workbench remotely reachable. See
 [Agent integration and administration](docs/AGENTS.md#network-posture-tailnet-first-and-private-only)
 and the deployment chapter in the technical manual before standing up an
-application deployment.
+application deployment. MagicDNS/certificate naming is not permission to create
+public ingress; independently verify that devices outside your tailnet cannot
+connect.
+
+## What works now and what still needs an integration
+
+| Capability | Shipped behavior |
+| --- | --- |
+| Private sign-in | Better Auth + SQLite; local operator provisioning; fixed eight-hour sessions; sign-out and local password/session recovery |
+| Application/source setup | App/environment registration, optional hosts, manifest-driven setup, tests, activation, and source lifecycle controls |
+| Canonical log push | Authenticated indexed SQLite admission with transactional receipts; bounded projections to Overview, Sources, Logs, Analytics, and Health |
+| Documents | Upload/download, immutable file versions, hashes, metadata/status/review dates, audit history, archive/restore |
+| Agents/governance | Agent/prompt/enrollment and attestation/risk record management; no agent execution or observed-job scheduler |
+| Trivy | Actual JSON report normalization/import, source-scoped admission and scan summaries; no scanner execution |
+| Other scan integrations | Eleven legacy connection templates remain data-only; their test/activation still fails closed |
+| Other SOC screens | Product UI/contracts remain available; require their own records and projectors |
+| MCP | Five narrow tools with scoped private service authentication, expiry, rotation/revocation and audit; no credential issuance or telemetry transport |
+
+The private app uses an indexed telemetry database; the disposable reference
+workbench retains its 10,000-record JSON store. Administration remains bounded
+and single-writer. Telemetry retention and replay guarantees have explicit
+limits described in the technical manual; this is not an unlimited SIEM.
+Documents are capped
+at 10 MiB per file, 512 MiB total bytes, 1,000 documents, and 10,000 versions.
+Do not hide a capacity failure by deleting evidence or resetting state.
+
+Next parity work includes more connector drivers and incremental projectors,
+durable worker retries/dead letters, web availability/TLS observations, legal
+acknowledgement receipts, observed agent jobs, richer attestation checklists,
+and risk-document import/export. Those are not implied by this starter.
 
 ## Adopt it into another stack
 
@@ -159,14 +232,14 @@ application deployment.
    `SOC_CONSOLE_ADMINISTRATION`, is not a substitute for authorization or a
    secret store; use only the closed commands supported by the installed
    administration contract.
-6. Implement the validated browser auth object described in
+6. Reuse the shipped private authentication service, or implement the validated browser auth object described in
    [the authentication boundary](docs/AUTHENTICATION.md). Authentication
    protocol, tokens, session storage, cookies, and resource authorization belong
    to the application server/BFF; OIDC deployments use Authorization Code +
    PKCE there. For one TypeScript/Node application, start with the dependency-free
    [Better Auth bridge](examples/better-auth-reference/README.md); use the
    Keycloak reference when identity is centralized across multiple products.
-   The bridge adapts an adopter-installed client; it does not install or
+   That optional embedding bridge adapts an adopter-installed client; it does not install or
    configure the Better Auth server, database/session layer, login methods, or
    authorization policy.
 7. Supply only browser-safe values described in
@@ -210,13 +283,15 @@ connector, or administration provider.
 | Investigate | Logs, Activity Learner, IOC Parser, Threat Intel, Known IPs |
 | Vuln Mgmt | Scans, Remediation |
 | Estate | Systems, Databases, Backups, Retention, Sources, Agent Management |
-| Govern | Attestations, Risk Register, Access |
+| Govern | Attestations, Risk Register, Documents, Access |
 | Shell utilities (primary, not sidebar destinations) | Onboarding, Settings |
 | Local implementation reference | Technical Docs (`/docs`) |
 
+There are 40 registered paths: the original 38 SOC paths, `/documents`, and
+`/docs`. Documents raises the primary count to 30; `/docs` remains local guidance.
 The nine linked detail/utility paths are `/analyst`, `/event`, `/ip`, `/search`,
 `/host-scan`, `/kev`, `/source`, `/attestation`, and `/risk`. They are adapter-addressable
-without being duplicated as primary navigation items. The 29-primary count
+without being duplicated as primary navigation items. The 30-primary count
 includes Onboarding and Settings; those two top-level surfaces are opened from
 shell controls rather than repeated in the six grouped sidebar sections. The
 Technical Docs utility is additional to those counts and is excluded from the
@@ -233,7 +308,7 @@ contracts/                      page, connector, source, record, and ingest sche
 examples/provider-template.js  deterministic empty provider example
 examples/better-auth-reference/ dependency-free bridge for one Better Auth app
 examples/keycloak-reference/   placeholder-only server auth review templates
-server/                         loopback-only disposable connector workbench core
+server/                         private application/auth/documents and reference integration core
 test/                           route, behavior, contract, and safety tests
 tools/                          local servers, validators, and public audit
 docs/                           adopter, auth, design, and architecture guidance
@@ -244,13 +319,15 @@ trust boundary.
 
 ## Production boundary
 
-A real deployment needs an adopter-owned BFF between the browser, identity
+A larger or multi-tenant deployment needs an adopter-owned BFF between the browser, identity
 provider, and operational services. That server must authenticate the operator,
 hold session state and any OIDC tokens, authorize each resource/action, validate
 and bound requests, reduce/redact output to the versioned presentation model,
 manage secrets, and produce durable audit records.
 
-The browser contracts validate and narrow object shape, but they are not a
+The included private application is a single-tenant BFF with real authentication;
+it does not implement resource-specific operator roles. The browser contracts
+validate and narrow object shape, but they are not a
 semantic secret scanner and cannot decide whether an operator may see a valid
 page/control model. The loopback reference store is not a transactional
 multi-user database or managed secret store. The interface is not

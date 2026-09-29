@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>bulwark&gt;soc · Private sign-in</title>
+  <link rel="icon" href="assets/favicon.ico?v=20260830-2" sizes="any">
+  <link rel="stylesheet" href="active-ui.css?v=20260830-1">
+  <link rel="stylesheet" href="app.css?v=20260929-1">
+  <script src="private-sign-in.js" defer></script>
+</head>
+<body>
+  <main class="private-sign-in wrap">
+    <a class="brand logo" href="/" aria-label="Bulwark Black SOC"><img src="assets/mark.png" alt="Bulwark Black SOC" width="132" height="148"></a>
+    <section class="panel">
+      <div class="panel-body">
+        <p class="eyebrow">PRIVATE APPLICATION</p>
+        <h1 id="sign-in-title">Sign in to your SOC</h1>
+        <p class="muted" id="sign-in-description">Use an operator account provisioned by the owner of this installation.</p>
+        <form id="private-sign-in-form" class="private-account-form">
+          <label id="email-label" class="form-field">Email<input id="operator-email" name="email" type="email" maxlength="254" autocomplete="username" required></label>
+          <label class="form-field">Password<input id="operator-password" name="password" type="password" minlength="15" maxlength="128" autocomplete="current-password" required></label>
+          <label id="new-password-label" class="form-field" hidden>New password<input id="operator-new-password" name="new-password" type="password" minlength="15" maxlength="128" autocomplete="new-password"></label>
+          <button class="resource-action" id="sign-in-submit" type="submit">Sign in</button>
+        </form>
+        <p id="sign-in-status" class="muted" role="status" aria-live="polite"></p>
+        <p class="muted">No public registration. If you need an account or a password reset, contact your installation owner.</p>
+        <a class="resource-action" href="/">Return to SOC</a>
+      </div>
+    </section>
+    <p class="muted">Private access only · Keep this application behind your Tailnet.</p>
+  </main>
+</body>
+</html>

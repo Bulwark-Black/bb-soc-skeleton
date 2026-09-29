@@ -3,9 +3,25 @@
 This reference is the practical default for an adopter that already runs one
 TypeScript/Node application and wants that application to own authentication.
 It adapts an adopter-installed Better Auth browser client to the console's
-provider-neutral `SOC_CONSOLE_AUTH` contract. The skeleton itself does not add a
-Better Auth package, server handler, database adapter, provider configuration,
-or secret.
+provider-neutral `SOC_CONSOLE_AUTH` contract. This optional embedding example is
+separate from the repository's runnable private application, which installs
+pinned Better Auth + SQLite and supplies email/password sign-in. To use that
+application directly, follow [the private quickstart](../../docs/AUTHENTICATION.md#shipped-private-application)
+instead of integrating this bridge. No provider credentials or deployment
+secrets are committed in either path.
+
+The private runtime also includes indexed SQLite telemetry, Documents, scoped
+service-agent access, and a Trivy JSON report importer. Those are server features,
+not capabilities conferred by this browser bridge. Agents → Service Access
+issues separate expiring credentials for the five-tool MCP client; never turn a
+Better Auth browser cookie into an agent credential. Scans → Trivy accepts a
+supported report from an operator or its source-bound ingest credential, not an
+MCP credential, and does not run the scanner. Eleven legacy scanner templates
+remain non-executing. See technical manual
+[section 52](../../public/technical-reference.md#52-storage-limits-reliability-acceptance-and-remaining-parity-work),
+[section 53](../../public/technical-reference.md#53-private-service-identities-and-authenticated-mcp-setup),
+and [section 54](../../public/technical-reference.md#54-trivy-report-import-from-a-users-own-scanner)
+for the concrete private implementation and its limits.
 
 Use the Keycloak reference instead when one centrally administered identity
 service must serve several products, languages, or independently deployed
@@ -111,11 +127,13 @@ server-protected page provider are wired together.
 
 ## Replace the inspection-only host policy
 
-`npm start` serves the data-free inspection shell only. Its server accepts only
+`npm run start:static` serves the data-free inspection shell only. Its server accepts only
 asset `GET`/`HEAD` requests, does not mount a Better Auth handler, and sends
 `connect-src 'none'`. The checked-in HTML contains the same restrictive
 `connect-src` directive in a meta policy. Consequently, the default local server
-cannot execute `getSession`, sign-in, or sign-out against Better Auth.
+cannot execute `getSession`, sign-in, or sign-out against Better Auth. `npm start`
+is the separate authenticated private runtime and already installs its own
+same-origin bridge, sign-in page, response policy, and auth handler.
 
 Serve the adopted console from the application that mounts Better Auth. Replace
 both the response policy and the checked-in meta policy with one reviewed
@@ -224,5 +242,6 @@ session internals out of browser-readable configuration and logs.
 Test at least anonymous, authenticated, expired, revoked, denied, upstream
 failure, sign-out failure, and post-login return-route behavior in the adopter
 application. The bridge test in this repository verifies only the public
-contract and reduction boundary with an injected test client. It does not install
-or pin Better Auth and cannot approve a downstream Better Auth deployment.
+contract and reduction boundary with an injected test client. Separate private
+runtime tests exercise the pinned Better Auth implementation; neither test
+suite approves a differently configured downstream Better Auth deployment.

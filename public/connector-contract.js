@@ -66,18 +66,20 @@
       "none", "awaiting-first-delivery", "late", "connector-error", "authentication-required",
       "configuration-invalid", "permission-denied", "rate-limited", "disabled"
     ]);
-    const SOURCE_STATES = Object.freeze(["draft", "configured", "tested", "active", "disabled"]);
+    const SOURCE_STATES = Object.freeze(["draft", "configured", "tested", "active", "disabled", "paused", "archived", "removed"]);
     const COMMANDS = Object.freeze([
-      "app.register", "host.enroll", "source.setup", "source.test", "source.activate"
+      "app.register", "host.enroll", "source.setup", "source.test", "source.activate",
+      "source.update", "source.pause", "source.resume", "source.archive", "source.remove", "source.revoke", "source.rotate"
     ]);
     const COMMAND_STATUSES = Object.freeze(["succeeded", "failed", "rejected", "conflict"]);
     const APP_STATES = Object.freeze(["registered", "disabled"]);
     const HOST_STATES = Object.freeze(["pending", "enrolled", "disabled"]);
-    const CONNECTOR_INSTANCE_STATES = Object.freeze(["configured", "tested", "active", "disabled"]);
+    const CONNECTOR_INSTANCE_STATES = Object.freeze(["configured", "tested", "active", "disabled", "paused", "archived", "removed"]);
     const CHANGE_ACTIONS = Object.freeze([
       "app.registered", "app.disabled", "host.enrolled", "host.disabled",
       "connector-instance.configured", "connector-instance.tested", "connector-instance.activated", "connector-instance.disabled",
-      "source.configured", "source.tested", "source.activated", "source.disabled"
+      "source.configured", "source.tested", "source.activated", "source.disabled",
+      "source.updated", "source.paused", "source.resumed", "source.archived", "source.removed", "source.revoked", "source.rotated"
     ]);
     const CHANGE_STATUSES = Object.freeze(["succeeded", "failed", "rejected", "conflict"]);
     const ERROR_CODES = Object.freeze([
@@ -590,7 +592,7 @@
       assertRecord(value, label);
       assertAllowedKeys(value, [
         "schemaVersion", "documentType", "sourceId", "connectorInstanceId", "appId", "connectorType", "sourceKind",
-        "displayName", "hostId", "state", "config", "credentialReferences", "revision", "createdAt", "updatedAt", "health"
+        "displayName", "hostId", "environment", "state", "config", "credentialReferences", "revision", "createdAt", "updatedAt", "health"
       ], label);
       if (value.schemaVersion !== VERSION) throw new TypeError(`${label}.schemaVersion must be ${VERSION}.`);
       if (value.documentType !== "source-registration") throw new TypeError(`${label}.documentType must be source-registration.`);
@@ -617,6 +619,7 @@
         throw new TypeError(`${label}.updatedAt must not precede createdAt.`);
       }
       if (value.hostId !== undefined) result.hostId = resourceId(value.hostId, `${label}.hostId`);
+      if (value.environment !== undefined) result.environment = typeName(value.environment, `${label}.environment`);
       if (value.health !== undefined) {
         result.health = normalizeSourceHealthSnapshot(value.health, `${label}.health`);
         if (result.health.sourceId !== result.sourceId || result.health.connectorInstanceId !== result.connectorInstanceId) {
@@ -720,8 +723,8 @@
 
       if (result.command === "app.register") {
         assertRecord(value.input, inputLabel);
-        assertAllowedKeys(value.input, ["displayName", "hosts", "publicPages"], inputLabel);
-        const hosts = uniqueTextArray(value.input.hosts, `${inputLabel}.hosts`, 1, 64, resourceId);
+        assertAllowedKeys(value.input, ["displayName", "hosts", "publicPages", "environments"], inputLabel);
+        const hosts = uniqueTextArray(value.input.hosts === undefined ? [] : value.input.hosts, `${inputLabel}.hosts`, 0, 64, resourceId);
         assertArray(value.input.publicPages, `${inputLabel}.publicPages`, 0, 64);
         const publicPages = [];
         const seenPages = new Set();
@@ -736,6 +739,7 @@
           hosts,
           publicPages
         };
+        if (value.input.environments !== undefined) result.input.environments = uniqueTextArray(value.input.environments, `${inputLabel}.environments`, 1, 32, typeName);
       } else if (result.command === "host.enroll") {
         assertRecord(value.input, inputLabel);
         assertAllowedKeys(value.input, ["appId", "hostId"], inputLabel);
@@ -746,7 +750,7 @@
       } else if (result.command === "source.setup") {
         assertRecord(value.input, inputLabel);
         assertAllowedKeys(value.input, [
-          "appId", "hostId", "connectorType", "sourceKind", "displayName", "config", "credentialReferences"
+          "appId", "hostId", "environment", "connectorType", "sourceKind", "displayName", "config", "credentialReferences"
         ], inputLabel);
         result.input = {
           appId: resourceId(value.input.appId, `${inputLabel}.appId`),
@@ -757,6 +761,7 @@
           credentialReferences: normalizeCredentialReferences(value.input.credentialReferences, `${inputLabel}.credentialReferences`)
         };
         if (value.input.hostId !== undefined) result.input.hostId = resourceId(value.input.hostId, `${inputLabel}.hostId`);
+        if (value.input.environment !== undefined) result.input.environment = typeName(value.input.environment, `${inputLabel}.environment`);
         if (manifest && !manifest.supportedSourceKinds.includes(result.input.sourceKind)) {
           throw new TypeError(`${inputLabel}.sourceKind is not supported by the connector manifest.`);
         }
@@ -765,13 +770,27 @@
         }
       } else {
         assertRecord(value.input, inputLabel);
-        assertAllowedKeys(value.input, ["sourceId", "connectorInstanceId", "expectedRevision"], inputLabel);
+        const extraKeys = result.command === "source.test" ? ["sample"] : result.command === "source.update" ? ["displayName", "config", "credentialReferences"] : [];
+        assertAllowedKeys(value.input, ["sourceId", "connectorInstanceId", "expectedRevision", ...extraKeys], inputLabel);
         result.input = {
           sourceId: resourceId(value.input.sourceId, `${inputLabel}.sourceId`),
           connectorInstanceId: resourceId(value.input.connectorInstanceId, `${inputLabel}.connectorInstanceId`),
           expectedRevision: unsignedInteger(value.input.expectedRevision, `${inputLabel}.expectedRevision`)
         };
         if (result.input.sourceId === result.input.connectorInstanceId) throw new TypeError(`${inputLabel}.sourceId and connectorInstanceId must identify different resources.`);
+        if (result.command === "source.test" && value.input.sample !== undefined) {
+          assertRecord(value.input.sample, `${inputLabel}.sample`);
+          assertAllowedKeys(value.input.sample, ["message", "channel", "severity"], `${inputLabel}.sample`);
+          result.input.sample = { message: requiredText(value.input.sample.message, `${inputLabel}.sample.message`, 2000) };
+          if (value.input.sample.channel !== undefined) result.input.sample.channel = requiredText(value.input.sample.channel, `${inputLabel}.sample.channel`, 120);
+          if (value.input.sample.severity !== undefined) result.input.sample.severity = enumValue(value.input.sample.severity, ["critical", "high", "medium", "low", "info", "unknown"], `${inputLabel}.sample.severity`);
+        }
+        if (result.command === "source.update") {
+          if (value.input.displayName !== undefined) result.input.displayName = requiredText(value.input.displayName, `${inputLabel}.displayName`, 120);
+          if (value.input.config !== undefined) result.input.config = normalizeConfig(value.input.config, `${inputLabel}.config`);
+          if (value.input.credentialReferences !== undefined) result.input.credentialReferences = normalizeCredentialReferences(value.input.credentialReferences, `${inputLabel}.credentialReferences`);
+          if (!extraKeys.some((key) => value.input[key] !== undefined)) throw new TypeError(`${inputLabel} must include a source change.`);
+        }
       }
       if (manifest && result.command === "source.setup") {
         if (result.input.connectorType !== manifest.connectorType) throw new TypeError(`${inputLabel}.connectorType does not match the connector manifest.`);
@@ -835,11 +854,13 @@
       const states = {
         "source.setup": "configured",
         "source.test": "tested",
-        "source.activate": "active"
+        "source.activate": "active", "source.update": "configured", "source.pause": "paused",
+        "source.resume": "active", "source.archive": "archived", "source.remove": "removed",
+        "source.revoke": "paused", "source.rotate": "active"
       };
       const allowed = command === "source.setup"
         ? ["appId", "sourceId", "connectorInstanceId", "revision", "state"]
-        : command === "source.activate"
+        : ["source.activate", "source.rotate"].includes(command)
           ? ["sourceId", "connectorInstanceId", "revision", "state", "oneTimeCredential"]
           : ["sourceId", "connectorInstanceId", "revision", "state"];
       assertAllowedKeys(value, allowed, label);
@@ -851,7 +872,7 @@
         state: states[command]
       };
       if (command === "source.setup") result.appId = resourceId(value.appId, `${label}.appId`);
-      if (command === "source.activate" && value.oneTimeCredential !== undefined) {
+      if (["source.activate", "source.rotate"].includes(command) && value.oneTimeCredential !== undefined) {
         result.oneTimeCredential = normalizeOneTimeCredential(
           value.oneTimeCredential,
           `${label}.oneTimeCredential`,
@@ -913,9 +934,9 @@
     function normalizeAppRegistration(value, label) {
       assertRecord(value, label);
       assertAllowedKeys(value, [
-        "appId", "displayName", "hosts", "publicPages", "state", "revision", "createdAt", "updatedAt"
+        "appId", "displayName", "hosts", "publicPages", "environments", "state", "revision", "createdAt", "updatedAt"
       ], label);
-      const hosts = uniqueTextArray(value.hosts, `${label}.hosts`, 1, 64, resourceId);
+      const hosts = uniqueTextArray(value.hosts, `${label}.hosts`, 0, 64, resourceId);
       assertArray(value.publicPages, `${label}.publicPages`, 0, 64);
       const publicPages = [];
       const seenPages = new Set();
@@ -936,6 +957,7 @@
         updatedAt: timestamp(value.updatedAt, `${label}.updatedAt`)
       };
       if (Date.parse(result.updatedAt) < Date.parse(result.createdAt)) throw new TypeError(`${label}.updatedAt must not precede createdAt.`);
+      if (value.environments !== undefined) result.environments = uniqueTextArray(value.environments, `${label}.environments`, 1, 32, typeName);
       return result;
     }
 
@@ -1080,6 +1102,9 @@
             const host = hostMap.get(normalized.hostId);
             if (!host || host.appId !== normalized.appId) throw new TypeError(`${entryLabel}.hostId must reference a host owned by its app.`);
           }
+          if (normalized.environment !== undefined && !(appMap.get(normalized.appId).environments || ["default"]).includes(normalized.environment)) {
+            throw new TypeError(`${entryLabel}.environment must be declared by its application.`);
+          }
           if (!allowedStates.includes(normalized.state)) throw new TypeError(`${entryLabel}.state is not valid in this snapshot collection.`);
           if (sourceIds.has(normalized.sourceId)) throw new TypeError(`${label} must use unique sourceId values across setups and sources.`);
           sourceIds.add(normalized.sourceId);
@@ -1087,7 +1112,7 @@
         });
       }
       const setups = normalizeSourceList(value.setups, `${label}.setups`, ["draft", "configured", "tested"]);
-      const sources = normalizeSourceList(value.sources, `${label}.sources`, ["active", "disabled"]);
+      const sources = normalizeSourceList(value.sources, `${label}.sources`, ["active", "disabled", "paused", "archived"]);
       const changeIds = new Set();
       const changes = value.changes.map((entry, index) => {
         const normalized = normalizeChange(entry, `${label}.changes[${index}]`);

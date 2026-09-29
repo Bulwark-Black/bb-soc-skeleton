@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 "use strict";
 
-// Dependency-free, narrow MCP facade for the SOC control-plane contracts.
+// Narrow MCP facade for the SOC control-plane contracts.
 // It intentionally exposes no shell, SQL, filesystem path, arbitrary URL,
 // telemetry, or credential tools. All mutations go through the same versioned
 // HTTP command endpoints used by the reference/application control plane.
@@ -35,8 +35,10 @@ const SERVER_INSTRUCTIONS = [
 const SERVER_META_KEY = "io.modelcontextprotocol/serverInfo";
 const PROTOCOL_META_KEY = "io.modelcontextprotocol/protocolVersion";
 const PRIVATE_DNS_SUFFIX = ["ts", "net"].join(".");
-const SECRET_ISSUING_CONNECTOR_COMMANDS = new Set(["host.enroll", "source.activate"]);
+const SECRET_ISSUING_CONNECTOR_COMMANDS = new Set(["host.enroll", "source.activate", "source.rotate"]);
 const SECRET_ISSUING_ADMINISTRATION_COMMANDS = new Set(["enrollment.issue"]);
+const SERVICE_PRIVILEGE_COMMANDS = new Set(["agent.create", "agent.update", "agent.resume", "agent.restore", "prompt.activate"]);
+const SERVICE_TOKEN_PATTERN = /^bbsvc_service-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}_[A-Za-z0-9_-]{43}$/;
 const PROTECTED_KEY_SUFFIXES = Object.freeze([
   "secret", "password", "passwd", "token", "apikey", "privatekey",
   "credential", "credentials", "authorization", "cookie", "sessionid",
@@ -136,7 +138,7 @@ const TOOL_DEFINITIONS = Object.freeze([
       }
     }, true),
   tool("connector_command", "Run connector control command",
-    "Submit one exact version-1 connector command to the canonical control service. Human approval is required for production-impacting operations. Credential-issuing host.enroll and source.activate commands are blocked in MCP.",
+    "Submit one exact version-1 connector command to the canonical control service. Human approval is required for production-impacting operations. Credential-issuing host.enroll, source.activate, and source.rotate commands are blocked in MCP.",
     {
       type: "object", additionalProperties: false, required: ["request"],
       properties: { request: CONNECTOR_REQUEST_SCHEMA }
@@ -276,14 +278,40 @@ function validateBaseUrl(value = DEFAULT_BASE_URL) {
 function parseArguments(argv, environment = process.env) {
   if (!Array.isArray(argv)) throw new TypeError("MCP arguments must be an array.");
   let baseUrl = environment.SOC_AGENT_MCP_BASE_URL || DEFAULT_BASE_URL;
+  let tokenFile = environment.SOC_AGENT_MCP_TOKEN_FILE;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
-    if (argument !== "--base-url" || index + 1 >= argv.length) {
-      throw new TypeError("Unknown or incomplete MCP argument: " + String(argument));
+    if (!["--base-url", "--token-file"].includes(argument) || index + 1 >= argv.length) {
+      throw new TypeError("Unknown or incomplete MCP argument. Use --base-url and optional --token-file.");
     }
-    baseUrl = argv[++index];
+    if (argument === "--base-url") baseUrl = argv[++index];
+    else tokenFile = argv[++index];
   }
-  return Object.freeze({ baseUrl: validateBaseUrl(baseUrl) });
+  return Object.freeze({ baseUrl: validateBaseUrl(baseUrl), ...(tokenFile === undefined ? {} : { tokenFile }) });
+}
+
+function readServiceTokenFile(filename) {
+  // Reject links before opening and verify the opened inode, not only its name.
+  // The path may be in environment/argv; the credential itself never should be.
+  try {
+    if (typeof filename !== "string" || !path.isAbsolute(filename) || filename !== path.resolve(filename)) throw new Error();
+    const repository = fs.realpathSync(ROOT);
+    if (filename === repository || filename.startsWith(repository + path.sep)) throw new Error();
+    let cursor = path.parse(filename).root;
+    for (const part of filename.slice(cursor.length).split(path.sep)) {
+      cursor = path.join(cursor, part);
+      if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error();
+    }
+    const fd = fs.openSync(filename, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try {
+      const stat = fs.fstatSync(fd);
+      if (!stat.isFile() || stat.nlink !== 1 || (stat.mode & 0o077) || stat.size > 256
+          || (typeof process.getuid === "function" && stat.uid !== process.getuid())) throw new Error();
+      const value = fs.readFileSync(fd, "utf8").replace(/\r?\n$/, "");
+      if (!SERVICE_TOKEN_PATTERN.test(value)) throw new Error();
+      return value;
+    } finally { fs.closeSync(fd); }
+  } catch { throw new TypeError("Service token file must be an owner-only regular file outside the repository at a canonical absolute path, containing one issued service credential."); }
 }
 
 function safeProblemCode(value) {
@@ -366,10 +394,17 @@ class ControlPlaneClient {
   #baseUrl;
   #fetch;
   #timeoutMs;
+  #tokenFile;
 
   constructor(options = {}) {
-    assertObject(options, "MCP control-plane client options", ["baseUrl", "fetchImpl", "timeoutMs"]);
+    assertObject(options, "MCP control-plane client options", ["baseUrl", "fetchImpl", "timeoutMs", "tokenFile"]);
     this.#baseUrl = validateBaseUrl(options.baseUrl || DEFAULT_BASE_URL);
+    if (options.tokenFile !== undefined) {
+      readServiceTokenFile(options.tokenFile);
+      this.#tokenFile = options.tokenFile;
+    } else if (!isLoopbackHost(new URL(this.#baseUrl).hostname)) {
+      throw new TypeError("Remote private control planes require an explicit service token file. The unauthenticated workbench is loopback-only.");
+    }
     this.#fetch = options.fetchImpl || globalThis.fetch;
     if (typeof this.#fetch !== "function") throw new TypeError("A Fetch-compatible implementation is required.");
     this.#timeoutMs = options.timeoutMs === undefined ? DEFAULT_TIMEOUT_MS : options.timeoutMs;
@@ -381,9 +416,11 @@ class ControlPlaneClient {
   get baseUrl() { return this.#baseUrl; }
 
   async #request(method, endpoint, query, body) {
+    if (this.#tokenFile) endpoint = endpoint.replace("/api/v1/", "/api/v1/service/");
     const target = new URL(endpoint, this.#baseUrl + "/");
     Object.entries(query || {}).forEach(([key, value]) => target.searchParams.set(key, String(value)));
     const headers = { Accept: "application/json" };
+    if (this.#tokenFile) headers.Authorization = "Bearer " + readServiceTokenFile(this.#tokenFile);
     const options = { method, headers, redirect: "error" };
     if (body !== undefined) {
       const encoded = JSON.stringify(body);
@@ -470,6 +507,9 @@ class ControlPlaneClient {
     const request = AdministrationRuntime.validateCommandRequest(requestValue);
     if (SECRET_ISSUING_ADMINISTRATION_COMMANDS.has(request.command)) {
       throw new TypeError("This credential-issuing administration command is intentionally unavailable through MCP; use the protected operator flow.");
+    }
+    if (this.#tokenFile && SERVICE_PRIVILEGE_COMMANDS.has(request.command)) {
+      throw new TypeError("This privilege-expanding command is unavailable to service agents; use the authenticated human operator flow.");
     }
     const document = await this.#request("POST", "/api/v1/administration/commands", null, request);
     let result;
@@ -560,9 +600,10 @@ function validateListParams(params) {
 }
 
 function createMcpServer(options = {}) {
-  assertObject(options, "MCP server options", ["client", "baseUrl", "fetchImpl", "timeoutMs"]);
+  assertObject(options, "MCP server options", ["client", "baseUrl", "fetchImpl", "timeoutMs", "tokenFile"]);
   const client = options.client || new ControlPlaneClient({
     baseUrl: options.baseUrl || DEFAULT_BASE_URL,
+    ...(options.tokenFile === undefined ? {} : { tokenFile: options.tokenFile }),
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
     ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs })
   });
@@ -766,7 +807,7 @@ function runStdio(server, input = process.stdin, output = process.stdout) {
 function main(argv = process.argv.slice(2), environment = process.env) {
   try {
     const options = parseArguments(argv, environment);
-    const server = createMcpServer({ baseUrl: options.baseUrl });
+    const server = createMcpServer(options);
     return runStdio(server);
   } catch (error) {
     process.stderr.write("Unable to start SOC MCP server: " + error.message + "\n");
@@ -791,6 +832,7 @@ module.exports = {
   main,
   parseArguments,
   readResource,
+  readServiceTokenFile,
   runStdio,
   validateBaseUrl
 };

@@ -5,6 +5,7 @@
 // loopback identity with application authentication and per-action RBAC.
 
 const crypto = require("node:crypto");
+const { currentOperator } = require("./operator-context");
 const AdministrationContract = require("../public/administration-contract");
 const {
   ReferenceAdministrationStore,
@@ -365,7 +366,7 @@ class ReferenceAdministrationRuntime {
       const target = resourceFor(request);
       this.store.transact({
         command: request.command,
-        actor: "loopback:operator",
+        actor: currentOperator(),
         resourceType: target.type,
         resourceId: target.id,
         requestId: request.requestId,
@@ -401,7 +402,7 @@ class ReferenceAdministrationRuntime {
     let result;
     const transaction = this.store.transact({
       command: request.command,
-      actor: "loopback:operator",
+      actor: currentOperator(),
       resourceType: metadata.resourceType,
       resourceId: metadata.resourceId,
       requestId: request.requestId,

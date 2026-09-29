@@ -2,20 +2,26 @@
 
 ## Purpose
 
-The repository is a dependency-free, data-free browser presentation boundary
-for the Bulwark Black SOC interface. It preserves product design and the full
-38-route SOC topology plus a shell-owned documentation utility while defining narrow browser contracts for page data,
-identity projection, source-management commands, and a domain-separated
-administration boundary for managed agents and governance records. Identity
-protocol, authorization, production persistence, and operational integrations
-remain in an adopter-owned stack.
+The repository provides a data-free Bulwark Black SOC interface and a runnable
+private starter. It preserves product design and the 38-route SOC topology,
+plus local technical documentation and a private document library. Narrow
+browser contracts separate page data, identity projection, source management,
+and agent/governance administration.
 
-The default local Node server serves static files and security headers only. A
-separate opt-in reference workbench exercises connector registration, host
-enrollment, one canonical push source, agent/governance administration, local
-persistence, and projection into existing page envelopes. It has no external database, scheduler, queue,
-webhook, email/scanner/infrastructure client, vendor connector, or production
-identity/authorization layer.
+`npm start` runs the private Better Auth application with SQLite identity and
+versioned document stores, application/environment registration, optional
+collectors, canonical log push, Trivy report import and agent/governance lifecycle
+management. Private telemetry and scoped service credentials use dedicated
+SQLite stores; administration retains the bounded JSON reference core. All
+operators have full access, while service identities have exact installation-
+wide scopes. Granular resource authorization and multitenancy remain adopter
+work. There is no scheduler, durable queue, vendor polling, agent runner or
+remote MCP listener. The stdio MCP client uses scoped private service access.
+
+`npm run start:static` retains the dependency-free static preview. A separate
+opt-in development workbench (`start:connectors`) exercises source and
+administration contracts without real operator authentication; never expose it
+remotely. Only the private starter requires the installed runtime dependencies.
 
 ## System view
 
@@ -28,7 +34,7 @@ identity/authorization layer.
 │                              │                                   │
 │ page + browser-auth + connector + administration contracts       │
 │                              │                                   │
-│ 38 SOC routes + local docs -> controller -> safe renderers       │
+│ 38 SOC routes + Docs + Documents -> controller -> safe renderers│
 │                              │                                   │
 │ page/control providers absent OR explicit/injected providers     │
 └──────────────────────────────┬───────────────────────────────────┘
@@ -36,23 +42,27 @@ identity/authorization layer.
                   ADOPTER APPLICATION TRUST BOUNDARY
                                │
 ┌──────────────────────────────▼───────────────────────────────────┐
-│ BFF: OIDC/session + authorization + validation + audit/redaction │
+│ private starter: Better Auth sessions + validation + audit       │
 │                              │                                   │
 │ connector registry + administration + identity/workflow services │
 │                              │                                   │
 │ telemetry admission -> canonical records -> page projectors      │
+│ SQLite identity/documents/telemetry/services + JSON admin state   │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-The production BFF must be designed, operated, and reviewed by the adopter.
-Browser contracts and the local reference workbench narrow and demonstrate
-communication; they do not collapse the production trust boundary.
+The adopter operates and reviews this application boundary. The starter now
+implements real sessions and document persistence but does not remove capacity,
+authorization, deployment, backup, or integration responsibilities. Browser
+contracts and the development workbench do not confer server privileges.
 
 The recommended deployment places this entire application boundary on a
 Tailscale tailnet or equivalent private overlay. Expose no UI/BFF,
 administration, connector, MCP, enrollment, ingest, or callback endpoint through
 public ingress or public DNS. Use loopback for development and explicit private
-listeners/private reverse proxies for shared service. Tailnet ACLs, tagged
+reverse proxies for shared service; the starter itself remains on loopback and
+uses its configured exact private HTTPS origin behind Tailnet Serve, never
+Funnel. Tailnet ACLs, tagged
 service identities, device approval, private TLS/mTLS, and key rotation limit
 reachability. Application authentication, action/resource authorization, CSRF,
 validation, rate limits, audit, and secret management remain mandatory because
@@ -75,7 +85,8 @@ public/index.html
   +-- public/application-bridge.js
   |                              inert static integration hook
   +-- public/technical-docs.js   generated frozen technical manual
-  +-- public/ui-catalog.js       define 38 SOC routes, /docs, shell metadata
+  +-- public/ui-catalog.js       define 38 SOC routes, /docs, /documents
+  +-- public/document-library.js private document UI/API client
   +-- public/app.js              empty states, renderers, factory/controller
   +-- public/bootstrap.js        resolve integrations and mount once
   |
@@ -91,8 +102,10 @@ public/index.html
 `administration-contract.js` exposes `window.SocConsoleAdministrationRuntime`,
 `technical-docs.js` exposes the frozen `window.SocConsoleTechnicalDocs`, and
 `app.js` exposes the frozen `window.SocConsole` namespace. The checked-in
-`application-bridge.js` installs nothing; a reviewed application host or the
-loopback workbench may serve an implementation at that hook before bootstrap.
+`application-bridge.js` installs nothing in static mode. The private application
+serves authenticated page/control/auth providers at that hook before bootstrap;
+the separate development workbench serves its explicitly non-production bridge.
+`document-library.js` remains inactive without the private application marker.
 
 The application factory is composed with validated dependencies:
 
@@ -153,6 +166,7 @@ provider/controller pair instead of remounting it.
 URL hash -> 38 SOC routes -> route heading + data-free structural panels
          -> adapter-absent state (no envelope, provider read, or refresh timer)
          -> /docs -> checked-in manual (no page/connector/admin provider read)
+         -> /documents -> explicit private-service-required state in preview
 ```
 
 No route renderer owns records, counts, identities, timestamps, events,
@@ -195,11 +209,13 @@ provider:
    -> { schemaVersion, reason, knownRevision? }
    -> connectorProvider.getSnapshot
    -> validate connector-control snapshot
-   -> render installed connector types, apps, hosts, setups, sources, changes
+   -> render installed connector types, apps/environments, optional hosts,
+      setups, sources, changes
 
 operator action
    -> typed app.register | host.enroll | source.setup | source.test |
-      source.activate request
+      source.activate | source.update | source.pause | source.resume |
+      source.revoke | source.rotate | source.archive | source.remove request
    -> connectorProvider.execute
    -> validate correlated result
    -> reread the control snapshot and affected page envelope
@@ -212,12 +228,47 @@ slots, canonical output families, page targets, and health policy. The UI does
 not accept arbitrary kinds or let an operator declare whether output is
 searchable.
 
+Applications do not require hosts. Canonical push selects a registered app
+environment and can be configured/tested/activated with no collector. A bounded
+real sample validates shape only and is not ingested or evidence of delivery.
+Selecting a collector adds enrollment/proof requirements. Scanner setup
+templates require hosts and fail closed because no drivers are installed.
+Pause refuses ingest; update/revoke/archive/remove/rotation invalidate the
+appropriate old credentials. Removal retains a tombstone and historical data.
+
 Telemetry does not travel through the command provider. Push, webhook, pull,
 OTLP, syslog, and agent transports terminate in server-side admission logic,
 which authenticates a stable source, validates a bounded payload, deduplicates
 it, commits a receipt and canonical records, and drives idempotent page
-projectors. The checked-in reference workbench implements only the bounded
-canonical `log.event` push slice. See [CONNECTORS.md](CONNECTORS.md).
+projectors. The private app supports canonical `log.event` push and bounded
+Trivy report normalization; the disposable workbench retains its reference
+behavior. Webhook/pull/OTLP/syslog are extension guidance, not shipped receivers.
+The private machine ingest endpoint uses scoped bearer proof
+without a browser cookie/Origin; browser control endpoints require the operator
+session and matching Origin. See [CONNECTORS.md](CONNECTORS.md).
+
+## Document persistence flow
+
+The local `/documents` page calls the private authenticated document API, never
+the SOC page adapter or connector command provider. Uploads, metadata changes,
+new immutable versions, archive/restore, and audit history commit in a dedicated
+SQLite store. Each version retains its bytes, filename, MIME metadata, length,
+and SHA-256 digest; downloads verify the digest and force attachment delivery.
+Optional app/record references are metadata associations, not automatic changes
+to risk or attestation state. No malware scanning or document-content execution
+is provided. Current limits are 10 MiB per file, 512 MiB total version bytes,
+1,000 documents, and 10,000 versions. There is no hard-delete UI or automatic
+retention worker. Backups must include document bytes and identity/state stores.
+
+Private telemetry uses indexed SQLite records and replay receipts, with control
+metadata, source health and audit committed in the same transaction. Hot-path
+reads do not clone all retained telemetry. Retention, capacity, replay windows
+and legacy migration are explicit contracts; see the technical manual.
+Administration and the disposable connector workbench still use single-writer
+bounded JSON state and crash-detecting journals. The workbench's connector
+limits remain 8 MiB state, 50 MiB audit and 10,000 records/receipts. Do not run
+replicas against the same state directory. Successful small-workload tests do
+not prove unrestricted ingestion scale or power-loss resilience.
 
 ## Administration flow
 
@@ -259,9 +310,13 @@ resource/action authorization, idempotency, optimistic concurrency,
 transactions, retention, redaction, and durable audit. The static browser
 contract does not grant any of them.
 
-The shipped narrow reference MCP facade calls the same loopback API boundary
-and exposes public documentation/contracts plus five scoped connector/admin
-operations. A production replacement uses the same canonical service/RBAC
+The shipped narrow stdio MCP facade exposes public documentation/contracts plus
+five connector/admin operations. With an owner-only token file it calls the
+private service API: digest-backed credentials, expiry/revocation and exact
+command scopes are checked server-side. Without a token it targets the disposable
+workbench. Service scopes are installation-wide, not resource-specific RBAC.
+Browser cookies must not be exported to the client.
+A production replacement uses the same canonical service/RBAC
 decisions. It must not become another store, authorization engine, telemetry
 transport, plaintext-secret channel, arbitrary URL client, or execution
 tunnel. See [AGENTS.md](AGENTS.md).
@@ -282,7 +337,14 @@ fields. The validator rejects raw claims, subject/session IDs, cookies,
 credentials, and access/refresh/ID tokens. Login/logout receive only an internal
 hash return route.
 
-The browser contract does not implement OIDC. Authorization Code + PKCE, token
+The browser contract does not implement OIDC. The private starter implements
+Better Auth sessions and disables public account registration; account creation
+is an operator CLI action. SQLite session storage, mutation-origin checks, and
+the full-access operator gate live on the server, not in browser capabilities.
+The private-only Access → Who projection reports that real session and operator
+inventory, bounded to 200 displayed names plus the total. It does not manufacture
+roles or populate the other Access tabs and is separate from telemetry projectors.
+For an OIDC replacement, Authorization Code + PKCE, token
 validation, confidential client credentials, server session/cookies, CSRF,
 logout-token validation, and resource authorization belong to the BFF. See
 [AUTHENTICATION.md](AUTHENTICATION.md).
@@ -292,16 +354,19 @@ logout-token validation, and resource authorization belong to the BFF. See
 The UI catalog is the source for route lookup, primary navigation, compact
 selection, detail-parent relationships, titles, focus behavior, and tests.
 
-- **Twenty-seven primary paths** populate the six grouped navigation areas.
+- **Twenty-seven SOC primary paths** populate the six grouped navigation areas;
+  the local `/documents` library adds a twenty-eighth grouped destination.
 - **Two additional primary paths**, `/onboard` and `/settings`, are reached
   through shell controls instead of sidebar destinations. These complete the
-  29-primary-route set.
+  29-SOC-primary-route set (30 primary destinations including Documents).
 - **Nine detail/utility paths**—`/analyst`, `/event`, `/ip`, `/search`,
   `/host-scan`, `/kev`, `/source`, `/attestation`, `/risk`—remain directly addressable and
   adapter-readable without being duplicated as primary navigation.
 - **One shell-owned local utility**, `/docs`, renders the checked-in technical
   manual and is deliberately excluded from the page, connector, and
   administration providers.
+- **One application-owned local page**, `/documents`, uses the private document
+  API instead of SOC page envelopes. The catalog therefore registers 40 paths.
 - Unknown paths render not found; they are not normalized to Overview.
 - Query values remain untrusted and are validated/authorized by the host.
 
@@ -346,15 +411,17 @@ mount.
 Endpoints, credentials, roles, policies, private names, page data, and topology
 are not browser config. See [CONFIGURATION.md](CONFIGURATION.md).
 
-## Security properties of the public baseline
+## Properties of the static public baseline
 
-- Static resources have no runtime dependency chain.
+- Static preview resources have no external runtime dependency chain; the
+  private server uses pinned installed dependencies.
 - The default document policy denies browser connections, objects, base changes,
   form submission, and child resources outside the allowlist.
-- The local server sends framing and related response-header policies.
+- The static preview server sends framing and related response-header policies.
 - The static bridge installs no browser network client or command provider;
-  public JavaScript performs no persistence, upload, telemetry collection, or
-  environment discovery on its own.
+  preview JavaScript performs no persistence, upload, telemetry collection, or
+  environment discovery on its own. The private server deliberately installs
+  authenticated providers and enables the separate document upload client.
 - All 38 SOC routes are empty without an injected provider; `/docs` remains
   readable from trusted checked-in content.
 - Page/auth objects are strictly allowlisted, normalized, and frozen/bound.
@@ -364,9 +431,9 @@ are not browser config. See [CONFIGURATION.md](CONFIGURATION.md).
   provider is explicitly installed.
 - The public audit allowlists committed files and exact product-asset hashes.
 
-These properties make the boundary inspectable. They do not make it a
-monitoring system, identity provider, relying-party server, or production
-security control.
+These properties describe the static preview, not the live private server.
+Neither the empty catalog nor the limited starter is evidence that a scanner,
+detector, approval process, or production security control is operational.
 
 ## Repository map
 
@@ -378,13 +445,17 @@ examples/provider-template.js  deterministic empty provider
 examples/keycloak-reference/   placeholder-only OIDC/BFF review templates
 docs/                           adoption, auth, contract, feature, design guidance
 test/                           route, behavior, contract, and boundary tests
-tools/serve.js                  loopback-only static development server
+tools/serve.js                  loopback-only static preview server
+tools/private-account.js        private operator provisioning/recovery CLI
 tools/validate-provider.js      page-envelope document validator
 tools/validate-connector.js     connector/control document validator
 tools/validate-ingest.js        canonical record/batch validator
 tools/agent-mcp.js              narrow stdio docs/control reference client
 tools/public-audit.js           strict checked-in public-boundary audit
-server/                         loopback reference connector/store/projectors
+server/private-application.js    default private application / authenticated APIs
+server/private-auth.js           Better Auth and SQLite identity/session store
+server/document-store.js         SQLite metadata, immutable versions, audit
+server/reference-*.js            bounded connector/admin core and development host
 ```
 
 ## Extension points
@@ -397,7 +468,8 @@ and return explicit absence/denial/failure states.
 
 ### Supply authentication integration
 
-Implement `SOC_CONSOLE_AUTH` as a thin browser bridge to the adopter BFF. Return
+Use the shipped private authentication bridge, or implement `SOC_CONSOLE_AUTH`
+as a thin browser bridge to a replacement BFF. Return
 only the closed session projection and use internal-hash login/logout return
 routes. Do not put OIDC/token/session implementation in the static shell.
 

@@ -39,6 +39,32 @@ const requiredTextFiles = new Set([
   "examples/keycloak-reference/relying-party-boundary.template.json",
   "examples/provider-template.js",
   "package.json",
+  "package-lock.json",
+  "public/sign-in.html",
+  "public/private-sign-in.js",
+  "public/document-library.js",
+  "public/service-access.js",
+  "public/scanner-import.js",
+  "server/service-access.js",
+  "server/scanner-ingest.js",
+  "server/scanner-pages.js",
+  "test/scanner-ingest.test.js",
+  "test/private-scanner-import.test.js",
+  "test/service-access.test.js",
+  "tools/import-trivy.js",
+  "server/sqlite-telemetry-store.js",
+  "test/sqlite-telemetry-store.test.js",
+  "server/private-application.js",
+  "server/private-auth.js",
+  "server/document-store.js",
+  "server/operator-context.js",
+  "tools/private-account.js",
+  "test/private-auth.test.js",
+  "test/private-application.test.js",
+  "test/private-source-workflow.test.js",
+  "test/private-recovery.test.js",
+  "tools/benchmark-private.js",
+  "test/document-store.test.js",
   "public/adapter-contract.js",
   "public/administration-contract.js",
   "public/active-ui.css",
@@ -123,7 +149,6 @@ const operationalFragments = [
   ["/", "var", "/", "lib", "/"].join(""),
   ["/", "Users", "/"].join(""),
   ["root", "@"].join(""),
-  [".ts", ".net"].join(""),
   ["system", "ctl"].join(""),
   ["journal", "ctl"].join("")
 ];
@@ -135,7 +160,7 @@ const secretPatterns = [
   ["secret.aws-access-key", /AKIA[0-9A-Z]{16}/],
   ["secret.jwt", /eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{10,}/],
   ["secret.bearer", /bearer\s+[A-Za-z0-9._~+/=-]{20,}/i],
-  ["secret.assignment", /(?:api[_-]?key|client[_-]?secret|password|token)\s*[:=]\s*["'][^"']{12,}["']/i]
+  ["secret.assignment", /(?:api[_-]?key|client[_-]?secret|password|token)\s*[:=]\s*["'][^"'\r\n]{12,}["']/i]
 ];
 
 const browserCapabilities = [
@@ -162,6 +187,10 @@ const unsafeHtmlPattern = [
 ];
 const selfReferential = new Set(["tools/public-audit.js", "test/public-boundary.test.js"]);
 const browserDocumentationFiles = new Set(["public/technical-docs.js"]);
+// These opt-in private application modules may issue same-origin HTTP requests.
+// The empty static shell still has connect-src 'none'; all other browser
+// restrictions (storage, sockets, unsafe HTML, and tokens) remain in force.
+const privateApplicationClients = new Set(["public/private-sign-in.js", "public/document-library.js", "public/service-access.js", "public/scanner-import.js"]);
 
 function relative(file) {
   return path.relative(root, file).split(path.sep).join("/");
@@ -169,7 +198,7 @@ function relative(file) {
 
 function listFiles(directory, results = []) {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-    if (entry.name === ".git") continue;
+    if (entry.name === ".git" || (directory === root && entry.name === "node_modules")) continue;
     const full = path.join(directory, entry.name);
     if (entry.isSymbolicLink()) results.push({ file: full, kind: "symlink" });
     else if (entry.isDirectory()) listFiles(full, results);
@@ -195,12 +224,13 @@ function isAllowedAddress(value) {
 
 function isAllowedUrl(value) {
   const normalized = value.replace(/[.,;:]$/, "");
+  if (normalized === "http://" || normalized === "https://") return true; // Scheme literal, not an endpoint.
   if (normalized === "http://www.w3.org/2000/svg") return true;
   if (normalized === "https://json-schema.org/draft/2020-12/schema") return true;
   try {
     const candidate = new URL(normalized);
     if (candidate.protocol === "http:"
-        && ["127.0.0.1", "localhost"].includes(candidate.hostname)
+        && ["127.0.0.1", "localhost", "[::1]"].includes(candidate.hostname)
         && (!candidate.port || (Number(candidate.port) >= 1 && Number(candidate.port) <= 65535))) {
       return true;
     }
@@ -282,6 +312,26 @@ function audit() {
     }
     const lower = text.toLowerCase();
 
+    // A lockfile contains public registry URLs and SHA-512 package integrity
+    // values, not application secrets. Validate those fields instead of treating
+    // npm metadata as deployment endpoints or high-entropy credentials.
+    if (rel === "package-lock.json") {
+      try {
+        const lock = JSON.parse(text);
+        if (lock.lockfileVersion !== 3 || !lock.packages) throw new Error("lock format");
+        const declared = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).dependencies;
+        if (JSON.stringify(lock.packages[""].dependencies) !== JSON.stringify(declared)) throw new Error("dependencies differ");
+        for (const [name, value] of Object.entries(lock.packages)) {
+          if (!name) continue;
+          if (!/^(?:node_modules\/(?:@[a-z0-9_-]+\/)?[a-z0-9_.-]+)(?:\/node_modules\/(?:@[a-z0-9_-]+\/)?[a-z0-9_.-]+)*$/.test(name)
+              || !/^https:\/\/registry\.npmjs\.org\//.test(value.resolved || "")
+              || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(value.integrity || "")
+              || value.link === true) throw new Error("unapproved dependency");
+        }
+      } catch { findings.push({ rule: "dependency.invalid-lock", file: rel, line: 1 }); }
+      continue;
+    }
+
     for (const marker of privateMarkers) {
       const index = lower.indexOf(marker);
       if (index >= 0) report(findings, "identity.private-marker", entry.file, text, index);
@@ -290,6 +340,8 @@ function audit() {
       const index = text.indexOf(fragment);
       if (index >= 0) report(findings, "operations.private-fragment", entry.file, text, index);
     }
+    const privateTailnetHost = /\b[a-z0-9][a-z0-9.-]+\.ts\.net\b/i.exec(text);
+    if (privateTailnetHost) report(findings, "operations.private-tailnet-host", entry.file, text, privateTailnetHost.index);
 
     if (!selfReferential.has(rel)) {
       for (const [rule, pattern] of secretPatterns) {
@@ -312,10 +364,11 @@ function audit() {
       && (rel.startsWith("public/") || rel.startsWith("examples/"));
     if (isBrowserRuntime) {
       for (const [rule, pattern] of browserCapabilities) {
+        if (rule === "capability.fetch" && privateApplicationClients.has(rel)) continue;
         const match = pattern.exec(text);
         if (match) report(findings, rule, entry.file, text, match.index);
       }
-      if (!browserDocumentationFiles.has(rel)) {
+      if (!browserDocumentationFiles.has(rel) && !privateApplicationClients.has(rel)) {
         for (const forbidden of mutationMethods) {
           const match = forbidden.exec(text);
           if (match) report(findings, "capability.mutation-method", entry.file, text, match.index);

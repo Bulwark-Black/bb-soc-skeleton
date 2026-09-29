@@ -118,6 +118,7 @@
       ["/agents", "Agent Management"]
     ]],
     ["Govern", [
+      ["/documents", "Documents"],
       ["/attestations", "Attestations"],
       ["/register", "Risk Register"],
       ["/access", "Access"]
@@ -665,24 +666,26 @@
       path: "/sources", group: "Estate", label: "Sources",
       tabsets: [{ param: "stab", default: "expected", items: [
         { id: "expected", label: "Expected sources", panels: [
-          { ...table("Expected sources", ["Source", "Host", "Last collection", "Cadence", "In Logs", "Collection", "Activity"]),
+          { ...table("Expected sources", ["Source", "Application / environment", "Last collection", "Cadence", "In Logs", "Collection", "Activity"]),
             rowDisclosures: ["What it does", "Why it matters", "If it goes quiet"] }
         ] },
         { id: "add", label: "Add a source", panels: [
-          workflow("1 · Connect the host", [
+          info("Start with your application", "application-source-start"),
+          workflow("Optional · Connect a collector for host-based scanners", [
             field("App", "select", { id: "appId", required: true, optionsFrom: "apps" }),
             field("Host", "select", { id: "hostId", required: true, optionsFrom: "hosts" })
           ], [{ id: "host.enroll", label: "Mint token" }], ["Tokened host", "Connection", "Break-glass"], { id: "connect-host" }),
-          workflow("2 · Declare what the host owes", [
+          workflow("1 · Add an application source", [
             field("App", "select", { id: "appId", required: true, optionsFrom: "apps" }),
-            field("Host", "select", { id: "hostId", optionsFrom: "hosts" }),
+            field("Environment", "select", { id: "environment", required: true, optionsFrom: "environments" }),
+            field("Collector host (optional for application push)", "select", { id: "hostId", optionsFrom: "hosts" }),
             field("Connector type", "select", { id: "connectorType", required: true, optionsFrom: "connectorTypes" }),
             field("Source kind", "select", { id: "sourceKind", required: true, optionsFrom: "sourceKinds" }),
             field("Display label", "text", { id: "displayName", required: true, maxLength: 120 }),
             field("Cadence (hours)", "number", { id: "cadenceHours", required: true, min: 0.1, max: 720, step: 0.05 })
           ], [{ id: "source.setup", label: "Begin source setup" }], ["Connector", "Mode", "Produces", "Populates"], { id: "declare-source", tableBefore: true }),
-          table("Pending source setups", ["Source", "Connector", "Test", "State", "Actions"], "Setup → test → activate", "pending-source-setups"),
-          table("Configured sources", ["Source", "Host", "Connector", "Produces", "Coverage", "State"], "Stable source identities", "configured-sources"),
+          table("2 · Validate a sample, then activate", ["Source", "Connector", "Test", "State", "Actions"], "A validation sample is not telemetry. Live delivery proves collection.", "pending-source-setups"),
+          table("Configured sources", ["Source", "Application / environment", "Connector", "Produces", "Coverage", "State", "Manage"], "Stable source identities", "configured-sources"),
           form("Scale-out shortcut · copy a host's source set", [field("Source host", "select"), field("New host")], ["Copy source set"])
         ] },
         { id: "changes", label: "Registry changes", panels: [table("Source registry changes", ["When", "Change", "Target", "Detail", "By"])] }
@@ -706,8 +709,14 @@
         { id: "add", label: "Add Agent", panels: [] },
         { id: "prompts", label: "Prompts", panels: [] },
         { id: "enrollment", label: "Enrollment", panels: [] },
+        { id: "access", label: "Service Access", panels: [] },
         { id: "audit", label: "History", panels: [] }
       ] }]
+    },
+    {
+      path: "/documents", group: "Govern", label: "Documents", localOnly: true,
+      variant: "document-library", panels: [],
+      description: "Upload, version, and track documents linked to your application and governance records."
     },
     {
       path: "/attestations", group: "Govern", label: "Attestations",
@@ -781,11 +790,12 @@
       panels: [
         form("1 · Register the app", [
           field("App name", "text", { id: "appName", required: true, maxLength: 40 }),
-          field("Hosts, comma-separated", "text", { id: "hosts", required: true, maxLength: 200 }),
+          field("Environments, comma-separated (default if blank)", "text", { id: "environments", maxLength: 300 }),
+          field("Collector hosts, comma-separated (optional)", "text", { id: "hosts", maxLength: 200 }),
           field("Public pages (optional, comma-separated URLs)", "text", { id: "publicPages", maxLength: 300 })
         ], [{ id: "app.register", label: "Register app" }], "register-app"),
-        table("Registered apps", ["App", "Host", "Enrollment", "Connection", ""], "Application registry", "registered-apps"),
-        info("2 · Connect each host", "connect-each-host")
+        table("Registered apps", ["App", "Environment / collector", "Enrollment", "Connection", ""], "Application registry", "registered-apps"),
+        info("2 · Add a source to the application", "connect-each-host")
       ]
     },
     {

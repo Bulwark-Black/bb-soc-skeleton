@@ -548,6 +548,10 @@ test("every public runtime script and provider example has no capability or unsa
     "public/auth-contract.js",
     "public/bootstrap.js",
     "public/connector-contract.js",
+    "public/document-library.js",
+    "public/private-sign-in.js",
+    "public/scanner-import.js",
+    "public/service-access.js",
     "public/technical-docs.js",
     "public/ui-catalog.js"
   ]);
@@ -566,8 +570,12 @@ test("every public runtime script and provider example has no capability or unsa
   ];
   for (const name of runtimeFiles) {
     const source = read(name);
-    for (const pattern of forbiddenCapabilities) assert.doesNotMatch(source, pattern, `${name}: ${pattern}`);
-    if (name !== "public/technical-docs.js") {
+    const privateClient = ["public/document-library.js", "public/private-sign-in.js", "public/scanner-import.js", "public/service-access.js"].includes(name);
+    for (const pattern of forbiddenCapabilities) {
+      if (privateClient && pattern.source === "\\bfetch\\s*\\(") continue;
+      assert.doesNotMatch(source, pattern, `${name}: ${pattern}`);
+    }
+    if (name !== "public/technical-docs.js" && !privateClient) {
       for (const method of [/\bPOST\b/, /\bPUT\b/, /\bPATCH\b/, /\bDELETE\b/]) {
         assert.doesNotMatch(source, method, `${name}: ${method}`);
       }
@@ -681,7 +689,7 @@ test("the local server handles GET and HEAD with security headers", async (t) =>
   assert.equal(mutation.headers.allow, "GET, HEAD");
 });
 
-test("the structural catalog contains 38 SOC routes plus one local documentation utility", () => {
+test("the structural catalog contains 38 SOC routes plus Documents and local documentation", () => {
   const context = browserContext(["public/ui-catalog.js"]);
   const catalog = context.SocConsoleUiCatalog;
   assert.equal(catalog.schemaVersion, "1");
@@ -690,15 +698,15 @@ test("the structural catalog contains 38 SOC routes plus one local documentation
   const pages = JSON.parse(JSON.stringify(catalog.pages));
   const groups = JSON.parse(JSON.stringify(catalog.groups));
   const byPath = new Map(pages.map((page) => [page.path, page]));
-  assert.equal(pages.length, 39);
-  assert.equal(byPath.size, 39, "catalog routes are unique");
+  assert.equal(pages.length, 40);
+  assert.equal(byPath.size, 40, "catalog routes are unique");
 
   const groupedRoutes = groups.flatMap(([, entries]) => entries.map(([route]) => route));
-  assert.equal(groupedRoutes.length, 27);
-  assert.equal(new Set(groupedRoutes).size, 27);
+  assert.equal(groupedRoutes.length, 28);
+  assert.equal(new Set(groupedRoutes).size, 28);
   const utilities = ["/onboard", "/settings", "/docs"];
   const entryRoutes = new Set([...groupedRoutes, ...utilities]);
-  assert.equal(entryRoutes.size, 30);
+  assert.equal(entryRoutes.size, 31);
   groupedRoutes.forEach((route) => {
     assert.ok(byPath.has(route), route);
     assert.notEqual(byPath.get(route).hidden, true, `${route} is a grouped entry route`);
@@ -706,6 +714,8 @@ test("the structural catalog contains 38 SOC routes plus one local documentation
   utilities.forEach((route) => assert.equal(byPath.get(route).hidden, true, route));
   assert.equal(byPath.get("/docs").localOnly, true);
   assert.equal(byPath.get("/docs").variant, "technical-documentation");
+  assert.equal(byPath.get("/documents").localOnly, true);
+  assert.equal(byPath.get("/documents").variant, "document-library");
   const detailRoutes = pages.map((page) => page.path).filter((route) => !entryRoutes.has(route)).sort();
   assert.deepEqual(detailRoutes, [
     "/analyst", "/attestation", "/event", "/host-scan",
@@ -868,7 +878,7 @@ test("the structural catalog contains 38 SOC routes plus one local documentation
   assert.deepEqual(tabs("/systems", "stab").map(([id]) => id), ["estate", "affected"]);
   assert.deepEqual(tabs("/retention", "vtab").map(([id]) => id), ["policy", "reality", "review"]);
   assert.deepEqual(tabs("/sources", "stab").map(([id]) => id), ["expected", "add", "changes"]);
-  assert.deepEqual(tabs("/agents", "atab").map(([id]) => id), ["agents", "add", "prompts", "enrollment", "audit"]);
+  assert.deepEqual(tabs("/agents", "atab").map(([id]) => id), ["agents", "add", "prompts", "enrollment", "access", "audit"]);
   assert.deepEqual(tabs("/attestations", "gtab").map(([id]) => id), ["active", "create", "archived", "history"]);
   assert.deepEqual(tabs("/register", "riskTab").map(([id]) => id), ["active", "create", "archived", "history"]);
   assert.deepEqual(tabs("/access", "atab").map(([id]) => id), ["who", "refusals", "chain", "offboarding"]);
@@ -975,7 +985,7 @@ test("technical documentation remains selectable without becoming a primary SOC 
   await harness.app.mount();
 
   const primaryRoutes = JSON.parse(JSON.stringify(harness.context.SocConsole.primaryRoutes));
-  assert.equal(primaryRoutes.length, 29);
+  assert.equal(primaryRoutes.length, 30);
   assert.equal(primaryRoutes.includes("/docs"), false);
   assert.equal(findNodes(routeSelect,
     (candidate) => candidate.tagName === "OPTION" && candidate.getAttribute("value") === "/docs").length, 1);
@@ -1058,21 +1068,21 @@ test("Estate, Govern, and Configure preserve the active structural schemas witho
 
   const expectedSources = tab("/sources", "stab", "expected").panels;
   assert.deepEqual(columns(expectedSources, "Expected sources"),
-    ["Source", "Host", "Last collection", "Cadence", "In Logs", "Collection", "Activity"]);
+    ["Source", "Application / environment", "Last collection", "Cadence", "In Logs", "Collection", "Activity"]);
   assert.deepEqual(expectedSources[0].rowDisclosures,
     ["What it does", "Why it matters", "If it goes quiet"]);
   const sourceAdd = tab("/sources", "stab", "add").panels;
   assert.deepEqual(sourceAdd.map((panel) => panel.title), [
-    "1 · Connect the host", "2 · Declare what the host owes", "Pending source setups",
+    "Start with your application", "Optional · Connect a collector for host-based scanners", "1 · Add an application source", "2 · Validate a sample, then activate",
     "Configured sources", "Scale-out shortcut · copy a host's source set"
   ]);
-  assert.deepEqual(sourceAdd[0].columns, ["Tokened host", "Connection", "Break-glass"]);
-  assert.deepEqual(sourceAdd[1].columns, ["Connector", "Mode", "Produces", "Populates"]);
-  assert.deepEqual(sourceAdd[1].fields.map((field) => field.label), [
-    "App", "Host", "Connector type", "Source kind", "Display label", "Cadence (hours)"
+  assert.deepEqual(sourceAdd[1].columns, ["Tokened host", "Connection", "Break-glass"]);
+  assert.deepEqual(sourceAdd[2].columns, ["Connector", "Mode", "Produces", "Populates"]);
+  assert.deepEqual(sourceAdd[2].fields.map((field) => field.label), [
+    "App", "Environment", "Collector host (optional for application push)", "Connector type", "Source kind", "Display label", "Cadence (hours)"
   ]);
-  assert.deepEqual(sourceAdd[2].columns, ["Source", "Connector", "Test", "State", "Actions"]);
-  assert.deepEqual(sourceAdd[3].columns, ["Source", "Host", "Connector", "Produces", "Coverage", "State"]);
+  assert.deepEqual(sourceAdd[3].columns, ["Source", "Connector", "Test", "State", "Actions"]);
+  assert.deepEqual(sourceAdd[4].columns, ["Source", "Application / environment", "Connector", "Produces", "Coverage", "State", "Manage"]);
 
   assert.equal(byPath.get("/agents").variant, "administration-agents");
   assert.deepEqual(tab("/agents", "atab", "prompts").panels, []);
@@ -1090,7 +1100,7 @@ test("Estate, Govern, and Configure preserve the active structural schemas witho
   assert.deepEqual(columns(accessWho, "Devices on the tailnet"), ["Device", "Tailnet IP", "Tags", "State"]);
 
   assert.deepEqual(byPath.get("/onboard").panels.map((panel) => panel.title),
-    ["1 · Register the app", "Registered apps", "2 · Connect each host"]);
+    ["1 · Register the app", "Registered apps", "2 · Add a source to the application"]);
   const settingsPanels = byPath.get("/settings").panels;
   assert.deepEqual(settingsPanels.map((panel) => panel.title), [
     "How settings behave", "Overview", "SOC Health", "Daily Brief", "Analytics", "Analyst", "Triage",
@@ -1119,7 +1129,7 @@ test("Estate and Configure workflows render the active compact treatments as ine
   assert.match(sources.mountRoot.textContent, /Tokened hostConnectionBreak-glass/);
   assert.match(sources.mountRoot.textContent, /ConnectorModeProducesPopulates/);
   assert.match(sources.mountRoot.textContent, /SourceConnectorTestStateActions/);
-  assert.match(sources.mountRoot.textContent, /SourceHostConnectorProducesCoverageState/);
+  assert.match(sources.mountRoot.textContent, /SourceApplication \/ environmentConnectorProducesCoverageStateManage/);
   assertUniqueRenderedIdentifiers(sources.mountRoot, "#/sources?stab=add");
   sources.app.unmount();
 
@@ -1402,6 +1412,7 @@ test("a validated connector provider populates source choices and enables only l
   assert.equal(capturedCommand.command, "source.setup");
   assert.deepEqual(JSON.parse(JSON.stringify(capturedCommand.input)), {
     appId: "app-one",
+    environment: "default",
     hostId: "host-one",
     connectorType: "canonical-push",
     sourceKind: "log.event",
@@ -1419,6 +1430,49 @@ test("a validated connector provider populates source choices and enables only l
   });
   assert.deepEqual(requests.map((request) => request.reason), ["initial", "refresh"]);
   assert.match(harness.mountRoot.textContent, /Connector action completed/);
+  harness.app.unmount();
+});
+
+test("application source UI submits sample validation and exposes lifecycle management without a host", async (t) => {
+  const os = require("node:os");
+  const { ReferenceControlPlane } = require("../server/reference-runtime");
+  const directory = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "soc-source-ui-"));
+  const plane = new ReferenceControlPlane({ stateDirectory: directory });
+  t.after(() => { plane.dispose(); fs.rmSync(directory, { recursive: true, force: true }); });
+  let sequence = 0;
+  const execute = (command, input) => plane.execute({ schemaVersion: "1", documentType: "connector-command-request",
+    requestId: `source-ui-${++sequence}`, command, requestedAt: new Date().toISOString(), input });
+  const appId = execute("app.register", { displayName: "Web application", hosts: [], publicPages: [], environments: ["preview", "live"] }).output.appId;
+  execute("source.setup", { appId, environment: "preview", connectorType: "canonical-push", sourceKind: "log.event", displayName: "Application source",
+    config: { "cadence-seconds": 300 }, credentialReferences: [] });
+  const harness = createUiHarness("#/sources?stab=add", { provider: false, commands: {
+    schemaVersion: "1", id: "application-source-ui", getSnapshot: (request) => plane.getSnapshot(request), execute: (request) => plane.execute(request)
+  } });
+  await harness.app.mount();
+  const environment = harness.mountRoot.querySelector('[name="environment"]');
+  assert.equal(environment.value, `${appId}:preview`);
+  assert.equal(environment.closest("form").querySelector('[name="hostId"]').required, false, "application sources do not require a collector");
+  const sample = harness.mountRoot.querySelector('[name="sampleMessage"]');
+  assert.ok(sample);
+  sample.value = "Operator-supplied redacted application log";
+  const validate = sample.closest("form").querySelector('[data-command-action="source.test"]');
+  harness.mountRoot.dispatchEvent({ type: "submit", target: sample.closest("form"), submitter: validate });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(plane.getState().sources[0].state, "tested");
+  const activate = harness.mountRoot.querySelector('[data-command-action="source.activate"]');
+  harness.mountRoot.dispatchEvent({ type: "click", target: activate });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(plane.getState().sources[0].state, "active");
+  assert.match(harness.mountRoot.textContent, /Application source/);
+  assert.match(harness.mountRoot.textContent, /preview/);
+  assert.match(harness.mountRoot.textContent, /sender's secret store/);
+  assert.ok(harness.mountRoot.querySelector('[data-command-action="source.rotate"]'));
+  assert.ok(harness.mountRoot.querySelector('[data-command-action="source.update"]'));
+  const pause = harness.mountRoot.querySelector('[data-command-action="source.pause"]');
+  harness.mountRoot.dispatchEvent({ type: "click", target: pause });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(plane.getState().sources[0].state, "paused");
+  assert.ok(harness.mountRoot.querySelector('[data-command-action="source.resume"]'));
   harness.app.unmount();
 });
 
@@ -1616,16 +1670,16 @@ test("built-in scan templates exactly match every scan tab and enable only the s
   await sourceHarness.app.mount();
   const guidance = findNodes(sourceHarness.mountRoot,
     (candidate) => candidate.getAttribute("data-scan-setup-guidance") === "scan-trivy")[0];
-  assert.match(guidance.textContent, /Installed match: Trivy connection template \(trivy-template\)/);
+  assert.match(guidance.textContent, /Installed matches: Trivy JSON report import \(trivy-report\).*Trivy connection template \(trivy-template\)/);
   const setupButton = findNodes(sourceHarness.mountRoot,
     (candidate) => candidate.tagName === "BUTTON" && candidate.textContent === "Begin source setup")[0];
   const setupForm = setupButton.closest("form");
-  assert.equal(setupForm.querySelector('[name="connectorType"]').value, "trivy-template");
-  assert.equal(setupForm.querySelector('[name="sourceKind"]').value, "trivy-template:trivy.scan");
+  assert.equal(setupForm.querySelector('[name="connectorType"]').value, "trivy-report");
+  assert.equal(setupForm.querySelector('[name="sourceKind"]').value, "trivy-report:trivy.scan");
   const editors = setupForm.querySelectorAll("[data-connector-manifest]");
   assert.equal(editors.length, REFERENCE_CONNECTOR_MANIFESTS.length);
   editors.forEach((editor) => {
-    const selected = editor.getAttribute("data-connector-manifest") === "trivy-template";
+    const selected = editor.getAttribute("data-connector-manifest") === "trivy-report";
     assert.equal(editor.hidden, !selected);
     editor.querySelectorAll("[name]").forEach((control) => assert.equal(control.disabled, !selected));
   });
@@ -1983,7 +2037,9 @@ test("public browser runtime and provider template contain structure but no demo
   for (const name of runtimeFiles) {
     const source = read(name);
     const stringLiterals = source.match(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`/gs) || [];
-    assert.doesNotMatch(stringLiterals.join("\n"), /\b(?:demo|synthetic)\b/i, name);
+    // Generated documentation describes an opt-in synthetic benchmark; it does
+    // not seed application records. Its exact source is verified separately.
+    if (name !== "public/technical-docs.js") assert.doesNotMatch(stringLiterals.join("\n"), /\b(?:demo|synthetic)\b/i, name);
     assert.doesNotMatch(source, /\b(?:demo|fixture)-[a-z0-9-]+\b/i, name);
   }
 
@@ -2231,7 +2287,8 @@ test("authenticated sessions without optional display data never render as sign-
 
 test("Better Auth reference bridges current client calls into the closed console contract", async () => {
   const packageDocument = JSON.parse(read("package.json"));
-  assert.equal(packageDocument.dependencies?.["better-auth"], undefined);
+  assert.match(packageDocument.dependencies?.["better-auth"], /^\d+\.\d+\.\d+$/);
+  assert.match(packageDocument.dependencies?.["better-sqlite3"], /^\d+\.\d+\.\d+$/);
   assert.equal(packageDocument.devDependencies?.["better-auth"], undefined);
   const referenceGuide = read("examples/better-auth-reference/README.md");
   for (const clientCall of ["authClient.getSession()", "authClient.signOut()", "authClient.signIn.social"]) {
@@ -3416,18 +3473,118 @@ test("representative dynamic routes emit unique identifiers and no null-like lit
       await harness.app.refresh();
     }
     assertUniqueRenderedIdentifiers(harness.mountRoot, routes[index]);
-    assert.doesNotMatch(renderedValues(harness.mountRoot), /\b(?:null|undefined)\b/i, routes[index]);
+    // The technical manual intentionally teaches nullable JSON fields. Other
+    // UI routes must never leak a missing value through string interpolation.
+    assert.doesNotMatch(renderedValues(harness.mountRoot), routes[index].startsWith("#/docs") ? /\bundefined\b/i : /\b(?:null|undefined)\b/i, routes[index]);
   }
   harness.app.unmount();
 });
 
-test("README states both the non-operational boundary and adopter path", () => {
+test("refresh coalesces repeated requests and preserves unsaved forms", async () => {
+  let release;
+  const harness = createUiHarness("#/", { envelope(request) {
+    if (request.reason === "refresh") return new Promise((resolve) => { release = () => resolve(adapterEnvelope(request.route)); });
+    return adapterEnvelope(request.route);
+  } });
+  await harness.app.mount();
+  const first = harness.app.refresh();
+  const second = harness.app.refresh();
+  assert.equal(first, second, "only one refresh is in flight");
+  while (!release) await Promise.resolve();
+  assert.equal(harness.readRequests.length, 2);
+  release(); await first;
+  const form = harness.document.createElement("form");
+  form.setAttribute("data-dirty", "true");
+  const input = harness.document.createElement("input"); input.value = "Unsaved operator input"; form.append(input);
+  harness.mountRoot.append(form);
+  await harness.app.refresh();
+  assert.equal(harness.readRequests.length, 2, "dirty forms pause background and manual refresh");
+  assert.equal(input.value, "Unsaved operator input");
+  assert.equal(form.parentNode, harness.mountRoot);
+  harness.app.unmount();
+});
+
+test("Documents is an honest local-only empty surface without a private runtime", async () => {
+  const harness = createUiHarness("#/documents");
+  await harness.app.mount();
+  assert.equal(harness.readRequests.length, 0);
+  assert.match(harness.mountRoot.textContent, /Document storage is not connected/);
+  assert.doesNotMatch(harness.mountRoot.textContent, /built-in technical reference/);
+  harness.app.unmount();
+});
+
+test("README distinguishes the private starter, empty preview, and remaining integration work", () => {
   const readme = read("README.md");
   const prose = readme.replace(/^>\s?/gm, "").replace(/\s+/g, " ");
-  assert.match(prose, /does not collect telemetry/i);
+  assert.match(prose, /Better Auth.*SQLite/i);
+  assert.match(prose, /no public (?:registration|signup)/i);
+  assert.match(prose, /start:static/i);
   assert.match(prose, /no credentials/i);
-  assert.match(prose, /no (?:active )?(?:outbound|browser) network clients?/i);
-  assert.match(prose, /does not make[^.]{0,160}production-ready/i);
+  assert.match(prose, /no scanner execution/i);
+  assert.match(prose, /bounded/i);
   assert.match(readme, /adapter/i);
   assert.match(readme, /npm run (?:check|verify)/i);
+});
+
+test("Service Access renders an honest unavailable state in the static shell", async () => {
+  const harness = createUiHarness("#/agents?atab=access");
+  await harness.app.mount();
+  assert.match(harness.mountRoot.textContent, /Private agent access is not connected/);
+  assert.match(harness.mountRoot.textContent, /registrations and prompts do not grant API access/);
+  harness.app.unmount();
+});
+
+test("private view drafts protect Service Access and scanner import from refresh and dispose on unmount", async () => {
+  for (const [route, moduleName] of [["#/agents?atab=access", "SocServiceAccess"], ["#/scans?tab=trivy", "SocScannerImport"]]) {
+    const harness = createUiHarness(route);
+    let disposed = 0;
+    const cleanup = () => { disposed += 1; };
+    cleanup.isDirty = () => true;
+    harness.context.SOC_PRIVATE_APPLICATION = true;
+    harness.context[moduleName] = { render({ container }) { container.append(harness.document.createElement("form")); return cleanup; } };
+    await harness.app.mount();
+    const reads = harness.readRequests.length;
+    const priorDisposals = disposed;
+    await harness.app.refresh();
+    assert.equal(harness.readRequests.length, reads, route + " dirty private view pauses reads");
+    assert.equal(disposed, priorDisposals, route + " preserves widget");
+    harness.app.unmount();
+    assert.equal(disposed, priorDisposals + 1);
+  }
+});
+
+test("a private draft started during an outstanding read survives the final render", async () => {
+  let release;
+  let dirty = false;
+  let disposed = 0;
+  let rendered = 0;
+  const harness = createUiHarness("#/scans?tab=trivy", { envelope(request) {
+    if (request.reason === "refresh") return new Promise((resolve) => { release = () => resolve(adapterEnvelope(request.route)); });
+    return adapterEnvelope(request.route);
+  } });
+  harness.context.SOC_PRIVATE_APPLICATION = true;
+  harness.context.SocScannerImport = { render({ container }) {
+    rendered += 1;
+    const input = harness.document.createElement("input");
+    input.setAttribute("data-test", "pending-import");
+    container.append(input);
+    const cleanup = () => { disposed += 1; };
+    cleanup.isDirty = () => dirty;
+    return cleanup;
+  } };
+  await harness.app.mount();
+  const refresh = harness.app.refresh();
+  while (!release) await Promise.resolve();
+  const pendingInput = harness.mountRoot.querySelector('[data-test="pending-import"]');
+  assert.ok(pendingInput);
+  pendingInput.value = "operator-selected-report.json";
+  dirty = true;
+  const counts = { rendered, disposed };
+  release();
+  await refresh;
+  assert.deepEqual({ rendered, disposed }, counts, "late read must not replace an active widget");
+  assert.equal(harness.mountRoot.querySelector('[data-test="pending-import"]'), pendingInput);
+  assert.equal(pendingInput.value, "operator-selected-report.json");
+  harness.app.unmount();
+  assert.equal(disposed, counts.disposed + 1);
 });

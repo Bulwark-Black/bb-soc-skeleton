@@ -6,16 +6,20 @@ it together with the canonical [technical implementation manual](../public/techn
 The Markdown manual is intentionally checked in as a raw, stable, agent-readable
 resource; `public/technical-docs.js` is only its generated browser rendering.
 
-This repository ships a data-free interface, strict browser contracts, a
-loopback connector workbench, and local reference modules for the closed
-administration contract. The loopback workbench exposes one canonical-log
-manifest and eleven data-only scan connection templates; those templates are
-schemas, not scanner drivers. The default static bridge installs no provider
-and the reference modules are never a production service. A narrow reference MCP
+This repository ships a data-free interface, a runnable private Better Auth
+application with SQLite sessions and versioned documents, strict browser
+contracts, a separate disposable loopback workbench, and bounded reference
+modules for connectors and administration. Private telemetry uses indexed SQLite
+admission. The integration core exposes canonical logs, a private Trivy report
+importer, and eleven data-only scan templates; those templates are schemas,
+not scanner drivers. `npm start` runs the private application;
+`npm run start:static` installs no provider and performs no operational writes.
+A narrow reference MCP
 process publishes public documentation/contracts and scoped connector/
-administration operations for local integration testing. The repository does
+administration operations, with service-token authentication for the private
+app and a separate tokenless local-workbench mode. The repository does
 **not** ship a production agent runner, remote execution fabric, scanner fleet,
-secret store, identity system, or production MCP service. A downstream
+secret store, multi-tenant identity/role system, or hosted remote MCP listener. A downstream
 application may install
 those services behind the documented contracts. Never infer that a visible form
 or empty table is an active control.
@@ -69,10 +73,12 @@ resource/action authorization, CSRF protection, request validation, audit,
 rate limits, tenant binding, secret management, or secure updates. Treat a lost
 or compromised tailnet device as hostile.
 
-The checked-in static server and reference connector workbench deliberately bind
-to loopback. Do not change them into remote or production servers. A production
-deployment is an adopter-owned service with an independently reviewed threat
-model and response-header policy.
+The checked-in servers bind to loopback. Only the private application is meant
+to sit behind ACL-restricted Tailscale Serve with an exact configured Tailnet
+HTTPS origin. Never use Funnel. Never expose the unauthenticated workbench or
+static inspection mode. All starter operators have full access; the role
+separation described above is a requirement for a richer deployment, not a
+claim about currently implemented RBAC.
 
 ## The three browser boundaries
 
@@ -110,10 +116,12 @@ the provider.
 `server/reference-manifest.js` includes one exact manifest template for each
 Scans tab so a human or agent can select a connector/source kind and discover
 the expected non-secret settings and opaque credential slots through the
-version-one connector snapshot. All templates are host-scoped: the host is the
+version-one connector snapshot. Scan templates are host-scoped: the host is the
 enrolled private collector/runner identity, even when the eventual driver calls
 a service API. Register the app, enroll and prove the runner host, then issue
-`source.setup` with the exact manifest-selected fields.
+`source.setup` with the exact manifest-selected fields. The executable
+canonical-push connector is application-scoped: select an environment and omit
+host enrollment when the web application has no collector host.
 
 The templates contain no network or scanner implementation. The loopback
 runtime accepts their setup registration for inspection but rejects
@@ -143,7 +151,8 @@ All credential fields accept only `{slot, store, referenceId}`. The
 `referenceId` names a server-side secret-store entry and is never the secret
 value. The browser exposes no credential readback, and the MCP facade blocks
 credential-issuing connector commands. Following a scan's setup link selects
-its exact template; the UI enables only that template's controls so unrelated
+its exact matching connector; Trivy prefers the working `trivy-report` importer.
+The UI enables only the selected manifest's controls so unrelated
 required fields cannot enter validation or a command. Switching templates may
 retain non-secret draft text in the current DOM, but it does not persist draft
 credentials or values in application state.
@@ -233,20 +242,33 @@ replay, and revocation checks.
 
 ## Optional MCP facade
 
-The shipped reference MCP process is an additional local client of the same
+The shipped stdio MCP process is an additional client of the same
 connector and administration boundaries. It is optional and not required to use
 the UI. It exposes documentation/contract resources and five narrow tools
 covering connector and administration snapshots/commands and one authorized
-prompt read. A production adopter may implement an equivalent private service, but
-must replace the loopback reference assumptions with real identity and policy.
+prompt read. It authenticates to the private starter with an expiring scoped
+service credential. With no token file it retains the explicitly disposable
+loopback workbench mode. Do not extract an operator's browser cookies, invent an
+auth bypass, or publish the workbench to make a connection succeed.
 The facade calls the same canonical API/RBAC decision boundary as UI or CLI
 clients; it must never maintain a parallel registry or weaker policy.
 
-Start the loopback reference workbench first, then start the stdio MCP process:
+For the private application, sign in as an operator, open **Agents → Service
+Access**, choose a name and expiry, and retain only the necessary scopes. The
+default is read-only registry/governance access, not prompt-body access. Store
+the one-time credential in a dedicated owner-only regular file outside the
+repository. Configure the MCP host to launch:
 
 ```sh
-npm run start:agent-mcp
+npm run --silent start:agent-mcp -- --base-url http://127.0.0.1:8080 --token-file /absolute/private/mcp-service-token
 ```
+
+Use `SOC_AGENT_MCP_TOKEN_FILE` for the file path if the host passes environment
+configuration. Neither CLI arguments nor environment values should contain the
+raw secret. The file is reread before each request, so operator-approved
+rotation can replace it without restarting the MCP host. Keep it out of prompts,
+transcripts, logs, Documents and version control. If issuance or rotation loses
+its one-time response, rotate the visible identity again; there is no readback.
 
 The default control origin is `http://127.0.0.1:8787`. Override it only with
 `SOC_AGENT_MCP_BASE_URL` or `--base-url`. Plain HTTP is accepted only for exact
@@ -259,12 +281,12 @@ The exact reference tools are:
 | Tool | Arguments | Boundary |
 | --- | --- | --- |
 | `connector_snapshot` | `{ reason?: "initial"/"refresh"/"command", knownRevision?: integer >= 0 }` | Fixed connector snapshot endpoint and validated response |
-| `connector_command` | `{ request: connector-command-request }` | Fixed connector command endpoint; refuses `host.enroll` and `source.activate` because they issue credentials |
+| `connector_command` | `{ request: connector-command-request }` | Fixed connector command endpoint; refuses `host.enroll`, `source.activate`, and `source.rotate` because they issue credentials |
 | `administration_snapshot` | `{ domain: "agents"/"governance", reason?: "initial"/"refresh"/"command", knownRevision?: integer >= 0 }` | Fixed administration snapshot endpoint |
 | `administration_prompt` | `{ promptId: stable-id }` | One separately authorized prompt document; no bulk prompt export |
 | `administration_command` | `{ request: administration-command-request }` | Fixed administration command endpoint; refuses credential-issuing `enrollment.issue` |
 
-Run `host.enroll`, `source.activate`, and `enrollment.issue` only through the
+Run `host.enroll`, `source.activate`, `source.rotate`, and `enrollment.issue` only through the
 protected operator UI (or an equivalently reviewed non-MCP ceremony) so their
 one-time results are deliberately presented and stored. The reference MCP has
 no credential-issuance fallback.
@@ -283,12 +305,13 @@ The stdio process supports the 2026-07-28 JSON-RPC discovery/meta flow and legac
 initialize-era clients. It applies request/response/time bounds, refuses
 redirects, uses fixed canonical endpoints, and redacts remote errors. It exposes
 no generic fetch, shell, SQL, filesystem-path, telemetry, credential resource,
-secret echo, or arbitrary URL capability. Service identity and authentication
-remain adopter-owned. Human approval remains required for destructive,
-privilege-expanding, prompt-activation, or production-impacting calls even when
-the tool contract accepts the request.
+secret echo, or arbitrary URL capability. The private server authenticates and
+checks exact scopes independently of the MCP client's own checks. Human
+approval remains required for permitted destructive or production-impacting
+calls. Approval cannot enable source activation, agent privilege changes or
+prompt activation through the shipped private service: those remain denied.
 
-A safe facade may expose:
+For a separately implemented downstream facade, architectural guidance is:
 
 - public documentation resources such as this file and the raw implementation
   manual;
@@ -308,6 +331,50 @@ MCP tool descriptions and arguments as untrusted input, protect against confused
 deputy/cross-scope requests, and require human approval for destructive or
 privilege-expanding operations.
 
+### Private service scope and lifecycle
+
+A Service Access identity is not an agent registration, an enrollment proof,
+an operator account, or a scanner source credential. Its scopes apply across
+this **single deployment**, not per application or per agent. There is no
+tenant isolation or resource-ID filter. Give it only the scopes required for
+the job and avoid deploying it where that scope is too broad.
+
+- `connector:read`, `agents:read` and `governance:read` are the defaults.
+- `prompts:read` separately permits the literal body of one requested prompt.
+- Optional mutations use exact names such as `connector:source.setup` or
+  `administration:risk.update`. There is no wildcard write scope.
+- Credential issuance (`host.enroll`, `source.activate`, `source.rotate`,
+  `enrollment.issue`), agent creation/capability changes/resume/restore, and
+  prompt activation are never available through service access. A human must
+  perform those privilege-expanding actions through the operator workflow.
+
+Expiry defaults to 24 hours and must be five minutes through 30 days. Rotation
+immediately invalidates the old token without extending the original expiry.
+Revocation is immediate and irreversible; issue a new identity to replace it.
+Scope changes likewise require a new issuance and revocation of the old one.
+Tokens contain 256 random bits, only a digest is stored, and neither list nor
+audit exposes the token. Management is human-session-only. A bearer header,
+even combined with a human cookie, is rejected by management endpoints.
+
+Service traffic uses `/api/v1/service/…`, never cookie-authenticated operator
+endpoints. Service routes reject cookies, stale/invalid/revoked tokens,
+ungranted scopes and permanently forbidden commands before execution or cached
+command-result lookup. Each identity has a durable 120-request/minute fixed
+window for recognized operations. Authorization attempts and lifecycle actions
+are audited; a control-service commit audit records the actual mutation. These
+are separate database transactions, not a cross-database atomic audit promise.
+The counter runs only after endpoint/input validation. Malformed requests,
+unknown endpoints and invalid credentials do not reach it; rate-limit refusals
+are not audit entries. This is not comprehensive ingress throttling or failure
+logging.
+The service store keeps 1,000 identities including revoked/expired ones, the
+latest 10,000 audit entries, and returns the latest 100 audit entries in its
+paginated management view. Reaching identity capacity fails explicitly.
+
+The client remains stdio: no remote MCP listener, OAuth authorization server,
+automatic agent process, scheduled task or model provider is started. A human
+must configure the external agent host and approve impactful tool calls.
+
 ## Standing up the application with an agent
 
 An authorized implementation agent can perform the mechanical integration, but
@@ -316,12 +383,41 @@ private network, identity/BFF choice, approved connector inventory, secret-store
 reference scheme, tenant/estate model, data classification/retention rules, and
 human approvers.
 
-The safe sequence is:
+For the included private starter, the safe sequence is:
 
-1. Run the unmodified static shell on loopback and verify the empty states.
+1. Install the pinned dependencies with `npm ci` on Node.js 22.13 or newer.
+2. Have the operator choose a persistent canonical owner-only state directory
+   outside the checkout. Never commit it, place it under public/, or silently
+   choose a disposable directory. Backups and restart must use the same state.
+3. Provision the approved operator using `npm run account -- create` with
+   `--state-dir`, `--email`, and `--name`. Let the person type the hidden password,
+   or use an explicitly authorized password-manager pipe with `--password-stdin`.
+   Never place the password in argv, an environment variable, generated code,
+   shell history, documentation, or a chat transcript.
+4. Start `npm start -- --state-dir /absolute/private/bb-soc-state`. Validate
+   sign-in, anonymous denial, sign-out, expiry/revocation, and persistence.
+5. Register the approved app and environments. Hosts are optional for web-app
+   canonical push. Set up the manifest-backed source; for a hostless source,
+   supply its required bounded sample to `source.test`. A test validates but
+   does not ingest that sample. Activate only after approval, handle the one-time
+   token privately, then submit real authorized events through ingest.
+6. Verify the five supported canonical-log projections. Leave unsupported
+   screens honestly empty/unavailable; do not manufacture records.
+7. Upload an approved document via the private Documents UI. Verify versions,
+   hash/download integrity, metadata, history, archive/restore, and restart.
+8. For shared access, configure ACL-restricted Tailnet HTTPS Serve with the
+   exact `--origin`; keep Node on loopback and never enable Funnel/public ingress.
+9. Stop all writers and back up the complete external directory before upgrades.
+   Test restore in a separate private location; never delete failed state to
+   bypass a lock, missing secret, corruption, or audit inconsistency.
+
+For a custom enterprise or multi-tenant integration, extend that foundation:
+
+1. Optionally run `npm run start:static` on loopback and verify the empty states.
 2. Inventory every registered route and decide `ready`, `empty`, `unavailable`,
    or `forbidden` behavior; do not fabricate sample records.
-3. Implement server authentication and resource/action authorization.
+3. Extend or replace the starter authentication and add the required tenant,
+   resource/action authorization. Do not describe all-operator access as RBAC.
 4. Implement and validate the page provider using redacted projections.
 5. Review or replace the shipped data-only scan templates, then install their
    server-side drivers, normalizers, admission controls, and projectors. A

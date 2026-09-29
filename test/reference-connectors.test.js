@@ -21,6 +21,73 @@ const { ReferenceStateStore, hashCredential, validateState } = require("../serve
 
 const START = Date.parse("2026-08-30T10:00:00.000Z");
 
+test("application sources validate real samples and preserve environment, delivery, and lifecycle across restart", (t) => {
+  const harness = createReferenceHarness(t);
+  let sequence = 0;
+  const execute = (command, input) => harness.plane.execute(harness.command(`app-flow-${++sequence}`, command, input));
+  const registered = execute("app.register", { displayName: "Application under test", hosts: [], publicPages: [], environments: ["preview", "live"] });
+  assert.equal(registered.status, "succeeded");
+  const appId = registered.output.appId;
+  assert.equal(harness.plane.getState().hosts.length, 0);
+  const configured = execute("source.setup", { appId, environment: "live", connectorType: "canonical-push", sourceKind: "log.event",
+    displayName: "Application events", config: { "cadence-seconds": 300 }, credentialReferences: [] });
+  assert.equal(configured.status, "succeeded");
+  const sourceId = configured.output.sourceId;
+  const connectorInstanceId = configured.output.connectorInstanceId;
+  const revisionInput = () => ({ sourceId, connectorInstanceId, expectedRevision: harness.plane.getState().sources[0].revision });
+  const untested = execute("source.test", revisionInput());
+  assert.equal(untested.error.code, "test-failed");
+  assert.equal(execute("source.test", { ...revisionInput(), sample: { message: "A real redacted application line", channel: "application" } }).status, "succeeded");
+  assert.equal(harness.plane.getState().records.length, 0, "sample validation never fabricates telemetry");
+  assert.equal(JSON.stringify(harness.plane.getState()).includes("A real redacted application line"), false, "sample text is never retained in command state");
+  const activationRequest = harness.command("app-flow-activate", "source.activate", revisionInput());
+  const activation = harness.plane.execute(activationRequest);
+  assert.equal(activation.status, "succeeded");
+  let credential = activation.output.oneTimeCredential.value;
+  const batch = logBatch({ appId, sourceId, at: harness.clock().toISOString(), message: "Admitted application event", receiptId: "application-receipt-0001", recordId: "application-event-1" });
+  assert.equal(harness.plane.ingest(batch, credential, digest(batch)).accepted, 1);
+  assert.equal(harness.plane.ingest(batch, credential, digest(batch)).replay, true);
+  assert.equal(harness.plane.getSnapshot({ schemaVersion: "1", reason: "refresh" }).sources[0].environment, "live");
+  for (const route of ["/", "/sources", "/logs", "/analytics", "/health"]) assert.equal(harness.plane.readPage(route, {}).state, "ready");
+  const pauseRequest = harness.command("app-flow-pause", "source.pause", revisionInput());
+  assert.equal(harness.plane.execute(pauseRequest).status, "succeeded");
+  assert.throws(() => harness.plane.ingest(batch, credential, digest(batch)), (error) => error.code === "activation-blocked");
+  assert.equal(harness.plane.execute(pauseRequest).status, "succeeded", "lifecycle retries are idempotent");
+  assert.equal(execute("source.resume", revisionInput()).status, "succeeded");
+  const oldCredential = credential;
+  const rotateRequest = harness.command("app-flow-rotate", "source.rotate", revisionInput());
+  const rotated = harness.plane.execute(rotateRequest);
+  credential = rotated.output.oneTimeCredential.value;
+  assert.throws(() => harness.plane.ingest(batch, oldCredential, digest(batch)), (error) => error.code === "not-authorized");
+  assert.equal(harness.plane.execute(rotateRequest).output.oneTimeCredential, undefined);
+  assert.equal(execute("source.revoke", revisionInput()).status, "succeeded");
+  assert.throws(() => harness.plane.ingest(batch, credential, digest(batch)), (error) => error.code === "not-authorized");
+  assert.equal(execute("source.resume", revisionInput()).error.code, "activation-blocked");
+  assert.equal(execute("source.rotate", revisionInput()).status, "succeeded");
+  assert.equal(execute("source.update", { ...revisionInput(), displayName: "Updated events", config: { "cadence-seconds": 600 } }).status, "succeeded");
+  assert.equal(harness.plane.getState().sources[0].state, "configured");
+  assert.equal(execute("source.activate", revisionInput()).error.code, "activation-blocked");
+  assert.equal(execute("source.test", { ...revisionInput(), sample: { message: "Updated redacted sample" } }).status, "succeeded");
+  const reactivated = execute("source.activate", revisionInput());
+  credential = reactivated.output.oneTimeCredential.value;
+  harness.plane.dispose();
+  harness.plane = new ReferenceControlPlane({ stateDirectory: harness.directory, clock: harness.clock });
+  assert.equal(harness.plane.getState().sources[0].environment, "live");
+  assert.equal(harness.plane.ingest(batch, credential, digest(batch)).replay, true);
+  assert.equal(harness.plane.execute(activationRequest).output.oneTimeCredential, undefined);
+  assert.equal(execute("source.remove", revisionInput()).error.code, "activation-blocked");
+  assert.equal(execute("source.archive", revisionInput()).status, "succeeded");
+  assert.throws(() => harness.plane.ingest(batch, credential, digest(batch)), (error) => error.code === "not-authorized");
+  assert.equal(execute("source.remove", revisionInput()).status, "succeeded");
+  assert.equal(harness.plane.getSnapshot({ schemaVersion: "1", reason: "refresh" }).sources.length, 0);
+  assert.equal(harness.plane.getState().sources[0].state, "removed", "removal preserves a tombstone");
+  assert.equal(harness.plane.getState().records.length, 1, "removal preserves admitted history");
+  assert.equal(harness.plane.readPage("/logs", {}).state, "ready");
+  const invalidEnvironment = execute("source.setup", { appId, environment: "absent", connectorType: "canonical-push", sourceKind: "log.event",
+    displayName: "Invalid environment", config: { "cadence-seconds": 300 }, credentialReferences: [] });
+  assert.equal(invalidEnvironment.error.code, "validation-failed");
+});
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -366,7 +433,8 @@ test("all scan views ship exact data-only connection templates with meaningful o
     ["quarantine-template", ["quarantined-now", "deleted-from-quarantine"], ["endpoint.event", "finding"], ["store-access", "encryption-access"]],
     ["remediation-template", ["vm-analyst-latest-review", "remediation-log"], ["remediation.record"], ["workflow-access", "evidence-store-access"]]
   ];
-  assert.equal(REFERENCE_CONNECTOR_MANIFESTS.length, 12);
+  assert.equal(REFERENCE_CONNECTOR_MANIFESTS.length, 13);
+  assert.equal(REFERENCE_CONNECTOR_MANIFESTS.filter((manifest) => manifest.connectorType === "trivy-report").length, 1);
   assert.equal(REFERENCE_SCAN_CONNECTOR_MANIFESTS.length, expected.length);
   expected.forEach(([connectorType, surfaces, requiredKinds, credentialSlots], index) => {
     const manifest = ConnectorRuntime.validateConnectorManifest(REFERENCE_SCAN_CONNECTOR_MANIFESTS[index]);

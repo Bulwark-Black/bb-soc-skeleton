@@ -694,10 +694,14 @@ should not see. Enforce authentication, authorization, classification,
 redaction, query bounds, rate limits, audit, and retention before constructing
 an envelope.
 
-The strict `npm run audit:public` policy proves that checked-in public JavaScript
-does not install browser networking, persistence, upload, telemetry, or command
-providers on its own. It has no relaxed “application” profile. The checked-in
-`application-bridge.js` is inert; the optional loopback workbench or an adopter
-host serves the actual bridge under a separately reviewed policy. Keep a
-production operational provider behind the adopter's authenticated BFF and
-independently review that downstream boundary.
+The strict `npm run audit:public` policy checks a positive file manifest and
+browser capability restrictions; it is not a proof of application security.
+The static shell still denies browser connections and its checked-in
+`application-bridge.js` is inert. Four explicitly reviewed private clients
+(sign-in, Documents, Service Access and Trivy report import) may call fixed
+same-origin APIs only when served by the private application. Other scripts
+remain subject to the networking restrictions; all public clients are checked
+for browser credential persistence and unsafe HTML sinks. The private host
+installs the actual authenticated provider bridge. Keep operational services
+behind server authentication/authorization and review those boundaries
+independently; a browser validator is not authorization.

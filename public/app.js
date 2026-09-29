@@ -263,6 +263,9 @@
     };
     const pageFilters = new Map();
     let autoRefreshId = null;
+    let refreshPromise = null;
+    let privateViewCleanup = null;
+    let privateViewRoute = null;
     let commandSequence = 0;
     let goShortcutPending = false;
     let goShortcutTimer = null;
@@ -463,7 +466,7 @@
     function pageHeader(page) {
       const fragment = documentRef.createDocumentFragment();
       const adapterLabel = page.localOnly
-        ? "built-in technical reference"
+        ? page.variant === "document-library" ? "private document library" : "built-in technical reference"
         : provider
           ? `adapter · ${state.providerState}`
           : "no data adapter";
@@ -1083,8 +1086,14 @@
       if (field.optionsFrom === "hosts") {
         return snapshot.hosts.map((item) => ({
           value: item.hostId,
+          appId: item.appId,
           label: item.displayName || item.hostId
         }));
+      }
+      if (field.optionsFrom === "environments") {
+        return snapshot.apps.flatMap((app) => (app.environments || ["default"]).map((environment) => ({
+          value: `${app.appId}:${environment}`, appId: app.appId, label: environment
+        })));
       }
       if (field.optionsFrom === "connectorTypes") {
         return snapshot.connectorTypes.map((item) => ({
@@ -1130,7 +1139,8 @@
           node("option", { text: interactive && options.length ? "Choose…" : "Awaiting application options", attrs: { value: "" } }),
           ...options.map((option) => node("option", { text: option.label, attrs: {
             value: option.value,
-            "data-connector-type": option.connectorType
+            "data-connector-type": option.connectorType,
+            "data-app-id": option.appId
           } }))
         ]);
       }
@@ -1275,6 +1285,24 @@
       if (!connector || !sourceKind) return;
       if (!connector.value && preferredConnectorType) connector.value = preferredConnectorType;
       const connectorType = String(connector.value || "");
+      const app = form.querySelector('[name="appId"]');
+      if (app && !app.value && state.controlSnapshot.apps.length === 1) app.value = state.controlSnapshot.apps[0].appId;
+      for (const name of ["environment", "hostId"]) {
+        const select = form.querySelector(`[name="${name}"]`);
+        if (!select) continue;
+        const matching = [];
+        select.querySelectorAll("option").forEach((option) => {
+          const owner = option.getAttribute("data-app-id");
+          if (!owner) return;
+          option.hidden = option.disabled = owner !== (app && app.value);
+          if (!option.disabled) matching.push(option);
+        });
+        if (!matching.some((option) => option.value === select.value)) select.value = name === "environment" && matching.length ? matching[0].value : "";
+        if (name === "hostId") {
+          const manifest = state.controlSnapshot.connectorTypes.find((item) => item.connectorType === connectorType);
+          select.required = Boolean(manifest && manifest.scope === "host");
+        }
+      }
       form.querySelectorAll("[data-connector-manifest]").forEach((editor) => {
         const active = Boolean(connectorType) && editor.getAttribute("data-connector-manifest") === connectorType;
         editor.hidden = !active;
@@ -1348,7 +1376,8 @@
       if (interactive && panel.id === "declare-source") {
         const profile = scanProfilesBySetupFor.get(state.query.get("setupFor"));
         const matches = profile ? matchingScanManifests(profile) : [];
-        syncSourceSetupForm(controls, matches.length === 1 ? matches[0].connectorType : "");
+        const reportImporter = matches.find((manifest) => manifest.connectorType === "trivy-report");
+        syncSourceSetupForm(controls, reportImporter ? reportImporter.connectorType : matches.length === 1 ? matches[0].connectorType : "");
       }
       const table = panel.columns.length ? structuralTable(panel.title, panel.columns) : null;
       const meta = interactive ? "Server-authorized connector workflow" : panel.meta || "Command boundary";
@@ -1425,10 +1454,10 @@
         const rows = [];
         snapshot.apps.forEach((app) => {
           const appHosts = snapshot.hosts.filter((host) => host.appId === app.appId);
-          if (!appHosts.length) rows.push([app.displayName, "—", "not enrolled", "unknown", ""]);
+          if (!appHosts.length) rows.push([app.displayName, (app.environments || ["default"]).join(", "), "collector optional", "ready for source setup", node("a", { text: "Add source", attrs: { href: "#/sources?stab=add" } })]);
           appHosts.forEach((host) => rows.push([
             app.displayName,
-            host.displayName || host.hostId,
+            `${(app.environments || ["default"]).join(", ")} · ${host.displayName || host.hostId}`,
             host.state,
             host.connectionState,
             host.state === "enrolled" || host.state === "disabled" ? "" : controlActionButton("host.enroll", "Mint token", {
@@ -1443,11 +1472,17 @@
         const rows = snapshot.setups.map((setup) => {
           const manifest = snapshot.connectorTypes.find((item) => item.connectorType === setup.connectorType);
           const actions = [];
-          if (["draft", "configured"].includes(setup.state)) actions.push(controlActionButton("source.test", "Test", {
+          if (["draft", "configured"].includes(setup.state)) actions.push(node("form", { attrs: { "data-command-form": "" } }, [
+            setup.connectorType === "canonical-push" ? node("label", {}, [
+              node("span", { text: "Paste a real redacted log message" }),
+              node("textarea", { attrs: { name: "sampleMessage", rows: "3", maxlength: "2000", required: !setup.hostId, disabled: state.commandPending } })
+            ]) : null,
+            controlActionButton("source.test", setup.connectorType === "canonical-push" ? "Validate sample" : "Test connector", {
+            type: "submit",
             "data-source-id": setup.sourceId,
             "data-connector-instance-id": setup.connectorInstanceId,
             "data-expected-revision": setup.revision
-          }));
+          })]));
           if (setup.state === "tested") actions.push(controlActionButton("source.activate", "Activate", {
             "data-source-id": setup.sourceId,
             "data-connector-instance-id": setup.connectorInstanceId,
@@ -1463,13 +1498,41 @@
           const host = source.hostId && snapshot.hosts.find((item) => item.hostId === source.hostId);
           const recordKinds = manifest && manifest.payload.recordKinds;
           const routes = manifest && manifest.targets.map((target) => target.route);
+          const app = snapshot.apps.find((item) => item.appId === source.appId);
+          const attributes = { "data-source-id": source.sourceId, "data-connector-instance-id": source.connectorInstanceId, "data-expected-revision": source.revision };
+          const actions = [];
+          actions.push(node("details", {}, [node("summary", { text: "Sender instructions" }),
+            node("p", { text: source.connectorType === "trivy-report"
+              ? "Import an existing Trivy JSON report in Scans → Trivy, or submit it from your scanner worker to /api/v1/scanners/trivy/import?sourceId=" + source.sourceId + ". Keep the source credential in that worker's secret store. This service does not launch scans."
+              : "Send canonical JSON batches from your application's server or worker to /api/v1/ingest over the private connection. Keep the ingest credential in that sender's secret store." }),
+            node("p", {}, [node("strong", { text: "Source ID: " }), node("code", { text: source.sourceId })]),
+            node("p", {}, [node("strong", { text: "Application scope (estateId): " }), node("code", { text: source.appId })]),
+            node("p", {}, [node("strong", { text: "Environment: " }), node("code", { text: source.environment || "default" })]),
+            node("p", { text: "Use a stable recordId for each event and a stable receiptId when retrying the same exact batch. A sample validation checks shape; only accepted live delivery marks collection healthy." }),
+            node("a", { text: "Exact event and batch schema", attrs: { href: "#/docs" } })
+          ]));
+          if (source.state === "active") actions.push(controlActionButton("source.pause", "Pause", attributes));
+          if (source.state === "paused") actions.push(controlActionButton("source.resume", "Resume", attributes));
+          if (["active", "paused"].includes(source.state)) {
+            actions.push(controlActionButton("source.rotate", "Rotate credential", attributes), controlActionButton("source.revoke", "Revoke access", attributes), controlActionButton("source.archive", "Archive", attributes));
+            actions.push(node("details", {}, [node("summary", { text: "Edit source" }),
+              node("form", { attrs: { "data-command-form": "" } }, [
+                node("label", {}, [node("span", { text: "Name" }), node("input", { attrs: { name: "displayName", value: source.displayName, required: true, maxlength: "120" } })]),
+                node("label", {}, [node("span", { text: "Cadence (seconds)" }), node("input", { attrs: { name: "cadenceSeconds", type: "number", min: "60", max: "31536000", value: source.config["cadence-seconds"], required: true } })]),
+                node("p", { className: "muted", text: "Saving pauses collection, revokes existing credentials, and requires sample validation and activation again." }),
+                controlActionButton("source.update", "Save and revalidate", { ...attributes, type: "submit" })
+              ])
+            ]));
+          }
+          if (source.state === "archived") actions.push(controlActionButton("source.remove", "Remove (retain history)", attributes));
           return [
             source.displayName,
-            host ? host.displayName : source.hostId || "application",
+            `${app ? app.displayName : source.appId} / ${source.environment || "default"}${host ? ` · ${host.displayName}` : ""}`,
             manifest ? manifest.displayName : source.connectorType,
             Array.isArray(recordKinds) ? recordKinds.map((item) => typeof item === "string" ? item : item.kind || item.id).filter(Boolean).join(", ") : "declared by manifest",
             Array.isArray(routes) ? routes.join(", ") : "declared by manifest",
-            source.state
+            source.state,
+            node("div", { className: "form-actions" }, actions)
           ];
         });
         return snapshotTable(panel, panel.columns, rows, "No source has been activated.");
@@ -1493,6 +1556,15 @@
     }
 
     function renderCatalogPanel(panel, index) {
+      if (panel.id === "connect-host") return node("details", { className: "connector-collector-tools" }, [
+        node("summary", { text: "Optional collector setup for host-based integrations" }), workflowPanel(panel, index)
+      ]);
+      if (["application-source-start", "connect-each-host"].includes(panel.id)) {
+        return panelShell(panel.title, node("div", { className: "panel-body" }, [
+          node("p", { text: "Register your application and its environments, then choose a source. Application log push works without an enrolled host; scanners may require a collector." }),
+          node("a", { className: "resource-action", text: panel.id === "connect-each-host" ? "Add a source" : "Add an application", attrs: { href: panel.id === "connect-each-host" ? "#/sources?stab=add" : "#/onboard" } })
+        ]), "Application setup", undefined, { id: panel.id });
+      }
       if (panel.type === "log-results") return logResultsPanel(panel);
       if (panel.type === "search-dispatch") return searchDispatchPanel(panel);
       if (panel.type === "lookup") return lookupStatePanel(panel);
@@ -3196,7 +3268,10 @@
           text: label,
           attrs: { type: "button", disabled: !auth },
           dataset: { authAction: action }
-        })
+        }),
+        authenticated && global.SOC_PRIVATE_APPLICATION ? node("a", {
+          className: "resource-action", text: "Change password", attrs: { href: "/sign-in?mode=password" }
+        }) : null
       ]), auth ? "Application auth boundary" : "Not connected");
     }
 
@@ -3266,7 +3341,9 @@
             node("strong", { text: `One-time ${oneTimePurpose} credential` }),
             node("code", { text: oneTime.value || oneTime }),
             oneTime.expiresAt ? node("small", { className: "muted", text: `Expires ${oneTime.expiresAt}` }) : null,
-            node("small", { className: "muted", text: "Store this on the intended host now. It will not appear in the registry or audit trail again." })
+            node("small", { className: "muted", text: "Store this in the application sender's secret store now. It will not appear in the registry or audit trail again." }),
+            oneTime.purpose === "source-ingest" ? node("p", { text: `Send JSON batches to /api/v1/ingest using this credential in the Authorization: Bearer header. Source ID: ${output.sourceId}. Each batch needs schemaVersion 1, documentType ingest-batch, sourceId, a unique receiptId, sentAt, and normalized log.event records. Do not put the credential in JSON or browser code.` }) : null,
+            oneTime.purpose === "source-ingest" ? node("a", { text: "Read the exact ingest contract", attrs: { href: "#/docs" } }) : null
           ]) : null
         ]),
         node("button", { className: "resource-action", text: "Dismiss", attrs: { type: "button", "data-command-dismiss": "" } })
@@ -4036,6 +4113,16 @@
     }
 
     function renderPage() {
+      // A read may have started before the user selected a file or received a
+      // one-time credential. Recheck at the actual DOM replacement boundary.
+      const routeKey = routeHash(state.route, queryObject(state.query));
+      if (privateViewCleanup && privateViewRoute === routeKey && privateViewCleanup.isDirty && privateViewCleanup.isDirty()
+          && (!(config.auth && config.auth.required) || state.session.authenticated)) {
+        updateShellState();
+        return;
+      }
+      if (privateViewCleanup) { privateViewCleanup(); privateViewCleanup = null; }
+      privateViewRoute = null;
       updateNavigation();
       updateShellState();
       const page = pageByPath.get(state.route);
@@ -4077,6 +4164,39 @@
         wrapper.append(renderTechnicalDocumentation());
         root.replaceChildren(wrapper);
         applyPageFilter();
+        return;
+      }
+
+      if (page.localOnly && page.variant === "document-library") {
+        const container = node("section", { className: "document-library" });
+        wrapper.append(container);
+        root.replaceChildren(wrapper);
+        if (global.SOC_PRIVATE_APPLICATION && global.SocDocumentLibrary) {
+          privateViewCleanup = global.SocDocumentLibrary.render({ container, apiBase: "/api/v1/documents", onError: showToast }) || null;
+          privateViewRoute = routeKey;
+        } else {
+          container.append(node("section", { className: "panel empty-state" }, [
+            node("h2", { text: "Document storage is not connected" }),
+            node("p", { text: "Start the private application and sign in to upload, version, download, and track your own documents. No documents are included in the skeleton." })
+          ]));
+        }
+        return;
+      }
+
+      if (page.path === "/agents" && tabState.values.atab === "access") {
+        wrapper.append(routeTabs(page, tabState));
+        const container = node("section", { className: "administration-workspace", attrs: { id: "active-page-panels", role: "tabpanel", "aria-labelledby": "page-title" } });
+        wrapper.append(container);
+        root.replaceChildren(wrapper);
+        if (global.SOC_PRIVATE_APPLICATION && global.SocServiceAccess) {
+          privateViewCleanup = global.SocServiceAccess.render({ container, onError: showToast }) || null;
+          privateViewRoute = routeKey;
+        } else {
+          container.append(node("section", { className: "panel empty-state" }, [
+            node("h2", { text: "Private agent access is not connected" }),
+            node("p", { text: "Start the private application and sign in to issue scoped, expiring service credentials. Agent registrations and prompts do not grant API access." })
+          ]));
+        }
         return;
       }
 
@@ -4224,6 +4344,16 @@
       }
 
       root.replaceChildren(wrapper);
+      if (page.path === "/scans" && (tabState.values.tab || "trivy") === "trivy"
+          && global.SOC_PRIVATE_APPLICATION && global.SocScannerImport) {
+        const container = node("section", { className: "scanner-import" });
+        wrapper.append(container);
+        privateViewCleanup = global.SocScannerImport.render({
+          container, sources: state.controlSnapshot ? state.controlSnapshot.sources : [], onError: showToast,
+          onImported: () => refresh("manual")
+        }) || null;
+        privateViewRoute = routeKey;
+      }
       applyPageFilter();
     }
 
@@ -4248,6 +4378,7 @@
     }
 
     async function loadControlSnapshot(reason) {
+      const requestSerial = state.requestSerial;
       if (!commands || !["/sources", "/onboard", "/scans"].includes(state.route)) {
         state.controlState = commands ? "idle" : "absent";
         state.controlError = false;
@@ -4262,9 +4393,12 @@
           reason: reason === "initial" ? "initial" : reason === "command" ? "command" : "refresh"
         };
         if (state.controlSnapshot) request.knownRevision = state.controlSnapshot.revision;
-        state.controlSnapshot = connectorRuntime.validateControlSnapshot(await commands.getSnapshot(request));
+        const snapshot = connectorRuntime.validateControlSnapshot(await commands.getSnapshot(request));
+        if (!state.mounted || requestSerial !== state.requestSerial) return;
+        state.controlSnapshot = snapshot;
         state.controlState = "ready";
       } catch (error) {
+        if (!state.mounted || requestSerial !== state.requestSerial) return;
         state.controlSnapshot = null;
         state.controlState = "error";
         state.controlError = true;
@@ -4278,6 +4412,7 @@
     }
 
     async function loadAdministrationSnapshot(page, reason) {
+      const serial = state.requestSerial;
       const domain = administrationDomainForPage(page);
       state.administrationPrompt = null;
       if (!domain || !administration) {
@@ -4304,16 +4439,21 @@
         if (state.administrationSnapshot && state.administrationSnapshot.domain === domain) {
           request.knownRevision = state.administrationSnapshot.revision;
         }
-        state.administrationSnapshot = await administration.getSnapshot(request);
+        const snapshot = await administration.getSnapshot(request);
+        if (!state.mounted || serial !== state.requestSerial) return;
+        state.administrationSnapshot = snapshot;
         if (domain === "agents" && state.query.get("prompt")) {
-          state.administrationPrompt = await administration.getPrompt({
+          const prompt = await administration.getPrompt({
             schemaVersion: VERSION,
             documentType: "agent-prompt-request",
             promptId: state.query.get("prompt")
           });
+          if (!state.mounted || serial !== state.requestSerial) return;
+          state.administrationPrompt = prompt;
         }
         state.administrationState = "ready";
       } catch (error) {
+        if (!state.mounted || serial !== state.requestSerial) return;
         state.administrationSnapshot = null;
         state.administrationPrompt = null;
         state.administrationState = "error";
@@ -4401,7 +4541,7 @@
         return;
       }
       await loadControlSnapshot(reason);
-      if (!state.mounted) return;
+      if (!state.mounted || serial !== state.requestSerial) return;
       if (!provider) {
         state.providerState = "absent";
         finishRouteRender(reason, routeChanged, previousTabLabel);
@@ -4555,6 +4695,7 @@
         return {
           displayName: values.appName,
           hosts: commaList(values.hosts, 12),
+          environments: commaList(values.environments, 32).length ? commaList(values.environments, 32) : ["default"],
           publicPages: commaList(values.publicPages, 6)
         };
       }
@@ -4601,6 +4742,7 @@
         });
         return {
           appId: values.appId,
+          environment: values.environment ? values.environment.slice(values.environment.indexOf(":") + 1) : undefined,
           hostId: values.hostId || undefined,
           connectorType,
           sourceKind,
@@ -4609,12 +4751,19 @@
           credentialReferences
         };
       }
-      if (action === "source.test" || action === "source.activate") {
-        return {
+      if (action.startsWith("source.") && connectorRuntime.COMMANDS.includes(action)) {
+        const input = {
           sourceId: trigger && trigger.dataset.sourceId,
           connectorInstanceId: trigger && trigger.dataset.connectorInstanceId,
           expectedRevision: Number(trigger && trigger.dataset.expectedRevision)
         };
+        if (action === "source.test" && values.sampleMessage) input.sample = { message: values.sampleMessage };
+        if (action === "source.update") {
+          const source = state.controlSnapshot.sources.find((item) => item.sourceId === input.sourceId);
+          input.displayName = values.displayName;
+          input.config = { ...source.config, "cadence-seconds": Number(values.cadenceSeconds) };
+        }
+        return input;
       }
       throw new TypeError("That connector action is not supported by this interface version.");
     }
@@ -4626,6 +4775,8 @@
 
     async function performCommand(action, form, trigger) {
       if (!commands || state.commandPending) return;
+      if (["source.remove", "source.archive", "source.revoke", "source.rotate"].includes(action)
+          && typeof global.confirm === "function" && !global.confirm(`Confirm ${action.slice(7)} for this source? Existing sender access may stop immediately.`)) return;
       let request;
       try {
         request = {
@@ -4886,14 +5037,16 @@
     }
 
     function onRootInput(event) {
+      markFormDirty(event);
       if (event.target && event.target.closest && event.target.closest("[data-documentation-filter]")) {
         applyPageFilter(event);
       }
     }
 
     function onRootChange(event) {
+      markFormDirty(event);
       const connector = event.target && event.target.closest
-        ? event.target.closest('[name="connectorType"]')
+        ? event.target.closest('[name="connectorType"]') || event.target.closest('[name="appId"]')
         : null;
       if (connector) {
         syncSourceSetupForm(connector.closest("[data-command-form]"));
@@ -5030,9 +5183,22 @@
       }
     }
 
-    function onHashChange() { renderRoute("navigation"); }
+    function onHashChange() {
+      const previous = routeHash(state.route, queryObject(state.query));
+      if (global.location.hash === previous) return;
+      if (privateViewCleanup && privateViewCleanup.isDirty && privateViewCleanup.isDirty()
+          && typeof global.confirm === "function" && !global.confirm("Leave this page and discard your unsaved changes, selected upload, or one-time credential?")) {
+        global.location.hash = previous;
+        return;
+      }
+      renderRoute("navigation");
+    }
     function onRouteSelect() { if (hooks.routeSelect && hooks.routeSelect.value) navigate(hooks.routeSelect.value); }
     function onTimezone() {
+      if (privateViewCleanup && privateViewCleanup.isDirty && privateViewCleanup.isDirty()) {
+        showToast("Save or discard your pending work before changing the time display.");
+        return;
+      }
       state.timezone = state.timezone === "UTC" ? "Local" : "UTC";
       renderPage();
       showToast(`Times are displayed in ${state.timezone}.`);
@@ -5070,7 +5236,7 @@
       await loadSession();
       if (!state.mounted) return api;
       await renderRoute("initial");
-      if (state.mounted && provider) autoRefreshId = global.setInterval(() => { refresh(); }, 300000);
+      if (state.mounted && provider) autoRefreshId = global.setInterval(() => { refresh("automatic"); }, 300000);
       return api;
     }
 
@@ -5079,6 +5245,7 @@
       state.terminal = true;
       state.mounted = false;
       state.requestSerial += 1;
+      if (privateViewCleanup) { privateViewCleanup(); privateViewCleanup = null; }
       if (autoRefreshId !== null) global.clearInterval(autoRefreshId);
       autoRefreshId = null;
       clearGoShortcut();
@@ -5164,16 +5331,31 @@
       if (state.terminal) throw new Error("This application controller has been unmounted.");
       if (!pageByPath.has(path)) throw new TypeError("navigate path is not in the SOC interface catalog.");
       const target = routeHash(path, query);
+      if (target === global.location.hash && privateViewCleanup && privateViewCleanup.isDirty && privateViewCleanup.isDirty()) return undefined;
       if (global.location.hash === target) return renderRoute("navigation");
       global.location.hash = target;
       return undefined;
     }
 
-    async function refresh() {
-      if (!state.mounted) return;
-      await loadSession();
-      if (!state.mounted) return;
-      await renderRoute("refresh");
+    function markFormDirty(event) {
+      const form = event.target && event.target.closest ? event.target.closest("form") : null;
+      if (form && form.dataset) form.dataset.dirty = "true";
+    }
+
+    function refresh(reason) {
+      if (!state.mounted) return Promise.resolve();
+      if (refreshPromise) return refreshPromise;
+      if (state.commandPending || state.administrationPending || (privateViewCleanup && privateViewCleanup.isDirty && privateViewCleanup.isDirty()) || root.querySelector('form[data-dirty="true"]')
+          || root.querySelector('dialog[open]') || (hooks.commandDialog && hooks.commandDialog.open)) {
+        if (reason !== "automatic") showToast("Refresh paused to preserve your edits or pending action. Save or leave this page first.");
+        return Promise.resolve();
+      }
+      refreshPromise = (async () => {
+        await loadSession();
+        if (!state.mounted) return;
+        await renderRoute("refresh");
+      })().finally(() => { refreshPromise = null; });
+      return refreshPromise;
     }
 
     function getState() {

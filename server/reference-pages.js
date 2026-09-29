@@ -182,21 +182,21 @@ function normalizeConnectors(state) {
   }));
 }
 
-function normalizeSources(state, records, nowDate) {
+function normalizeSources(state, records, nowDate, indexedCounts) {
   const hosts = new Map(normalizeHosts(state).map((host) => [host.hostId, host]));
   const connectors = new Map(normalizeConnectors(state).map((connector) => [connector.connectorInstanceId, connector]));
-  const recordCounts = new Map();
+  const recordCounts = indexedCounts || new Map();
   records.forEach((record) => recordCounts.set(record.sourceId, (recordCounts.get(record.sourceId) || 0) + 1));
 
-  return state.sources.map((source, index) => {
+  return state.sources.filter((source) => source.state !== "removed").map((source, index) => {
     const label = `state.sources[${index}]`;
     const sourceId = identifier(source.sourceId, `${label}.sourceId`);
     const connectorInstanceId = identifier(source.connectorInstanceId, `${label}.connectorInstanceId`);
     const connector = connectors.get(connectorInstanceId);
     if (!connector) throw new TypeError(`${label}.connectorInstanceId does not reference a connector instance.`);
-    const hostId = identifier(source.hostId, `${label}.hostId`);
+    const hostId = source.hostId === undefined ? null : identifier(source.hostId, `${label}.hostId`);
     const host = hosts.get(hostId);
-    if (!host) throw new TypeError(`${label}.hostId does not reference a host.`);
+    if (hostId !== null && !host) throw new TypeError(`${label}.hostId does not reference a host.`);
     const sourceKind = boundedText(source.sourceKind, `${label}.sourceKind`, 120);
     const displayName = boundedText(
       source.label === undefined ? (source.displayName === undefined ? sourceId : source.displayName) : source.label,
@@ -216,6 +216,8 @@ function normalizeSources(state, records, nowDate) {
     const declaredHealth = source.health && typeof source.health.state === "string" ? source.health.state : null;
     const thresholds = scaledHealthThresholds(connector.connectorType, cadenceSeconds);
     const health = sourceHealth(connector.state, declaredHealth, lastSeenAt, thresholds, nowDate);
+    const applicationName = state.apps.find((app) => app.appId === source.appId)?.displayName || "Application";
+    const environment = source.environment || "default";
     return {
       sourceId,
       connectorInstanceId,
@@ -223,7 +225,8 @@ function normalizeSources(state, records, nowDate) {
       sourceKind,
       displayName,
       hostId,
-      hostName: host.name,
+      hostName: host ? host.name : `${state.apps.find((app) => app.appId === source.appId)?.displayName || "Application"} / ${source.environment || "default"}`,
+      contextName: `${applicationName} / ${environment}${host ? ` · collector ${host.name}` : ""}`,
       cadenceSeconds,
       lastSeenAt,
       receivedRecords: recordCounts.get(sourceId) || 0,
@@ -322,7 +325,7 @@ function sourceTable(sources) {
     caption: "Configured source collection and activity",
     columns: [
       { key: "source", label: "Source" },
-      { key: "host", label: "Host" },
+      { key: "host", label: "Application / environment" },
       { key: "last-collection", label: "Last collection" },
       { key: "cadence", label: "Cadence" },
       { key: "in-logs", label: "In Logs", align: "right" },
@@ -331,7 +334,7 @@ function sourceTable(sources) {
     ],
     rows: shown.map((source) => [
       source.displayName,
-      source.hostName,
+      source.contextName,
       source.lastSeenAt ? { type: "time", value: source.lastSeenAt } : "Never",
       formatCadence(source.cadenceSeconds),
       { type: "number", value: source.receivedRecords, unit: "events" },
@@ -349,7 +352,7 @@ function projectSources(state, records, sources, nowDate) {
       `Registry revision ${state.revision} contains no configured sources.`,
       "no-sources-configured",
       "No sources connected",
-      "Enroll a host and complete source setup, testing, and activation before events can arrive.",
+      "Register an application and environment, add a source, validate a redacted sample, then activate it. A collector is optional for application log push.",
       nowDate.toISOString()
     );
   }
@@ -377,7 +380,7 @@ function logTable(records, sources, hosts) {
     columns: [
       { key: "when", label: "When" },
       { key: "source", label: "Source" },
-      { key: "host", label: "Host" },
+      { key: "host", label: "Application / environment" },
       { key: "severity", label: "Severity" },
       { key: "state", label: "State" },
       { key: "channel", label: "Channel" },
@@ -391,7 +394,7 @@ function logTable(records, sources, hosts) {
       return [
         { type: "time", value: record.observedAt },
         source ? source.displayName : record.sourceId,
-        host ? host.name : (record.payload.assetRef || "—"),
+        source ? source.contextName : host ? host.name : (record.payload.assetRef || record.estateId),
         { type: "badge", label: severity, tone: severityTone(severity) },
         { type: "badge", label: record.payload.state, tone: stateTone(record.payload.state) },
         record.payload.channel || "—",
@@ -409,6 +412,7 @@ function logSearchText(record, source) {
     record.estateId,
     record.hostId,
     source && source.displayName,
+    source && source.contextName,
     record.payload.title,
     record.payload.message,
     record.payload.summary,
@@ -537,7 +541,7 @@ function projectHealth(state, records, sources, nowDate) {
       "Source health is unavailable until a source has been configured.",
       "no-source-health",
       "No sources to assess",
-      "Enroll a host and activate a source to begin measuring collection health.",
+      "Add and activate an application source, then send its first event to begin measuring collection health. Host-based integrations may also require a collector.",
       nowDate.toISOString()
     );
   }
@@ -585,15 +589,15 @@ function projectHealth(state, records, sources, nowDate) {
   };
 }
 
-function projectOverview(state, records, sources, nowDate) {
+function projectOverview(state, records, sources, nowDate, recentRecords) {
   if (state.apps.length === 0 && state.hosts.length === 0 && sources.length === 0 && records.length === 0) {
     return emptyEnvelope(
       "/",
       "Security Posture — Overview",
-      "The reference control plane has no registered applications, hosts, sources, or log events.",
+      "No applications, sources, or log events have been registered yet.",
       "no-operational-data",
       "No operational data",
-      "Register an application, enroll a host, configure a source, and deliver canonical log events to populate the console.",
+      "Register your application and environments, configure a source, validate a sample, and activate it. Live event delivery populates the console; application log push needs no collector host.",
       nowDate.toISOString()
     );
   }
@@ -604,14 +608,14 @@ function projectOverview(state, records, sources, nowDate) {
     title: "Connector estate",
     items: [
       { label: "Registered apps", value: state.apps.length, tone: "info" },
-      { label: "Enrolled hosts", value: state.hosts.length, tone: "info" },
+      { label: "Optional collectors", value: state.hosts.length, tone: "info" },
       { label: "Configured sources", value: sources.length, tone: sources.length > 0 ? "ok" : "neutral" },
       { label: "Sources needing attention", value: attention, tone: attention > 0 ? "warn" : "ok" },
       { label: "Log events retained", value: records.length, tone: "info" }
     ]
   }];
   if (records.length > 0) {
-    const recent = records.slice().sort((left, right) => Date.parse(right.observedAt) - Date.parse(left.observedAt)).slice(0, 20);
+    const recent = recentRecords || records.slice().sort((left, right) => Date.parse(right.observedAt) - Date.parse(left.observedAt)).slice(0, 20);
     panels.push({ ...logTable(recent, sources, normalizeHosts(state)), id: "detections", title: "Recent log events" });
   } else {
     panels.push({
@@ -626,7 +630,7 @@ function projectOverview(state, records, sources, nowDate) {
     route: "/",
     state: "ready",
     title: "Security Posture — Overview",
-    summary: `Reference connector registry revision ${state.revision}.`,
+    summary: `Application source registry revision ${state.revision}.`,
     updatedAt: nowDate.toISOString(),
     panels
   };
@@ -648,7 +652,7 @@ function createPageEnvelope(route, query, state, now) {
       route: request.route,
       state: "empty",
       title: "No data supplied",
-      summary: "The loopback reference projector does not populate this route.",
+      summary: "No data provider is installed for this route in this deployment.",
       updatedAt: nowDate.toISOString(),
       panels: []
     }, request.route);
@@ -666,4 +670,60 @@ function createPageEnvelope(route, query, state, now) {
   return runtime.validateEnvelope(projectors[route](), route);
 }
 
-module.exports = { SUPPORTED_PAGE_ROUTES, createPageEnvelope };
+function createIndexedPageEnvelope(route, query, store, now) {
+  const runtime = loadAdapterRuntime();
+  const request = runtime.validateRequest({ schemaVersion: "1", route, query: query || {}, reason: "navigation" });
+  const state = store.controlSnapshot();
+  const nowDate = normalizeNow(now);
+  if (!SUPPORTED_ROUTE_SET.has(route)) {
+    if (route === "/scans") {
+      const { createScannerPageEnvelope } = require("./scanner-pages");
+      const selection = store.latestScannerRecords();
+      const envelope = createScannerPageEnvelope(route, request.query, state, selection.records, nowDate);
+      if (selection.total > selection.records.length) envelope.summary += ` Showing a bounded ${selection.records.length} of ${selection.total} records belonging to the selected latest reports; additional details are omitted.`;
+      if (selection.sourceLimit) envelope.summary += " Latest-report summaries are limited to the 200 most recent reporting sources.";
+      return runtime.validateEnvelope(envelope, route);
+    }
+    return createPageEnvelope(route, request.query, state, nowDate);
+  }
+  const totals = store.logSummary();
+  const sources = normalizeSources(state, [], nowDate, totals.counts);
+  const hosts = normalizeHosts(state);
+  const retained = { length: totals.count };
+  let envelope;
+  if (route === "/") envelope = projectOverview(state, retained, sources, nowDate, store.logQuery({ limit: 20 }).records);
+  else if (route === "/sources") envelope = projectSources(state, retained, sources, nowDate);
+  else if (route === "/health") envelope = projectHealth(state, retained, sources, nowDate);
+  else if (route === "/logs") {
+    const search = (request.query.q || "").trim().toLocaleLowerCase();
+    const sourceId = request.query.sourceId === undefined ? undefined : identifier(request.query.sourceId, "query.sourceId");
+    const sourceMatches = search ? sources.filter((source) => [source.displayName, source.contextName].join("\n").toLocaleLowerCase().includes(search)).map((source) => source.sourceId) : [];
+    const selected = store.logQuery({ sourceId, search, sourceMatches, limit: requestedLogLimit(request.query) });
+    if (!selected.count) envelope = projectLogs(state, request.query, [], sources, hosts, nowDate);
+    else envelope = { schemaVersion: "1", route, state: "ready", title: "Security Logs",
+      summary: `${selected.count} canonical event${selected.count === 1 ? "" : "s"} matched.${summarySuffix(selected.records.length, selected.count)}`,
+      updatedAt: nowDate.toISOString(), panels: [logTable(selected.records, sources, hosts)] };
+  } else {
+    const hours = requestedHours(request.query);
+    const end = new Date(nowDate); end.setUTCMinutes(0, 0, 0);
+    const startMs = end.getTime() - (hours - 1) * HOUR_MS;
+    const selected = store.analytics(new Date(startMs).toISOString(), new Date(end.getTime() + HOUR_MS).toISOString());
+    if (!selected.count) envelope = projectAnalytics(state, request.query, [], nowDate);
+    else {
+      const buckets = Array.from({ length: hours }, (_, index) => new Date(startMs + index * HOUR_MS).toISOString());
+      const counts = new Map(selected.rows.map((row) => [row.hour, row.count]));
+      envelope = { schemaVersion: "1", route, state: "ready", title: "Analytics",
+        summary: `Aggregated from canonical normalized log events over the selected ${hours}-hour window.`, updatedAt: nowDate.toISOString(),
+        panels: [{ id: "summary-metrics", type: "metrics", title: "Collection summary", items: [
+          { label: "Events collected", value: selected.count, tone: "info" },
+          { label: "Sources reporting", value: selected.sources, tone: "ok" },
+          { label: "Channels reporting", value: selected.channels, tone: "info" },
+          { label: "History held", value: totals.earliest || "None", tone: "neutral" }
+        ] }, { id: "events-collected-per-hour", type: "chart", title: "Events collected per hour", unit: "events", buckets,
+          series: [{ label: "Canonical log events", values: buckets.map((bucket) => counts.get(bucket.slice(0, 13)) || 0), tone: "info" }] }] };
+    }
+  }
+  return runtime.validateEnvelope(envelope, route);
+}
+
+module.exports = { SUPPORTED_PAGE_ROUTES, createPageEnvelope, createIndexedPageEnvelope };

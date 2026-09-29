@@ -26,24 +26,33 @@ or accept, retrieve, or return plaintext credentials.
 The repository provides:
 
 - strict browser/CommonJS validation for connector manifests, registrations,
-  health, control snapshots, five lifecycle commands, and provider objects;
+  health, control snapshots, twelve lifecycle commands, and provider objects;
 - portable JSON Schemas for connector/source/control documents and canonical
   record/ingest documents;
 - Onboarding and Sources UI bindings that remain disabled without a validated
   connector provider;
 - local validators for connector and ingest documents;
-- a loopback-only reference server with a persistent local registry, bounded
+- a private Better Auth application (`npm start`) with authenticated operator
+  sessions, same-origin mutation checks, the source UI, and a document library;
+- a separate loopback-only development workbench with a persistent local registry, bounded
   command/ingest endpoints, hashed one-time credentials, a crash-detecting
   audit journal, and page projection; and
-- one reference connector type: canonical `log.event` push projected into
-  Overview, Sources, Security Logs, Analytics, and SOC Health.
+- application-scoped canonical `log.event` push projected into Overview,
+  Sources, Security Logs, Analytics, and SOC Health; and
+- a private application Trivy JSON report importer (`trivy-report`) projected
+  into Scans → Trivy. Eleven legacy scan setup manifests remain explicit
+  templates without drivers, including the separate `trivy-template`.
 
-It does not provide production authentication/authorization, CSRF/session
-handling, a transactional database, managed secret storage, a durable queue,
-multi-process coordination, vendor connectors, pull scheduling, webhook
-signature handlers, OTLP/syslog listeners, an agent runner, or a production MCP
-service. A separate narrow reference MCP process exposes public resources and
-scoped calls into the same loopback connector/administration API boundary.
+The private starter provides sessions and SQLite-backed identity/documents,
+but all provisioned operators have full application access: resource-scoped
+RBAC and multitenancy are not implemented for operators. Private telemetry now
+uses indexed SQLite transactions; administration remains bounded/single-writer.
+Scoped service credentials authorize the narrow MCP control API separately
+from browser sessions and source ingest credentials. Managed secret storage,
+durable queues, multi-process coordination, more vendor drivers, pull
+scheduling, webhook signature handlers, OTLP/syslog listeners and an agent
+runner remain adopter work. See the technical manual for exact service scopes,
+retention, replay, migration and Trivy import limits.
 
 ## Current version-1 vocabulary
 
@@ -52,11 +61,11 @@ These identifiers are opaque, stable, server-issued identities:
 
 | Entity | Current v1 fields and relationship |
 | --- | --- |
-| App | `appId`, display name, declared `hostId` list, optional HTTPS public pages, lifecycle/revision/timestamps |
+| App | `appId`, display name, environments (default `default`), optional declared `hostId` list, optional HTTPS public pages, lifecycle/revision/timestamps |
 | Host | `hostId`, owning `appId`, display name, enrollment state, independent connection state, last proof, revision/timestamps |
 | Connector manifest | Stable `connectorType` and `connectorVersion`; data-only description of one installed connector type |
 | Connector instance | `connectorInstanceId`, owning `appId`, `connectorType`, non-secret config, credential references, lifecycle/revision/timestamps |
-| Source | `sourceId`, `connectorInstanceId`, `appId`, optional `hostId`, `connectorType`, manifest-owned `sourceKind`, config/references, health, lifecycle/revision/timestamps |
+| Source | `sourceId`, `connectorInstanceId`, `appId`, selected application `environment`, optional `hostId`, `connectorType`, manifest-owned `sourceKind`, config/references, health, lifecycle/revision/timestamps |
 | Change | Stable change ID, typed resource/action/status, timestamp, and bounded safe message |
 
 Never derive source identity from `(host, sourceKind)`. Multiple instances of
@@ -129,7 +138,7 @@ this exact interface:
 ```
 
 It returns a `connector-control-snapshot` containing installed connector types,
-apps, hosts, connector instances, staged setups, active/disabled sources,
+apps, hosts, connector instances, staged setups, active/paused/archived sources,
 changes, and the registry revision. The runtime validates all identity and
 ownership relationships and forbids one-time credentials anywhere in a
 snapshot.
@@ -139,11 +148,18 @@ closed command set is:
 
 | Command | Input purpose | Successful state |
 | --- | --- | --- |
-| `app.register` | Display name, normalized host labels, optional HTTPS public pages | `registered` app |
+| `app.register` | Display name, optional environments/host labels/HTTPS public pages | `registered` app; no host required |
 | `host.enroll` | Existing owning `appId` and `hostId` | `enrolled`; may return one connection-check credential once |
-| `source.setup` | App/optional host, installed connector/source kind, display name, non-secret config, credential references | independent source and connector instance in `configured` |
-| `source.test` | Stable source/instance IDs plus `expectedRevision` | `tested` |
+| `source.setup` | App/environment/optional host, installed connector/source kind, display name, non-secret config, credential references | independent source and connector instance in `configured` |
+| `source.test` | Stable source/instance IDs plus `expectedRevision` and a bounded real `sample` (required without a host) | `tested`; sample is not ingested |
 | `source.activate` | Stable source/instance IDs plus `expectedRevision` | `active`; may return one source-ingest credential once |
+| `source.update` | Stable source/instance IDs, revision, and display name/config/credential-reference changes | `configured`; revokes old credentials and requires retest/reactivation |
+| `source.pause` | Stable source/instance IDs plus `expectedRevision` | `paused`; rejects ingest |
+| `source.resume` | Same selector/revision; requires an unrevoked ingest credential | `active` |
+| `source.revoke` | Same selector/revision | `paused`; revokes all source credentials |
+| `source.rotate` | Same selector/revision | `active`; revokes old credentials and returns a replacement once |
+| `source.archive` | Same selector/revision | `archived`; revokes credentials |
+| `source.remove` | Same selector/revision; source must be archived | `removed` tombstone; retained events/audit are not deleted |
 
 Results are `succeeded`, `failed`, `rejected`, or `conflict` and carry either a
 typed output or a bounded safe error. Reusing a request ID with different input
@@ -159,21 +175,27 @@ settings, upload, or other structural actions.
 
 The implemented UI guides an operator through these gates:
 
-1. **Register app.** `/onboard` collects an app name, a bounded list of hosts,
-   and optional HTTPS public pages. The server creates stable app/host IDs.
-2. **Enroll host.** Mint a host-bound connection-check credential. Display it
-   only in that successful result and store only a digest/reference server-side.
-3. **Prove connection.** An enrolled host submits the reserved, fresh
-   connection-check document with that credential. This proves only the local
-   admission path and never creates a searchable source or event.
-4. **Configure source.** `/sources?stab=add` selects the app, host, installed
+1. **Register application.** `/onboard` collects an app name, environments,
+   optional collector hosts, and optional HTTPS public pages. A hosted web app
+   can omit hosts entirely; the server creates stable app and optional host IDs.
+2. **Optional collector enrollment.** If a source needs a host, mint its
+   host-bound connection-check credential. Display it only in the successful
+   result and store only a digest/reference server-side.
+3. **Optional collector proof.** A selected enrolled host submits the reserved,
+   fresh connection-check document. This proves only admission and creates no
+   searchable source or event. Hostless canonical push skips these two steps.
+4. **Configure source.** `/sources?stab=add` selects the app, environment, optional host, installed
    connector type, and one supported kind. The form is generated from manifest
-   config fields and credential-reference slots. Reference mode allows this
-   after enrollment, but the next test remains blocked until connection proof.
-5. **Test.** Run a bounded server-side connection/structure test. A test changes
-   lifecycle state but does not create telemetry or mark collection healthy.
+   config fields and credential-reference slots. A selected host must be enrolled
+   and needs fresh connection proof before testing; scan templates require a host.
+5. **Validate a real sample.** Supply `sample: { message, channel?, severity? }`
+   from the intended source. This bounded validation changes lifecycle state but
+   neither persists the sample nor proves delivery or marks collection healthy.
+   Scanner templates fail closed until a reviewed server driver is installed.
 6. **Activate.** Pin the source/instance and issue any source-bound ingest
-   identity. Collection health remains pending until a real batch is accepted.
+   identity. Copy its one-time value into the sender's server-side secret store.
+   Follow the displayed source/app IDs and ingest instructions; never put it in
+   web-page JavaScript. Collection health remains pending until a real batch is accepted.
 7. **Observe.** Project accepted records and source health into existing panel
    IDs. An old successful test or delivery cannot mask a current failure.
 
@@ -264,11 +286,18 @@ analytics consume canonical records; they must not scrape page envelopes.
 
 ## Loopback reference workbench
 
-The reference workbench is opt-in and never starts with the static shell. Start
+For the usable private application, follow [AUTHENTICATION.md](AUTHENTICATION.md)
+and [ADOPTION.md](ADOPTION.md): install dependencies, provision an operator, then
+run `npm start` with an external persistent state directory. Machine ingest uses
+its scoped source bearer without a browser session or Origin header; operator
+control APIs require the authenticated session and same-origin mutation checks.
+
+The reference workbench is a separate opt-in development tool. Start
 it with an explicit disposable state directory:
 
 ```sh
 soc_reference_state="$(mktemp -d)"
+soc_reference_state="$(cd "$soc_reference_state" && pwd -P)"
 npm run start:connectors -- --state-dir "$soc_reference_state"
 ```
 
@@ -297,9 +326,10 @@ calls. Its exact HTTP surface is:
 | `GET`/`HEAD /application-bridge.js` | Generated same-origin browser providers for reference mode |
 | `GET`/`HEAD /api/v1/browser-provider.js` | API-namespaced alias for the same generated provider bridge |
 
-To exercise the whole reference slice, register an app on `/onboard`, open the
-Sources **Add a source** tab, and mint the selected host's connection-check
-credential. The intended host submits a fresh version-1 connection-check
+To exercise the hostless slice, register an app and environments on `/onboard`,
+then open Sources **Add a source**. No host enrollment is needed. If you select
+an optional collector, mint its connection-check credential first. The intended
+host submits a fresh version-1 connection-check
 document with that one-time value; for local contract testing the generated
 bridge exposes the same call as:
 
@@ -307,7 +337,7 @@ bridge exposes the same call as:
 await SOC_REFERENCE_WORKBENCH.connectionCheck(connectionCheckDocument, oneTimeCredential)
 ```
 
-Refresh Sources, configure `canonical-push` / `log.event`, run **Test**, and
+Refresh Sources, configure `canonical-push` / `log.event`, validate a real sample, and
 then **Activate**. Activation displays a different, source-bound ingest value
 once. Submit a batch that already passes `npm run validate:ingest`; the local
 helper calls the same bounded endpoint as an agent would:
@@ -351,17 +381,22 @@ atomic replacement, journals intent/commit/abort, and fails closed on detected
 inconsistency or write failure. One-time values are returned only at issuance;
 only digests and safe metadata persist.
 
+This same connector core is currently used by the private starter: 8 MiB state,
+50 MiB audit, 10,000 records, and 10,000 receipts are hard limits. Full-state
+rewrites and the single-process lock remain capacity constraints; exceeding a
+limit fails closed, and there is no automatic retention/compaction service.
+
 Those safeguards make the workbench useful for local contract testing. They do
 not make it a production server. Do not expose it remotely or put production
 credentials, customer data, or production telemetry in its state directory.
 
 ## Reference agent MCP
 
-With the loopback workbench running, `npm run start:agent-mcp` starts a separate
+With the loopback workbench running, `npm run --silent start:agent-mcp` starts a separate
 stdio MCP process. It publishes checked-in documentation/contracts and calls the
 same fixed control API through `connector_snapshot`, `connector_command`,
 `administration_snapshot`, `administration_prompt`, and
-`administration_command`. `host.enroll`, `source.activate`, and
+`administration_command`. `host.enroll`, `source.activate`, `source.rotate`, and
 `enrollment.issue` are refused before HTTP because their successful results may
 contain one-time credentials. Run them through the protected operator UI or an
 equivalently reviewed non-MCP ceremony.
@@ -372,15 +407,21 @@ plain HTTP only on exact loopback and HTTPS only on loopback/private addresses
 or the validated private-overlay DNS suffix. Tools accept no URL, redirects are refused, and
 the process exposes no generic fetch, shell, SQL, filesystem path, telemetry,
 secret retrieval/echo, or credential resource. It is a narrow client of the
-same authenticated/authorized service, never another connector registry or
-ingest path. Exact resources/arguments and agent-use rules are in
+canonical boundary, never another connector registry or ingest path. Supply
+`--token-file /absolute/private/mcp-service-token` and the private application's
+`--base-url` for authenticated service mode. Issue and rotate the credential in
+Agents → Service Access; do not supply browser cookies. The server enforces exact
+scopes and prohibits credential issuance and privilege expansion. Exact
+resources/arguments and agent-use rules are in
 [AGENTS.md](AGENTS.md#optional-mcp-facade).
 
 ## Production replacement boundary
 
-A production deployment replaces the entire reference server while retaining
-compatible browser/page/ingest contracts or deliberately versioning them. The
-replacement requires:
+A larger production deployment replaces the development workbench and upgrades
+the private starter's bounded reference core while retaining compatible
+browser/page/ingest contracts or deliberately versioning them. The private
+starter already supplies operator sessions and CSRF checks, but the full
+deployment still requires:
 
 - TLS, authenticated browser sessions and service identities, CSRF protection,
   and app/resource/action authorization;
@@ -407,10 +448,10 @@ log streams, or a second direct registry-write path through MCP.
 ## Scan connector implementation guide
 
 The Scans page is a structural catalog, not an installed scanner suite. The
-checked-in reference registry ships only `canonical-push` for `log.event`; it
-does not ship Trivy, Patch First, file-integrity, EOL, exposure, IOC,
-urlscan.io, dependency, ClamAV, quarantine, or remediation drivers. An adopter
-must install a reviewed manifest **and** implement its server-side acquisition,
+registry includes working `canonical-push` and eleven scan setup templates,
+but no Trivy, Patch First, file-integrity, EOL, exposure, IOC, urlscan.io,
+dependency, ClamAV, quarantine, or remediation drivers. An adopter must review
+the manifest **and** implement its server-side acquisition,
 normalizer, validation, health, persistence, and projector path before claiming
 that a tab is connected.
 
@@ -421,7 +462,7 @@ Every scan connector follows the same control flow:
    Scans target surface are reviewed together.
 2. Provision any API key, token, certificate, SSH material, or cloud role
    through a write-only server/secret-manager flow. The UI stores only an opaque
-   reference such as `{ store: "secret-manager", reference: "..." }`; never put
+   reference such as `{ slot: "api-key", store: "secret-manager", referenceId: "approved-key" }`; never put
    the value in browser config, manifest data, source snapshots, command logs,
    MCP arguments, or canonical records.
 3. Create the source from `/sources?stab=add` (or the equivalent authorized
@@ -664,7 +705,8 @@ npm run validate:ingest -- path/to/record-or-batch.json
 ```
 
 An adopter integration is complete only when an authorized operator can
-register an app, enroll and prove a host, configure a manifest-backed source
+register an app/environment, optionally enroll and prove a required collector,
+configure a manifest-backed source
 with references, test without contaminating telemetry, activate, admit real
 records through every advertised transport, and see them populate the declared
 page targets. Tests must cover duplicate same-kind instances, stable IDs,

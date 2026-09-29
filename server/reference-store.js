@@ -134,7 +134,7 @@ function validateCredentialReferences(value, label) {
 function validateApp(value, index) {
   const label = "state.apps[" + index + "]";
   assertPlainRecord(value, label);
-  assertAllowedKeys(value, ["appId", "displayName", "hosts", "publicPages", "state", "revision", "createdAt", "updatedAt"], label);
+  assertAllowedKeys(value, ["appId", "displayName", "hosts", "publicPages", "environments", "state", "revision", "createdAt", "updatedAt"], label);
   assertId(value.appId, "appId", label + ".appId");
   assertString(value.displayName, label + ".displayName", 120, /\S/u);
   if (value.state !== "registered") throw new TypeError(label + ".state is invalid.");
@@ -144,6 +144,11 @@ function validateApp(value, index) {
   const hosts = assertArray(value.hosts, label + ".hosts", 64);
   hosts.forEach((hostId, hostIndex) => assertId(hostId, "hostId", label + ".hosts[" + hostIndex + "]"));
   if (new Set(hosts).size !== hosts.length) throw new TypeError(label + ".hosts contains duplicates.");
+  if (value.environments !== undefined) {
+    const environments = assertArray(value.environments, label + ".environments", 32);
+    if (!environments.length || new Set(environments).size !== environments.length) throw new TypeError(label + ".environments must be nonempty and unique.");
+    environments.forEach((entry) => assertString(entry, label + ".environments", 80, /^[a-z][a-z0-9.-]*$/));
+  }
   const pages = assertArray(value.publicPages, label + ".publicPages", 64);
   pages.forEach((page, pageIndex) => validatePublicPage(page, label + ".publicPages[" + pageIndex + "]"));
   if (new Set(pages).size !== pages.length) throw new TypeError(label + ".publicPages contains duplicates.");
@@ -179,7 +184,7 @@ function validateConnector(value, index, appIds) {
   if (!appIds.has(value.appId)) throw new TypeError(label + ".appId does not reference an app.");
   if (!getReferenceManifest(value.connectorType)) throw new TypeError(label + ".connectorType is unsupported.");
   assertString(value.displayName, label + ".displayName", 120, /\S/u);
-  if (!["configured", "tested", "active"].includes(value.state)) throw new TypeError(label + ".state is invalid.");
+  if (!["configured", "tested", "active", "paused", "archived", "removed"].includes(value.state)) throw new TypeError(label + ".state is invalid.");
   validateConfig(value.config, label + ".config");
   validateCredentialReferences(value.credentialReferences, label + ".credentialReferences");
   assertUnsigned(value.revision, label + ".revision");
@@ -198,8 +203,8 @@ function validateHealth(value, label, source) {
   if (value.sourceId !== source.sourceId || value.connectorInstanceId !== source.connectorInstanceId || value.revision !== source.revision) {
     throw new TypeError(label + " identity or revision does not match its source.");
   }
-  if (!["unknown", "pending", "healthy", "degraded", "stale", "offline", "error"].includes(value.state)) throw new TypeError(label + ".state is invalid.");
-  if (!["none", "awaiting-first-delivery", "late", "connector-error", "authentication-required", "configuration-invalid", "permission-denied", "rate-limited"].includes(value.reason)) {
+  if (!["unknown", "pending", "healthy", "degraded", "stale", "offline", "error", "disabled"].includes(value.state)) throw new TypeError(label + ".state is invalid.");
+  if (!["none", "awaiting-first-delivery", "late", "connector-error", "authentication-required", "configuration-invalid", "permission-denied", "rate-limited", "disabled"].includes(value.reason)) {
     throw new TypeError(label + ".reason is invalid.");
   }
   ["observedAt", "lastAttemptAt", "lastSuccessAt", "nextExpectedAt"].forEach((key) => assertNullableTimestamp(value[key], label + "." + key));
@@ -218,18 +223,20 @@ function validateSource(value, index, appIds, hostIds, connectorIds) {
   assertPlainRecord(value, label);
   assertAllowedKeys(value, [
     "schemaVersion", "documentType", "sourceId", "connectorInstanceId", "appId", "connectorType", "sourceKind",
-    "displayName", "hostId", "state", "config", "credentialReferences", "revision", "createdAt", "updatedAt", "health"
+    "displayName", "hostId", "environment", "state", "config", "credentialReferences", "revision", "createdAt", "updatedAt", "health"
   ], label);
   if (value.schemaVersion !== "1" || value.documentType !== "source-registration") throw new TypeError(label + " has an invalid contract.");
   assertId(value.sourceId, "sourceId", label + ".sourceId");
   assertId(value.connectorInstanceId, "connectorInstanceId", label + ".connectorInstanceId");
   assertId(value.appId, "appId", label + ".appId");
-  assertId(value.hostId, "hostId", label + ".hostId");
-  if (!appIds.has(value.appId) || !hostIds.has(value.hostId) || !connectorIds.has(value.connectorInstanceId)) throw new TypeError(label + " contains an invalid reference.");
+  if (value.hostId !== undefined) assertId(value.hostId, "hostId", label + ".hostId");
+  if (value.environment !== undefined) assertString(value.environment, label + ".environment", 80, /^[a-z][a-z0-9.-]*$/);
+  if (!appIds.has(value.appId) || (value.hostId !== undefined && !hostIds.has(value.hostId)) || !connectorIds.has(value.connectorInstanceId)) throw new TypeError(label + " contains an invalid reference.");
   const manifest = getReferenceManifest(value.connectorType);
   if (!manifest || !manifest.supportedSourceKinds.includes(value.sourceKind)) throw new TypeError(label + " has an unsupported type.");
+  if (manifest.scope === "host" && value.hostId === undefined) throw new TypeError(label + " requires its collector host.");
   assertString(value.displayName, label + ".displayName", 120, /\S/u);
-  if (!["configured", "tested", "active"].includes(value.state)) throw new TypeError(label + ".state is invalid.");
+  if (!["configured", "tested", "active", "paused", "archived", "removed"].includes(value.state)) throw new TypeError(label + ".state is invalid.");
   validateConfig(value.config, label + ".config");
   validateCredentialReferences(value.credentialReferences, label + ".credentialReferences");
   assertUnsigned(value.revision, label + ".revision");
@@ -280,9 +287,9 @@ function validateStoredRecord(value, index, appIds, hostIds, connectorIds, sourc
   if (canonical.kind !== "log.event") throw new TypeError(label + ".kind is unsupported.");
   assertId(value.estateId, "appId", label + ".estateId");
   assertId(value.connectorInstanceId, "connectorInstanceId", label + ".connectorInstanceId");
-  assertId(value.hostId, "hostId", label + ".hostId");
+  if (value.hostId !== undefined) assertId(value.hostId, "hostId", label + ".hostId");
   if (!appIds.has(value.estateId) || !connectorIds.has(value.connectorInstanceId)
-      || !hostIds.has(value.hostId) || !sourceIds.has(value.sourceId)) throw new TypeError(label + " contains an invalid reference.");
+      || (value.hostId !== undefined && !hostIds.has(value.hostId)) || !sourceIds.has(value.sourceId)) throw new TypeError(label + " contains an invalid reference.");
   assertNullableTimestamp(value.receivedAt, label + ".receivedAt");
   return value;
 }
@@ -322,7 +329,7 @@ function validateCommandCache(value, index) {
   assertAllowedKeys(value, ["requestId", "requestHash", "command", "result", "revision", "at"], label);
   assertString(value.requestId, label + ".requestId", 128, /^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
   assertHash(value.requestHash, label + ".requestHash");
-  if (!["app.register", "host.enroll", "source.setup", "source.test", "source.activate"].includes(value.command)) throw new TypeError(label + ".command is invalid.");
+  if (!require("../public/connector-contract").COMMANDS.includes(value.command)) throw new TypeError(label + ".command is invalid.");
   assertPlainRecord(value.result, label + ".result");
   const serialized = JSON.stringify(value.result);
   if (serialized.length > 4096 || /"(?:value|secret|token|password|authorization)"\s*:/i.test(serialized)) {
@@ -362,7 +369,9 @@ function validateState(value) {
   for (const source of sources) {
     const connector = connectors.find((entry) => entry.connectorInstanceId === source.connectorInstanceId);
     const host = hosts.find((entry) => entry.hostId === source.hostId);
-    if (!connector || !host || connector.appId !== source.appId || host.appId !== source.appId
+    const app = apps.find((entry) => entry.appId === source.appId);
+    if (!connector || connector.appId !== source.appId || (source.hostId !== undefined && (!host || host.appId !== source.appId))
+        || (source.environment !== undefined && !(app.environments || ["default"]).includes(source.environment))
         || connector.connectorType !== source.connectorType || connector.state !== source.state) {
       throw new TypeError("state source, connector, host, and app relationships are inconsistent.");
     }
@@ -559,6 +568,9 @@ class ReferenceStateStore {
     this.lockFile = path.join(this.directory, LOCK_FILE);
     this.lockDescriptor = null;
     this.failed = false;
+    if (!options.allowIndexedStore && fs.existsSync(path.join(this.directory, "telemetry.sqlite"))) {
+      throw new Error("This state directory was upgraded to indexed telemetry. Use the private application; the reference runtime cannot reopen its frozen migration snapshot.");
+    }
     ensureSecureDirectory(this.directory);
     this.acquireLock();
     try { this.state = this.load(); } catch (error) { this.close(); throw error; }
@@ -683,5 +695,5 @@ module.exports = {
   AUDIT_FILE, ID_PATTERNS, LOCK_FILE, MAX_RECORDS, MAX_RECEIPTS, ReferenceStateStore,
   SCHEMA_VERSION, STATE_FILE, assertAllowedKeys, assertId, assertPlainRecord, assertString,
   clone, emptyState, generateCredential, hashCredential, isPlainRecord, secureEqualHex, stableId,
-  validateAuditChain, validateState
+  validateAuditChain, validateAuditEntry, validateState
 };
