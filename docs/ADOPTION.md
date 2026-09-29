@@ -42,7 +42,7 @@ distributed SIEM, and it does not populate every SOC page.
 
 In Scans → Trivy, configure an application/environment-scoped Trivy JSON source,
 test and activate it, then upload a supported report. Accepted reports populate
-Trivy and Patch first views; API automation uses that source's ingest credential,
+the Trivy view only; API automation uses that source's ingest credential,
 not a service-agent credential. In Agents → Service Access, issue a read-only
 service identity, save its one-time value to an owner-only external file, and
 connect MCP with `--base-url` and `--token-file`. Add exact write scopes only when
@@ -405,10 +405,10 @@ workbench, projection targets, and production replacement requirements.
 For every Scans tab, follow the scan-specific recipes in
 [CONNECTORS.md](CONNECTORS.md#scan-connector-implementation-guide). Private mode
 adds a working `trivy-report` importer, separate from the eleven legacy setup
-templates. It projects Trivy and Patch first from supported vulnerability reports;
+templates. It populates the Trivy view from supported vulnerability reports;
 it does not run Trivy, patch packages, or activate the legacy `trivy-template`.
 File integrity, EOL, exposure, IOC, urlscan.io, dependencies, ClamAV, quarantine,
-remediation, and independent Patch First acquisition still require integrations.
+remediation, and Patch First acquisition/projection still require integrations.
 Provide a reviewed manifest, server driver, opaque credential-
 reference flow, normalizer, health policy, durable records, and idempotent
 projector for each one you enable.

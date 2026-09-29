@@ -448,9 +448,11 @@ log streams, or a second direct registry-write path through MCP.
 ## Scan connector implementation guide
 
 The Scans page is a structural catalog, not an installed scanner suite. The
-registry includes working `canonical-push` and eleven scan setup templates,
-but no Trivy, Patch First, file-integrity, EOL, exposure, IOC, urlscan.io,
-dependency, ClamAV, quarantine, or remediation drivers. An adopter must review
+registry includes working `canonical-push`, the private application's
+`trivy-report` importer, and eleven data-only scan setup templates. The importer
+populates only Trivy from reports produced elsewhere; no scanner execution,
+Patch First, file-integrity, EOL, exposure, IOC, urlscan.io, dependency, ClamAV,
+quarantine, or remediation drivers are installed. An adopter must review
 the manifest **and** implement its server-side acquisition,
 normalizer, validation, health, persistence, and projector path before claiming
 that a tab is connected.

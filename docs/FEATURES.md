@@ -108,7 +108,7 @@ Documents is included).
 
 | Route | Structural surface | Provider responsibility |
 | --- | --- | --- |
-| `#/scans` | **Scans:** Trivy, Patch first, File integrity, End of life, External surface plus sweep history, IOC scan, watched/on-demand urlscan.io surfaces, Dependencies, DLP Upload AV plus recent events, active/deleted Quarantine ledgers, and an inline Remediation log view; private Trivy adds a real report-upload form and projects accepted package/vulnerability observations into Trivy and Patch first | Supply additional scan, exploitation, integrity, EOL, exposure, dependency, and review integrations; importer acceptance does not attest scan completeness, exploitation status, or patch execution |
+| `#/scans` | **Scans:** Trivy, Patch first, File integrity, End of life, External surface plus sweep history, IOC scan, watched/on-demand urlscan.io surfaces, Dependencies, DLP Upload AV plus recent events, active/deleted Quarantine ledgers, and an inline Remediation log view; private Trivy adds a real report-upload form and projects accepted package/vulnerability observations into the Trivy view only | Supply additional scan, exploitation, integrity, EOL, exposure, dependency, Patch First, and review integrations; importer acceptance does not attest scan completeness, exploitation status, or patch execution |
 | `#/remediation` | **Remediation:** latest VM review, the exact six-field append-only remediation form, and remediation record cards | Authorized remediation records, evidence references, future-concern state, and commands |
 
 ### Estate
@@ -307,7 +307,7 @@ route is not authorization to read the referenced resource.
   Eleven legacy scanner setup templates have no drivers and cannot activate.
   The private starter additionally installs `trivy-report`: supported JSON
   imports produce scan summaries, package inventory and vulnerability records,
-  with Trivy/Patch first projections. Other acquisition modes remain adopter
+  with Trivy-only projections. Patch First and other acquisition modes remain adopter
   implementations; no server-side scanner execution is implied.
 
 See [CONNECTORS.md](CONNECTORS.md).
@@ -381,7 +381,7 @@ compliant, or risk-free.
 | Agent-readable MCP resources and five fixed control tools | Authenticated private service routes with owner-only token-file client, scopes, expiry, rotation/revocation and audit; legacy loopback mode retained; credential issuance, URLs, shell, telemetry, and secrets refused | Private deployment/TLS, permission selection, human approval workflow, availability and operations |
 | Document uploads, versions, metadata, history, archive/restore | Private authenticated library and bounded SQLite store | Scanning, retention, deletion policy, fine-grained access, backups |
 | Other commands, approvals, and catalog attachment controls | No | Yes |
-| Trivy vulnerability-report import | Supported JSON normalization, private UI/API, source credential admission, atomic ingest and Trivy/Patch first projection | Running the scanner privately, producing supported fresh reports, coverage validation and remediation |
+| Trivy vulnerability-report import | Supported JSON normalization, private UI/API, source credential admission, atomic ingest and Trivy-only projection | Running the scanner privately, producing supported fresh reports, coverage validation and remediation |
 | Other email, chat, ticketing, scanner, SIEM, cloud, or estate integrations | No | Yes |
 | Production availability, recovery, privacy, and incident response | No | Yes |
 
