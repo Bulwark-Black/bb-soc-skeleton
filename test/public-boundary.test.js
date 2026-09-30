@@ -332,6 +332,7 @@ function createUiHarness(initialHash, options = {}) {
   const context = vm.createContext({
     URL,
     URLSearchParams,
+    TextEncoder,
     clearTimeout() {},
     clearInterval() {},
     console,
@@ -549,11 +550,17 @@ test("every public runtime script and provider example has no capability or unsa
     "public/bootstrap.js",
     "public/connector-contract.js",
     "public/document-library.js",
+    "public/integration-center.js",
+    "public/live-monitoring.js",
     "public/private-sign-in.js",
     "public/scanner-import.js",
     "public/service-access.js",
+    "public/setup-assistance.js",
+    "public/setup-guides.js",
+    "public/source-mapping.js",
     "public/technical-docs.js",
-    "public/ui-catalog.js"
+    "public/ui-catalog.js",
+    "public/vendor-import.js"
   ]);
   const forbiddenCapabilities = [
     /\bfetch\s*\(/,
@@ -570,7 +577,7 @@ test("every public runtime script and provider example has no capability or unsa
   ];
   for (const name of runtimeFiles) {
     const source = read(name);
-    const privateClient = ["public/document-library.js", "public/private-sign-in.js", "public/scanner-import.js", "public/service-access.js"].includes(name);
+    const privateClient = ["public/document-library.js", "public/private-sign-in.js", "public/scanner-import.js", "public/service-access.js", "public/integration-center.js", "public/vendor-import.js", "public/live-monitoring.js", "public/setup-guides.js", "public/setup-assistance.js", "public/source-mapping.js"].includes(name);
     for (const pattern of forbiddenCapabilities) {
       if (privateClient && pattern.source === "\\bfetch\\s*\\(") continue;
       assert.doesNotMatch(source, pattern, `${name}: ${pattern}`);
@@ -877,11 +884,11 @@ test("the structural catalog contains 38 SOC routes plus Documents and local doc
   });
   assert.deepEqual(tabs("/systems", "stab").map(([id]) => id), ["estate", "affected"]);
   assert.deepEqual(tabs("/retention", "vtab").map(([id]) => id), ["policy", "reality", "review"]);
-  assert.deepEqual(tabs("/sources", "stab").map(([id]) => id), ["expected", "add", "changes"]);
+  assert.deepEqual(tabs("/sources", "stab").map(([id]) => id), ["setup", "mapping", "operations", "expected", "add", "integrations", "live", "vendors", "observations", "changes"]);
   assert.deepEqual(tabs("/agents", "atab").map(([id]) => id), ["agents", "add", "prompts", "enrollment", "access", "audit"]);
   assert.deepEqual(tabs("/attestations", "gtab").map(([id]) => id), ["active", "create", "archived", "history"]);
   assert.deepEqual(tabs("/register", "riskTab").map(([id]) => id), ["active", "create", "archived", "history"]);
-  assert.deepEqual(tabs("/access", "atab").map(([id]) => id), ["who", "refusals", "chain", "offboarding"]);
+  assert.deepEqual(tabs("/access", "atab").map(([id]) => id), ["who", "refusals", "chain", "offboarding", "observations"]);
   assert.deepEqual(tabs("/access", "oview").map(([id]) => id), ["records", "guide"]);
 
   for (const page of pages) {
@@ -941,7 +948,7 @@ test("technical documentation is synchronized, frozen, and contains the complete
   ];
   vocabularies.flat().forEach((value) => assert.match(manual.markdown, new RegExp(value.replace(".", "\\.")), value));
   for (const phrase of [
-    "no browser command for installing a connector manifest",
+    "installs only reviewed, data-only canonical declarations",
     "does \\*\\*not\\*\\* provide the following production systems",
     "ships an optional stdio MCP reference client",
     "never a production server",
@@ -1363,7 +1370,7 @@ test("a validated connector provider populates source choices and enables only l
   assert.ok(options.includes("canonical-push"));
   assert.ok(options.includes("canonical-push:log.event"));
   assert.equal(nodesWithClass(harness.mountRoot, "connector-manifest-editor").length, 1);
-  assert.match(harness.mountRoot.textContent, /Produces log\.event/);
+  assert.match(harness.mountRoot.textContent, /Allows log\.event/);
   assert.equal(findNodes(harness.mountRoot,
     (candidate) => candidate.getAttribute("name") === "config::canonical-push::cadence-seconds").length, 0,
   "the active cadence-hours field is the single cadence editor");
@@ -1474,6 +1481,165 @@ test("application source UI submits sample validation and exposes lifecycle mana
   assert.equal(plane.getState().sources[0].state, "paused");
   assert.ok(harness.mountRoot.querySelector('[data-command-action="source.resume"]'));
   harness.app.unmount();
+});
+
+test("integration links preselect only installed connector types and expose their source categories", async () => {
+  const { CANONICAL_EVENTS_MANIFEST, REFERENCE_CONNECTOR_MANIFESTS } = require("../server/reference-manifest");
+  const custom = JSON.parse(JSON.stringify(CANONICAL_EVENTS_MANIFEST));
+  custom.connectorType = "custom-app-events";
+  custom.displayName = "Custom application events";
+  custom.supportedSourceKinds = ["application.events"];
+  const snapshot = { schemaVersion: "1", documentType: "connector-control-snapshot",
+    connectorTypes: [...REFERENCE_CONNECTOR_MANIFESTS, custom],
+    apps: [], hosts: [], connectorInstances: [], setups: [], sources: [], changes: [], revision: 0 };
+  let executions = 0;
+  const commands = { schemaVersion: "1", id: "custom-preselection-test", getSnapshot: () => snapshot,
+    execute() { executions += 1; throw new Error("Selecting an integration must not execute a command."); } };
+  for (const type of ["custom-app-events", "canonical-events", "uninstalled-events"]) {
+    const harness = createUiHarness("#/sources?stab=add&connectorType=" + type, { provider: false, commands });
+    await harness.app.mount();
+    const connector = harness.mountRoot.querySelector('[name="connectorType"]');
+    const sourceKind = harness.mountRoot.querySelector('[name="sourceKind"]');
+    const expectedType = type === "uninstalled-events" ? "" : type;
+    assert.equal(connector.value || "", expectedType, type);
+    assert.equal(sourceKind.value || "", type === "custom-app-events" ? "custom-app-events:application.events" : "");
+    assert.equal(connector.closest("form").querySelector('[name="hostId"]').required, false);
+    const editors = harness.mountRoot.querySelectorAll("[data-connector-manifest]");
+    for (const editor of editors) assert.equal(editor.hidden, editor.getAttribute("data-connector-manifest") !== expectedType);
+    const permitted = sourceKind.querySelectorAll("option").filter((option) => option.getAttribute("data-connector-type") === expectedType && !option.disabled);
+    assert.equal(permitted.length, type === "canonical-events" ? 29 : type === "custom-app-events" ? 1 : 0);
+    assert.equal(executions, 0);
+    harness.app.unmount();
+  }
+});
+
+test("source activation credential guidance follows the installed record kinds and keeps Trivy on its report importer", async (t) => {
+  const os = require("node:os");
+  const { ReferenceControlPlane } = require("../server/reference-runtime");
+  const { runAsOperator } = require("../server/operator-context");
+  const { vendorManifest } = require("../tools/vendor-adapters");
+  for (const connectorType of ["canonical-events", "vendor.github-audit", "trivy-report"]) {
+    const directory = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "soc-activation-guide-"));
+    const plane = new ReferenceControlPlane({ stateDirectory: directory,
+      enabledConnectorTypes: ["canonical-push", "canonical-events", "trivy-report"] });
+    t.after(() => { plane.dispose(); fs.rmSync(directory, { recursive: true, force: true }); });
+    if (connectorType.startsWith("vendor.")) {
+      runAsOperator("activation-guide-operator", () => plane.installIntegration({ manifest: vendorManifest("github-audit"), expectedRevision: 0 }));
+    }
+    let sequence = 0;
+    const execute = (command, input) => plane.execute({ schemaVersion: "1", documentType: "connector-command-request",
+      requestId: "activation-guide-" + (++sequence), command, requestedAt: new Date().toISOString(), input });
+    const appId = execute("app.register", { displayName: "Synthetic activation application", publicPages: [], environments: ["test"] }).output.appId;
+    const sourceKind = connectorType === "trivy-report" ? "trivy.scan" : connectorType === "vendor.github-audit" ? "github-audit" : "audit.event";
+    const setup = execute("source.setup", { appId, environment: "test", connectorType, sourceKind,
+      displayName: "Synthetic activation source", config: { "cadence-seconds": 300 }, credentialReferences: [] }).output;
+    const sourceInput = () => {
+      const source = plane.controlState().sources.find(item => item.sourceId === setup.sourceId);
+      return { sourceId: source.sourceId, connectorInstanceId: source.connectorInstanceId, expectedRevision: source.revision };
+    };
+    const sample = { schemaVersion: "1", documentType: "normalized-record", recordId: "activation-guide-sample",
+      sourceId: setup.sourceId, estateId: appId, kind: "audit.event", observedAt: new Date().toISOString(),
+      payload: { title: "Synthetic audit observation", state: "unknown", category: "synthetic.audit" } };
+    const tested = execute("source.test", { ...sourceInput(), ...(connectorType === "trivy-report" ? {} : { recordSample: sample }) });
+    assert.equal(tested.status, "succeeded", connectorType);
+    const harness = createUiHarness("#/sources?stab=add", { provider: false, commands: {
+      schemaVersion: "1", id: "activation-guide-provider", getSnapshot: request => plane.getSnapshot(request), execute: request => plane.execute(request)
+    } });
+    t.after(() => harness.app.unmount());
+    await harness.app.mount();
+    const activate = harness.mountRoot.querySelector('[data-command-action="source.activate"]');
+    assert.ok(activate, connectorType);
+    harness.mountRoot.dispatchEvent({ type: "click", target: activate });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(plane.controlState().sources.find(item => item.sourceId === setup.sourceId).state, "active");
+    const notices = nodesWithClass(harness.mountRoot, "one-time-credential");
+    assert.equal(notices.length, 1, connectorType);
+    const guidance = notices[0].textContent;
+    assert.ok(guidance.includes(setup.sourceId));
+    if (connectorType === "trivy-report") {
+      assert.match(guidance, /Scans → Trivy/);
+      assert.match(guidance, /\/api\/v1\/scanners\/trivy\/import/);
+      assert.match(guidance, /Do not send generic canonical batches to a Trivy report source/);
+      assert.doesNotMatch(guidance, /\/api\/v1\/ingest/);
+    } else {
+      const manifest = plane.getSnapshot({ schemaVersion: "1", reason: "refresh" }).connectorTypes.find(item => item.connectorType === connectorType);
+      assert.match(guidance, /\/api\/v1\/ingest/);
+      assert.ok(guidance.includes("normalized records allowed by this source: " + manifest.payload.recordKinds.join(", ") + "."));
+      assert.doesNotMatch(guidance, /\/api\/v1\/scanners\/trivy\/import/);
+      if (connectorType === "vendor.github-audit") {
+        assert.match(guidance, /normalized records allowed by this source: audit\.event\./);
+        assert.doesNotMatch(guidance, /log\.event/);
+        assert.match(guidance, /Sources → Vendor imports/);
+      }
+    }
+    harness.app.unmount();
+  }
+});
+
+test("universal and custom source UIs pass canonical samples to the validated command contract without storing them", async (t) => {
+  const os = require("node:os");
+  const { ReferenceControlPlane } = require("../server/reference-runtime");
+  const { CANONICAL_EVENTS_MANIFEST } = require("../server/reference-manifest");
+  const { runAsOperator } = require("../server/operator-context");
+  const { validateNormalizedRecord } = require("../tools/ingest-contract");
+  for (const connectorType of ["canonical-events", "custom-app-events"]) {
+    const directory = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "soc-canonical-ui-"));
+    const plane = new ReferenceControlPlane({ stateDirectory: directory, enabledConnectorTypes: ["canonical-push", "canonical-events"] });
+    t.after(() => { plane.dispose(); fs.rmSync(directory, { recursive: true, force: true }); });
+    if (connectorType !== "canonical-events") {
+      const manifest = JSON.parse(JSON.stringify(CANONICAL_EVENTS_MANIFEST));
+      manifest.connectorType = connectorType;
+      runAsOperator("ui-review-operator", () => plane.installIntegration({ manifest, expectedRevision: 0 }));
+    }
+    let sequence = 0;
+    const execute = (command, input) => plane.execute({ schemaVersion: "1", documentType: "connector-command-request",
+      requestId: "canonical-ui-" + (++sequence), command, requestedAt: new Date().toISOString(), input });
+    const appId = execute("app.register", { displayName: "Canonical application", publicPages: [], environments: ["live"] }).output.appId;
+    const configured = execute("source.setup", { appId, environment: "live", connectorType, sourceKind: "authentication.event",
+      displayName: "Authentication observation source", config: { "cadence-seconds": 300 }, credentialReferences: [] }).output;
+    const requests = [];
+    const harness = createUiHarness("#/sources?stab=add", { provider: false, commands: {
+      schemaVersion: "1", id: "canonical-source-ui", getSnapshot: (request) => plane.getSnapshot(request),
+      execute: (request) => { requests.push(request); return plane.execute(request); }
+    } });
+    await harness.app.mount();
+    const textarea = harness.mountRoot.querySelector('[name="recordSample"]');
+    assert.ok(textarea, connectorType);
+    assert.equal(textarea.getAttribute("required"), "");
+    assert.match(textarea.closest("form").textContent, new RegExp(configured.sourceId));
+    assert.match(textarea.closest("form").textContent, new RegExp(appId));
+    const submit = async (value) => {
+      textarea.value = value;
+      const form = textarea.closest("form");
+      harness.mountRoot.dispatchEvent({ type: "submit", target: form, submitter: form.querySelector('[data-command-action="source.test"]') });
+      await new Promise((resolve) => setImmediate(resolve));
+    };
+    await submit("{ not valid JSON");
+    assert.equal(requests.length, 0);
+    assert.equal(textarea.value, "{ not valid JSON", "preparation failures preserve the draft");
+    const record = { schemaVersion: "1", documentType: "normalized-record", recordId: "ui-redacted-validation-only", sourceId: configured.sourceId,
+      estateId: appId, kind: "authentication.event", observedAt: new Date().toISOString(),
+      payload: { title: "Redacted authentication fact", state: "unknown", identityRef: "redacted-user" } };
+    const oversized = { ...record, payload: { ...record.payload,
+      fields: Object.fromEntries(Array.from({ length: 32 }, (_, index) => ["detail" + index, "\u{1f600}".repeat(500)])) } };
+    assert.doesNotThrow(() => validateNormalizedRecord(oversized));
+    const oversizedJson = JSON.stringify(oversized);
+    assert.ok(oversizedJson.length < 60000);
+    assert.ok(new TextEncoder().encode(oversizedJson).length > 60 * 1024);
+    await submit(oversizedJson);
+    assert.equal(requests.length, 0, "UTF-8 bytes, not textarea character count, bound validation samples");
+    assert.equal(plane.getState().sources[0].state, "configured");
+    await submit(JSON.stringify(record));
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].command, "source.test");
+    assert.deepEqual(JSON.parse(JSON.stringify(requests[0].input.recordSample)), record);
+    assert.equal(requests[0].input.sample, undefined);
+    assert.equal(plane.getState().sources[0].state, "tested");
+    assert.equal(plane.getState().records.length, 0);
+    assert.doesNotMatch(JSON.stringify(plane.getState()), /ui-redacted-validation-only|Redacted authentication fact|redacted-user/);
+    assert.ok(harness.mountRoot.querySelector('[data-command-action="source.activate"]'));
+    harness.app.unmount();
+  }
 });
 
 test("scan setup profiles use only catalog policy and validated connector snapshots", async () => {
@@ -3534,8 +3700,230 @@ test("Service Access renders an honest unavailable state in the static shell", a
   harness.app.unmount();
 });
 
+test("integration and observation tabs remain honest and data-free in the static shell", async () => {
+  for (const tab of ["integrations", "vendors", "observations"]) {
+    let controlReads = 0;
+    const harness = createUiHarness("#/sources?stab=" + tab, { commands: {
+      schemaVersion: "1", id: "unused-integration-control",
+      getSnapshot() { controlReads += 1; throw new Error("Local integration views must not read the generic control provider."); },
+      execute() { throw new Error("Static integration views must not execute commands."); }
+    } });
+    let mounted = 0;
+    harness.context.SocIntegrationCenter = { render() { mounted += 1; throw new Error("A private integration widget must not mount in static mode."); } };
+    harness.context.SocVendorImport = harness.context.SocIntegrationCenter;
+    await harness.app.mount();
+    assert.match(harness.mountRoot.textContent, /Integration services are not connected/);
+    assert.match(harness.mountRoot.textContent, /No records are included in the static shell/);
+    assert.equal(mounted, 0);
+    assert.equal(harness.readRequests.length, 0);
+    assert.equal(controlReads, 0);
+    assert.ok(harness.document.title.endsWith(tab === "integrations" ? "Sources — Integrations" : tab === "vendors" ? "Sources — Vendor Imports" : "Sources — Received Observations"));
+    const selected = findNodes(harness.mountRoot, (candidate) => candidate.getAttribute("role") === "tab" && candidate.getAttribute("aria-selected") === "true");
+    assert.equal(selected.length, 1);
+    assert.equal(new URL(selected[0].getAttribute("href").slice(1), "https://console.example.invalid").searchParams.get("stab"), tab);
+    harness.app.unmount();
+  }
+});
+
+test("live monitoring tab mounts its explanatory static widget without reading generic providers", async () => {
+  let controlReads = 0;
+  const harness = createUiHarness("#/sources?stab=live", { commands: {
+    schemaVersion: "1", id: "unused-live-control",
+    getSnapshot() { controlReads += 1; throw new Error("Static live view must not read the control provider."); },
+    execute() { throw new Error("Static live view must not execute commands."); }
+  } });
+  const createElement = harness.document.createElement.bind(harness.document);
+  harness.document.createElement = tag => { const node = createElement(tag); node.style = {}; return node; };
+  vm.runInContext(read("public/live-monitoring.js"), harness.context);
+  await harness.app.mount();
+  assert.match(harness.mountRoot.textContent, /static skeleton performs no collection/);
+  assert.equal(harness.readRequests.length, 0); assert.equal(controlReads, 0);
+  assert.ok(harness.document.title.endsWith("Sources — Live Monitoring"));
+  harness.app.unmount();
+});
+
+test("guided setup is an honest static local tab and does not read generic providers", async () => {
+  let controlReads = 0;
+  const harness = createUiHarness("#/sources?stab=setup", { commands: {
+    schemaVersion: "1", id: "unused-setup-control",
+    getSnapshot() { controlReads += 1; throw new Error("Guided setup owns its private read boundary."); },
+    execute() { throw new Error("Static setup must not execute commands."); }
+  } });
+  const createElement = harness.document.createElement.bind(harness.document);
+  harness.document.createElement = tag => { const element = createElement(tag); element.style = {}; return element; };
+  vm.runInContext(read("public/setup-guides.js"), harness.context);
+  await harness.app.mount();
+  assert.match(harness.mountRoot.textContent, /static skeleton makes no requests/);
+  assert.match(harness.mountRoot.textContent, /Monitor my application/);
+  assert.equal(harness.readRequests.length, 0); assert.equal(controlReads, 0);
+  assert.ok(harness.document.title.endsWith("Sources — Guided Setup"));
+  harness.app.unmount();
+});
+
+test("mapping and private operations are static local tabs and never read generic providers", async () => {
+  for (const [tab, filename, expected] of [["mapping", "public/source-mapping.js", /static skeleton makes no requests/],
+    ["operations", "public/setup-assistance.js", /Static guidance only/]]) {
+    let controlReads = 0;
+    const harness = createUiHarness("#/sources?stab=" + tab, { commands: {
+      schemaVersion: "1", id: "local-guidance-only",
+      getSnapshot() { controlReads += 1; throw new Error("Local guidance must not query the generic control provider."); },
+      execute() { throw new Error("Static guidance must not execute commands."); }
+    } });
+    const createElement = harness.document.createElement.bind(harness.document);
+    harness.document.createElement = tag => { const element = createElement(tag); element.style = {}; return element; };
+    harness.context.fetch = () => { throw new Error("Static guidance must not make a private request."); };
+    vm.runInContext(read(filename), harness.context);
+    await harness.app.mount();
+    assert.match(harness.mountRoot.textContent, expected);
+    assert.equal(harness.readRequests.length, 0); assert.equal(controlReads, 0);
+    assert.equal(harness.app.getState().query.stab, tab);
+    harness.app.unmount();
+  }
+});
+
+test("guided Add source preserves an application's second environment through source form synchronization", async () => {
+  const { REFERENCE_CONNECTOR_MANIFESTS } = require("../server/reference-manifest");
+  const at = "2026-09-29T12:00:00.000Z", appId = "app-guided-target";
+  const snapshot = { schemaVersion: "1", documentType: "connector-control-snapshot", connectorTypes: REFERENCE_CONNECTOR_MANIFESTS,
+    apps: [{ appId, displayName: "Synthetic guided application", environments: ["preview", "production"], hosts: [], publicPages: [], state: "registered", revision: 1, createdAt: at, updatedAt: at }],
+    hosts: [], connectorInstances: [], setups: [], sources: [], changes: [], revision: 1 };
+  const harness = createUiHarness("#/sources?stab=add&appId=" + appId + "&environment=production&connectorType=canonical-events", {
+    provider: false, commands: { schemaVersion: "1", id: "guided-environment-test", getSnapshot: () => snapshot,
+      execute() { throw new Error("Form selection must not mutate a source."); } }
+  });
+  await harness.app.mount();
+  const environment = harness.mountRoot.querySelector('[name="environment"]'), app = environment.closest("form").querySelector('[name="appId"]');
+  assert.equal(app.value, appId); assert.equal(environment.value, appId + ":production");
+  const connector = environment.closest("form").querySelector('[name="connectorType"]');
+  assert.equal(connector.value, "canonical-events");
+  harness.mountRoot.dispatchEvent({ type: "change", target: connector });
+  assert.equal(environment.value, appId + ":production", "connector synchronization cannot silently choose the first environment");
+  harness.mountRoot.dispatchEvent({ type: "change", target: app });
+  assert.equal(environment.value, appId + ":production", "reaffirming the selected application preserves its requested environment");
+  assert.equal(environment.closest("form").querySelector('[name="hostId"]').required, false);
+  harness.app.unmount();
+});
+
+test("Trivy provider queries retain real application and source filters but exclude local guided-navigation fields", async () => {
+  const id = "setup-11111111-1111-4111-8111-111111111111";
+  const harness = createUiHarness("#/scans?tab=trivy&appId=app-guided&sourceId=source-guided&environment=production&setupId=" + id);
+  await harness.app.mount();
+  assert.equal(harness.readRequests.length, 1);
+  assert.deepEqual(harness.readRequests[0].query, { tab: "trivy", appId: "app-guided", sourceId: "source-guided" });
+  assert.equal(harness.app.getState().query.environment, "production", "local connection context remains available to the upload widget");
+  assert.equal(harness.app.getState().query.setupId, id);
+  const back = findNodes(harness.mountRoot, candidate => candidate.tagName === "A" && candidate.textContent === "Return to saved setup guide")[0];
+  assert.ok(back); assert.equal(back.getAttribute("href"), "#/sources?stab=setup&setupId=" + id);
+  harness.app.unmount();
+});
+
+test("actual provider rejection mounts setup assistance and recovery disposes it", async () => {
+  let rejectRead = true, mounted = 0, disposed = 0, screenMounts = 0;
+  const harness = createUiHarness("#/logs?appId=app-guided&sourceId=source-guided", { envelope(request) {
+    return rejectRead ? Promise.reject(new Error("Synthetic provider failure")) : adapterEnvelope(request.route, request.query);
+  } });
+  harness.context.console = { error() {} };
+  harness.context.SOC_PRIVATE_APPLICATION = true;
+  harness.context.SocSetupAssistance = { render({ container, controlsContainer, mode, offerChecklist, route, query }) {
+    mounted += 1; assert.equal(route, "/logs"); assert.equal(query.get("sourceId"), "source-guided");
+    assert.equal(controlsContainer.getAttribute("id"), "page-title"); assert.equal(offerChecklist, false);
+    if (mode === "screen") {
+      screenMounts += 1;
+      const marker = harness.document.createElement("p"); marker.textContent = "Synthetic empty-screen assistance"; container.append(marker);
+    }
+    return () => { disposed += 1; };
+  } };
+  await harness.app.mount();
+  assert.equal(harness.app.getState().providerState, "error"); assert.equal(screenMounts, 1);
+  assert.match(harness.mountRoot.textContent, /Synthetic empty-screen assistance/);
+  rejectRead = false; await harness.app.refresh();
+  assert.equal(harness.app.getState().providerState, "ready"); assert.equal(disposed, mounted - 1);
+  assert.doesNotMatch(harness.mountRoot.textContent, /Synthetic empty-screen assistance/);
+  harness.app.unmount();
+  assert.equal(disposed, mounted);
+});
+
+test("beginner checklist is offered only on a confirmed empty unfiltered private page", async () => {
+  for (const item of [
+    { hash: "#/phishing", state: "empty", expected: true },
+    { hash: "#/phishing", state: "ready", expected: false },
+    { hash: "#/phishing", state: "error", expected: false },
+    { hash: "#/logs?appId=app-guided", state: "empty", expected: false },
+    { hash: "#/logs?sourceId=source-guided", state: "empty", expected: false },
+    { hash: "#/intel?itab=threatfox&sq=example", state: "empty", expected: false }
+  ]) {
+    const renders = [], harness = createUiHarness(item.hash, { envelope(request) {
+      return { ...adapterEnvelope(request.route, request.query), state: item.state, panels: [] };
+    } });
+    harness.context.SOC_PRIVATE_APPLICATION = true;
+    harness.context.SocSetupAssistance = { render(options) { renders.push(options); return () => {}; } };
+    await harness.app.mount();
+    assert.equal(renders.some(options => options.offerChecklist), item.expected, item.hash + " " + item.state);
+    assert.equal(renders[0].offerChecklist, false, "loading is not evidence of emptiness");
+    const last = renders[renders.length - 1]; assert.equal(last.mode, item.state === "ready" ? "checklist" : "screen");
+    assert.equal(last.controlsContainer.getAttribute("id"), "page-title"); harness.app.unmount();
+  }
+  const preview = createUiHarness("#/phishing", { envelope(request) { return { ...adapterEnvelope(request.route), state: "empty", panels: [] }; } });
+  preview.context.SocSetupAssistance = { render() { throw new Error("Static preview cannot mount private onboarding."); } };
+  await preview.app.mount(); preview.app.unmount();
+});
+
+test("setup selection updates history and controller query without navigation or dropping the active draft", async () => {
+  const harness = createUiHarness("#/sources?stab=setup&appId=app-guided"), replacements = [];
+  let selection, query, renders = 0, disposals = 0, dirty = false;
+  const id = "setup-11111111-1111-4111-8111-111111111111";
+  harness.context.history = { replaceState(state, title, url) { replacements.push({ state, title, url }); harness.location.hash = url; } };
+  harness.context.SOC_PRIVATE_APPLICATION = true;
+  harness.context.SocSetupGuides = { render(options) {
+    renders += 1; selection = options.onSelection; query = options.query;
+    const cleanup = () => { disposals += 1; }; cleanup.isDirty = () => dirty; return cleanup;
+  } };
+  await harness.app.mount(); const originalSelection = selection;
+  for (const invalid of ["not-a-guide", "setup-../invalid", "setup-" + "a".repeat(36), undefined, 42]) originalSelection(invalid);
+  assert.equal(replacements.length, 0); assert.equal(harness.app.getState().query.setupId, undefined);
+  originalSelection(id);
+  assert.equal(replacements.length, 1); assert.equal(replacements[0].url, "#/sources?stab=setup&appId=app-guided&setupId=" + id);
+  assert.equal(query.get("setupId"), id); assert.equal(harness.app.getState().query.setupId, id);
+  assert.equal(harness.readRequests.length, 0); assert.equal(renders, 1);
+  dirty = true; await harness.app.refresh();
+  assert.equal(renders, 1); assert.equal(disposals, 0, "bookmark synchronization must not cause the dirty widget to be replaced");
+  dirty = false; originalSelection(null);
+  assert.equal(harness.app.getState().query.setupId, undefined); assert.equal(harness.app.getState().query.appId, "app-guided");
+  assert.equal(harness.location.hash, "#/sources?stab=setup&appId=app-guided");
+  harness.location.hash = "#/logs"; await harness.app.refresh();
+  const count = replacements.length; originalSelection(id);
+  assert.equal(replacements.length, count, "a disposed guide callback cannot rewrite an unrelated route");
+  assert.equal(harness.app.getState().route, "/logs"); assert.equal(harness.app.getState().query.setupId, undefined);
+  harness.app.unmount();
+  originalSelection(id); assert.equal(replacements.length, count, "unmounted callback must not change browser history");
+});
+
+test("imported fact projections hide unsupported native triage workflows while retaining navigation", async () => {
+  const harness = createUiHarness("#/triage", { envelope(request) {
+    return { schemaVersion: "1", route: request.route, state: "ready", title: "Imported triage observations", panels: [
+      { id: "imported-observation-scope", type: "notice", title: "Imported observations — read only", tone: "info",
+        body: "Reported findings only. No case workflow or approvals are executed." },
+      adapterTable("imported-observations", "Imported observations", ["Reported title"])
+    ] };
+  } });
+  await harness.app.mount();
+  assert.match(harness.mountRoot.textContent, /Reported findings only/);
+  assert.match(harness.mountRoot.textContent, /imported-observations-0/);
+  for (const className of ["triage-statebar", "triage-lanes", "triage-filters", "triage-filter-label"]) {
+    assert.equal(hasClass(harness.mountRoot, className), false, className + " cannot imply unsupported generic-observation behavior");
+  }
+  assert.doesNotMatch(harness.mountRoot.textContent, /Filing a proposal moves that alert|Awaiting approval =/);
+  assert.ok(findNodes(harness.mountRoot, (candidate) => candidate.getAttribute("role") === "tab").length > 0);
+  const observations = findNodes(harness.mountRoot, (candidate) => candidate.tagName === "A" && candidate.textContent === "Filter all received observations")[0];
+  assert.equal(observations.getAttribute("href"), "#/sources?stab=observations");
+  assertUniqueRenderedIdentifiers(harness.mountRoot, "#/triage imported facts");
+  harness.app.unmount();
+});
+
 test("private view drafts protect Service Access and scanner import from refresh and dispose on unmount", async () => {
-  for (const [route, moduleName] of [["#/agents?atab=access", "SocServiceAccess"], ["#/scans?tab=trivy", "SocScannerImport"]]) {
+  for (const [route, moduleName] of [["#/agents?atab=access", "SocServiceAccess"], ["#/scans?tab=trivy", "SocScannerImport"],
+    ["#/sources?stab=integrations", "SocIntegrationCenter"], ["#/sources?stab=observations", "SocIntegrationCenter"], ["#/sources?stab=vendors", "SocVendorImport"], ["#/sources?stab=live", "SocLiveMonitoring"],
+    ["#/sources?stab=setup", "SocSetupGuides"], ["#/sources?stab=mapping", "SocSourceMapping"]]) {
     const harness = createUiHarness(route);
     let disposed = 0;
     const cleanup = () => { disposed += 1; };

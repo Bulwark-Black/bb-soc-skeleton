@@ -664,7 +664,11 @@
     },
     {
       path: "/sources", group: "Estate", label: "Sources",
+      searchTerms: "guided setup monitor my application check my setup live monitoring Sentry application errors Slack collection health connectors integrations vendor imports",
       tabsets: [{ param: "stab", default: "expected", items: [
+        { id: "setup", label: "Guided setup", panels: [] },
+        { id: "mapping", label: "Map a custom source", panels: [] },
+        { id: "operations", label: "Private deployment", panels: [] },
         { id: "expected", label: "Expected sources", panels: [
           { ...table("Expected sources", ["Source", "Application / environment", "Last collection", "Cadence", "In Logs", "Collection", "Activity"]),
             rowDisclosures: ["What it does", "Why it matters", "If it goes quiet"] }
@@ -688,6 +692,10 @@
           table("Configured sources", ["Source", "Application / environment", "Connector", "Produces", "Coverage", "State", "Manage"], "Stable source identities", "configured-sources"),
           form("Scale-out shortcut · copy a host's source set", [field("Source host", "select"), field("New host")], ["Copy source set"])
         ] },
+        { id: "integrations", label: "Integrations", panels: [] },
+        { id: "live", label: "Live monitoring", panels: [] },
+        { id: "vendors", label: "Vendor imports", panels: [] },
+        { id: "observations", label: "Received observations", panels: [] },
         { id: "changes", label: "Registry changes", panels: [table("Source registry changes", ["When", "Change", "Target", "Detail", "By"])] }
       ]}]
     },
@@ -765,7 +773,8 @@
           ] },
           { id: "refusals", label: "Refusals", panels: [table("Refused writes", ["When", "Identity", "Route attempted", "From"]), info("What a refusal is")] },
           { id: "chain", label: "Chain", panels: [table("Evidence integrity", ["Log", "Records", "Chain", "State"]), info("How identity works here")] },
-          { id: "offboarding", label: "Offboarding" }
+          { id: "offboarding", label: "Offboarding" },
+          { id: "observations", label: "Observations", panels: [info("Imported identity observations", "access-observation-guide")] }
         ]},
         { param: "oview", default: "records", when: { atab: "offboarding" }, items: [
           { id: "records", label: "Records", panels: [

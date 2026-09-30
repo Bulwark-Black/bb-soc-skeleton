@@ -5,7 +5,16 @@ that need to turn the public, data-free Bulwark Black SOC interface into an
 operational application. It explains what the repository already implements,
 what the adopting stack must provide, how applications, hosts, connector
 instances, and sources are registered, how telemetry becomes canonical records,
-and how those records populate every screen.
+and how those records populate every screen. Section 55 describes the current
+universal/custom canonical integration path, sender, received-observation views
+and exact boundaries. Section 56 covers ten vendor import mappings and the
+durable sender queue; section 57 covers the built-in Sentry collector, encrypted
+credential onboarding, collection health and optional Slack delivery.
+Sections 58 through 63 explain the guided setup center, custom sample mapping,
+scoped agent connections, document intake, empty-screen help and private
+deployment/recovery responsibilities.
+Earlier per-screen recipes describe the richer native
+integrations to build; they are not claims that every native workflow runs.
 
 The checked-in JSON Schemas and executable validators remain authoritative when
 this prose and executable behavior disagree. Treat a disagreement as a defect:
@@ -38,6 +47,11 @@ An implementation agent should use this manual in the following order:
    complete.
 6. Read sections 37 through 54 before deploying privately, enabling agent or
    governance administration, connecting a scanner, or operating any route.
+7. Read sections 55 through 57 for the currently shipped integration registry,
+   import tooling and live-monitoring workflow before proposing new plumbing.
+8. Read sections 58 through 63 for resumable application setup, read-only
+   diagnostics, custom field mapping, agent connection assistance, document
+   intake, empty-screen explanations, and private operating responsibilities.
 
 **Non-negotiable invariants**
 
@@ -109,8 +123,8 @@ boundaries. It includes:
   contract;
 - a closed, domain-separated agent/governance administration contract and
   local reference runtime/store modules;
-- a narrow stdio reference MCP exposing public documentation/contracts and five
-  fixed connector/administration tools with credential-issuing commands
+- a narrow stdio reference MCP exposing public documentation/contracts and seven
+  fixed connector/administration/setup tools with credential-issuing commands
   refused;
 - JSON Schemas and command-line validators;
 - UI workflows for application registration, host enrollment, source setup,
@@ -118,22 +132,32 @@ boundaries. It includes:
   credential revoke/rotate;
 - a loopback-only reference control plane;
 - hashed one-time host and source credentials in reference mode;
-- bounded canonical ingest for one preinstalled canonical log push connector;
+- bounded canonical log, universal canonical-event and Trivy report admission,
+  with human-installed immutable custom definitions and ten vendor mappings;
+- one supervised Sentry Cloud collector with guided secret onboarding,
+  durable checkpoints, verified quiet-poll health, local alerts and optional Slack;
+- resumable application/source setup and read-only local evidence checks,
+  including optional scoped service/MCP access to those same setup reads;
+- bounded custom JSON/NDJSON field mapping with offline recipe reuse, plus
+  guided agent credentials/configuration, document-link pickers, empty-screen
+  explanations and private operations guidance;
 - local persistence, audit intent and completion records, idempotent receipts,
   record deduplication, and several page projectors; and
 - tests for the public boundary and the complete reference lifecycle.
 
 The repository does **not** provide the following production systems:
 
-- multi-tenant, per-resource operator roles, MFA, passkeys, SMTP recovery, or
+- multi-tenant, per-resource operator roles, enforced MFA policy, passkeys, SMTP recovery, or
   configured enterprise SSO; all private starter operators have full access;
-- a connector package marketplace or browser command that installs arbitrary
-  connector manifests;
-- vendor drivers, webhook signature implementations, pull schedulers, OTLP or
-  syslog listeners, or a deployable host agent;
-- a write-only secret-provisioning service or managed secret store;
-- a high-volume transactional telemetry database, queue, worker leases,
-  dead-letter handling, or multi-process collector coordination;
+- an executable connector-package marketplace; the private Integrations UI
+  installs only reviewed, data-only canonical declarations (section 55);
+- general vendor acquisition, webhook signature receivers, OTLP/syslog listeners,
+  or a deployable host agent; Sentry Cloud is the narrow built-in poller (57);
+- a general-purpose managed secret vault; the Sentry/Slack workflow has its own
+  write-only encrypted credential input, not arbitrary driver secret resolution;
+- a distributed high-volume telemetry/queue system or multi-process collector
+  coordination; indexed SQLite, the external sender outbox (56) and the bounded
+  live-monitoring recovery/delivery journal (57) are shipped local implementations;
 - projectors for every canonical record kind and every screen;
 - a production MCP server;
 - automatically configured Tailnet TLS/ACLs, managed observability, automated
@@ -143,10 +167,11 @@ The repository does **not** provide the following production systems:
 
 The current UI can create applications, hosts, connector instances, and sources
 only from connector types already installed in the server-owned manifest
-registry. That registry contains executable canonical-push plus eleven
-data-only scan templates. An
-adopter that wants a catalog of integrations must implement the reviewed
-manifest installation process described in section 10. Do not imply that the
+registry. The private registry has fourteen built-ins (three admission drivers
+and eleven non-executing scan templates), plus up to 86 installed custom
+canonical definitions. Vendor presets occupy normal custom slots. Section 55
+documents the implemented catalog; section 10 also discusses the unshipped
+executable-package lifecycle. Do not imply that the
 current browser can download or execute an arbitrary third-party connector.
 
 There are 40 registered paths: the original 38 SOC routes plus Documents and
@@ -362,7 +387,12 @@ The server contract remains authoritative and must enforce its own bounds.
 
 **Sources**
 
-Open Sources, then Add a source:
+For guided Sentry Cloud collection, open Sources → Live monitoring and follow
+chapter 57. For supplied vendor exports, use Vendor imports and chapter 56.
+Application-scoped integrations need an app/environment but no enrolled host;
+follow the installed manifest's scope and the setup path in chapter 55.
+
+For a host-scoped connector, open Sources, then Add a source:
 
 1. Select the owning app and host.
 2. Select Mint token to enroll the host.
@@ -571,9 +601,12 @@ unreviewed projector identifiers.
 
 ## 10. Installing connector types and building a connector catalog
 
-Version 1 has no browser command for installing a connector manifest. The
-reference registry is hardcoded. A production catalog should add a separate,
-administrator-controlled package lifecycle outside the five source commands.
+The private application ships a human-only Integrations UI for immutable,
+data-only canonical declarations; see section 55 for the exact installation API.
+The separate reference workbench retains its fixed registry. Neither downloads
+or executes an arbitrary connector package. The following is a proposed
+administrator-controlled lifecycle for executable packages, not a prerequisite
+to using the shipped registry, importers or Sentry live-monitoring workflow.
 
 Recommended installation sequence:
 
@@ -1379,7 +1412,7 @@ mapping. Do not place OAuth tokens in browser storage.
 
 The repository ships an optional stdio MCP reference client in
 `tools/agent-mcp.js`. It publishes checked-in public documentation/contracts and
-calls fixed connector/administration endpoints on the same canonical API/RBAC
+calls fixed connector/administration/setup endpoints on the same canonical API/RBAC
 boundary as the browser. It is not a second registry, an agent runner, a secret
 broker, or a telemetry transport.
 
@@ -1402,7 +1435,7 @@ validated private-overlay DNS suffix. Tool arguments accept no URL. Redirects
 are refused, and fixed request/response/time limits and remote-error redaction
 apply.
 
-The exact five tools are:
+The exact seven tools are:
 
 | Tool | Arguments | Safety boundary |
 | --- | --- | --- |
@@ -1411,6 +1444,8 @@ The exact five tools are:
 | administration_snapshot | `{ domain: "agents"/"governance", reason?: "initial"/"refresh"/"command", knownRevision?: integer >= 0 }` | Fixed administration snapshot endpoint and validated result |
 | administration_prompt | `{ promptId: stable-id }` | One separately authorized literal prompt; no bulk export |
 | administration_command | `{ request: administration-command-request }` | Refuses credential-issuing enrollment.issue before HTTP |
+| setup_guides | `{}` | Private service token with optional setup:read; saved guide bindings and compatible choices only; unavailable in tokenless workbench mode |
+| setup_check | `{ appId, environment, path: "live"/"vendor"/"custom"/"trivy", sourceId?: stable-id }` | Private service token with setup:read; timestamped local evidence only; no vendor poll, notification, scan, mutation or readiness certification |
 
 Credential-issuing `host.enroll`, `source.activate`, `source.rotate`, and `enrollment.issue`
 must use the protected operator UI or an equivalently reviewed non-MCP
@@ -1419,8 +1454,10 @@ values.
 
 Documentation resource URIs are `soc://documentation/technical-manual`,
 `soc://documentation/agent-guide`, `soc://documentation/connectors`,
-`soc://documentation/architecture`, `soc://documentation/configuration`, and
-`soc://documentation/features`.
+`soc://documentation/architecture`, `soc://documentation/configuration`,
+`soc://documentation/features`, `soc://documentation/integration-review`,
+`soc://documentation/vendor-integrations`, `soc://documentation/live-monitoring`,
+and `soc://documentation/guided-setup`.
 Contract resource URIs under `soc://contracts/` are
 `administration-v1-schema`, `connector-manifest-v1`,
 `source-registration-v1`, `normalized-record-v1`, `ingest-batch-v1`,
@@ -2092,9 +2129,13 @@ execution channel. A production private endpoint adds workload identity,
 purpose/audience binding, replay protection, rate limits, and durable audit.
 
 The shipped narrow reference MCP process publishes this raw manual and public
-contract/catalog descriptions as resources. Its five tools are connector
-snapshot/command, administration snapshot/prompt/command; they call the same
+contract/catalog descriptions as resources. Its seven tools are connector
+snapshot/command, administration snapshot/prompt/command, and read-only
+setup_guides/setup_check; they call the same
 API/RBAC boundary as UI or CLI clients and refuse credential-issuing commands.
+The setup pair requires a private service token with optional setup:read and
+does not operate in the tokenless workbench. It reads saved guide choices and
+local evidence; it does not configure sources or perform an external test.
 A production adopter replaces the loopback identity/transport assumptions while
 retaining the same service policy. The MCP process must not be a
 telemetry transport, secret-entry/readback surface, raw-log search service,
@@ -2446,7 +2487,10 @@ records, not zero risk.
 **Access (`#/access`).** In the private starter, Who shows current-session
 context, the exact provisioned-account count, and the first 200 operator display
 names with full authority. It does not invent visitors, tailnet devices, or a
-read-only auditor role. Other Access tabs remain unconnected. In a fuller
+read-only auditor role. Observations (`?atab=observations`) displays imported
+identity, authentication, audit and offboarding facts without granting access;
+the remaining private-mode tabs show the same explicitly labeled facts, not
+native certification or offboarding workflows. In a fuller
 integration, Who projects identity/owner/visitor/device/auditor
 access; Refusals and Chain preserve denied-request and certification evidence;
 Offboarding shows summary/run records and selected detail; How to use explains
@@ -2693,7 +2737,7 @@ Origin values intact through the proxy.
 
 | Area | Implemented now | Not implied |
 | --- | --- | --- |
-| Sign-in | Better Auth email/password, SQLite sessions, hidden-input local account CLI, closed signup, sign-out, expiry and session revocation | MFA, SSO, mail delivery, tenant isolation, operator-specific roles |
+| Sign-in | Better Auth email/password, optional TOTP/backup-code 2FA, SQLite sessions, local account CLI, closed signup, sign-out and revocation | Enforced MFA policy, SSO, mail delivery, tenant isolation, operator-specific roles |
 | Access → Who | Current-session explanation, exact account total, first 200 provisioned operator display names and full authority | Access-event telemetry, refused-write/device/offboarding feeds, or a read-only auditor role |
 | Sources | Web-app/environment registration, optional hosts, canonical event setup/test/activation, lifecycle/credential maintenance | Arbitrary vendor installation, secret manager, pull scheduler, OTLP/syslog receiver |
 | Telemetry | Indexed SQLite admission, transactional receipts/health/audit, bounded indexed reads and explicit retention | Unlimited SIEM scale, all record kinds/every screen, detection/notification engine |
@@ -2750,6 +2794,41 @@ aliases; use their resolved paths. For a deployment, choose persistent storage,
 not a temporary workbench directory. Restart with the same path; pointing to a
 new empty directory creates a different empty deployment, not a recovery.
 
+On a new installation you may instead start the app without pre-provisioning,
+visit its sign-in page directly at the configured localhost origin, and use
+**Create your administrator account**. Enter your name, email, password and
+confirmation. After creation, sign in normally; setup does not create a session
+or return a credential. The normal public signup endpoint remains disabled.
+The form closes permanently after the first account, including a CLI-created
+account. Existing installations continue to show ordinary sign-in. There is no
+shared default password or forced initial password replacement.
+
+Browser bootstrap requires configured HTTP loopback, a direct loopback peer,
+matching Host/Origin, no forwarding headers, and no machine Authorization.
+It is unavailable at a configured Tailnet HTTPS origin. Complete it locally
+before enabling the private proxy, or use the CLI on that host. On a shared
+machine provision with the CLI before starting the listener: loopback access
+does not authenticate an OS user, and another local process can reach it. Never
+expose an uninitialized instance through a proxy that strips forwarding headers.
+
+GET /api/v1/first-run returns schemaVersion, setupRequired and
+browserSetupAllowed. POST accepts exactly name, email, password and
+confirmPassword as JSON (16 KiB maximum); success is 201 with schemaVersion
+and created=true only, no session cookie. Unknown keys, queries, compression,
+mismatched passwords and invalid input fail. At most one attempt runs at once,
+with five attempts/minute per server process; malformed form requests count.
+Restart resets that throttle, not setup completion. Closed setup returns 409.
+
+The privateBootstrapState singleton in auth.sqlite commits permanent completion
+atomically with the user, password hash and account audit. The condition is
+rechecked after hashing inside an immediate transaction. Existing operators or
+historical account-create audit close bootstrap during upgrade. Completed setup
+cannot reopen merely because all accounts are later removed. Missing/corrupt
+completion state fails closed; use trusted backup or local account recovery,
+never delete authentication state to regain setup. Restoring a pre-bootstrap
+backup restores that earlier state; this is not an external tamper-proof ledger.
+Additional operators and password recovery continue to use the local CLI.
+
 The account command requests a hidden password and confirmation. Passwords must
 contain 15–128 characters with no control characters. Generate a unique password
 with a password manager. Email is the login identifier; the starter does not
@@ -2773,9 +2852,10 @@ grant app access: the browser still needs a current application session.
 Access → Who shows the current-session explanation, total provisioned account
 count, and the first 200 operator display names with full read/write authority.
 Names are display labels and may not be unique. This bounded account projection
-does not populate other Access views, refused-write history, tailnet devices,
-or offboarding records. Those still need their own telemetry integrations; an
-empty structural auditor panel does not mean a read-only auditor role exists.
+does not create access telemetry, tailnet devices, or offboarding records.
+Sources can independently send identity/authentication/audit/offboarding facts
+to Access → Observations; those claims never change Who or local permissions.
+A structural auditor panel does not mean a read-only auditor role exists.
 
 **Authentication mechanics**
 
@@ -2794,8 +2874,8 @@ projection contains only authenticated state, approved display name/initials,
 and presentation capability hints. Every protected API call rechecks the
 server session, not a browser flag.
 
-The auth HTTP allowlist contains only POST sign-in/email, sign-out,
-change-password, and GET get-session under `/api/auth/`. Other library routes,
+The auth HTTP allowlist contains POST sign-in/email, sign-out,
+change-password, GET get-session, and the factor routes described below under `/api/auth/`. Other library routes,
 including signup, reset-email, arbitrary user updates, and administrative user
 creation, are not exposed. Auth JSON is capped at 16 KiB. Cookie-authenticated
 mutations require the exact configured Origin; Host and Fetch Metadata are
@@ -2807,6 +2887,37 @@ socket address, five password changes, and a general auth limit of 100.
 Forwarded IP headers are not trusted. A loopback proxy can cause multiple
 operators to share a bucket; document this conservative behavior before a
 larger deployment. This is not a per-user lockout or an MFA replacement.
+
+**Optional account 2FA**
+
+Open Account security at /sign-in?mode=security (linked from Setup checklist).
+Better Auth protects both local and Tailnet access; TOTP is optional per account,
+not enabled automatically or enforced across the deployment. Confirm your
+password, manually add the displayed key/URI to a trusted authenticator, save
+the ten one-time backup codes privately, then prove a six-digit authenticator
+code. Only successful proof activates protection. Activation revokes all
+sessions; sign in again. No external QR service or browser persistence is used.
+
+Enrolled accounts must complete a five-minute factor challenge after password
+verification; password success alone creates no application session. Use a
+current authenticator code or one unused backup code. No trusted-device bypass,
+SMS or email OTP is supported. To disable, sign in with your factor/recovery
+code and confirm your password in Account security; sessions are revoked again.
+
+GET /api/auth/two-factor/status returns only the current account's status.
+POST enable/disable under /api/auth/two-factor/ accepts exactly password;
+POST verify-totp/verify-backup-code accepts exactly code. Each factor POST has
+a durable five-attempt/minute address limit; repeated invalid sign-in factors also use
+the library's ten-failure/fifteen-minute account lockout. TOTP can be phished:
+retain Tailnet-only reachability and never paste codes into an AI conversation.
+
+The factor schema is added to auth.sqlite on upgrade without enabling existing
+accounts. Protect the encrypted factor state and auth-secret together. Back up
+the complete stopped state before upgrade. Password reset/session revoke clears
+pending challenges but does not remove the factor. If both the authenticator
+and backup codes are lost, there is no web reset bypass; the owner needs reviewed
+local recovery or a separate CLI-provisioned operator. Do not erase auth state.
+See docs/AUTHENTICATION.md for enrollment, limits and recovery details.
 
 **Recovery and revocation**
 
@@ -3203,6 +3314,8 @@ interchangeable. Creating any of them does not start a model or agent process.
 3. Keep the default `connector:read`, `agents:read`, `governance:read` scopes
    unless the job needs more. These expose installation metadata, not telemetry
    streams or document bytes. Prompt bodies need separate `prompts:read`.
+   The setup-observer purpose explicitly selects `connector:read` and the
+   optional `setup:read`; it is not a retroactive expansion of existing tokens.
 4. Expand optional write grants only if required. Each grant is an exact
    command, never a wildcard. Read the prompt and approve impactful operations
    in the external agent host too; a token scope does not replace human review.
@@ -3279,6 +3392,8 @@ Origin must match. Endpoint paths are fixed:
 | GET /api/v1/service/administration/snapshot?domain=agents | agents:read |
 | GET /api/v1/service/administration/snapshot?domain=governance | governance:read |
 | GET /api/v1/service/administration/prompts?promptId=ID | prompts:read |
+| GET /api/v1/service/setup | setup:read; saved guide choices and compatible source declarations |
+| GET /api/v1/service/setup/check?appId=ID&environment=NAME&path=PATH | setup:read; optional sourceId; read-only local diagnostic evidence |
 | POST /api/v1/service/control/commands | Exact permitted connector command scope |
 | POST /api/v1/service/administration/commands | Exact permitted administration command scope |
 
@@ -3286,7 +3401,9 @@ Command bodies remain the existing version-1 contracts, including request ID,
 timestamps and expected revisions. The service path calls the same runtime,
 not a second registry. The separate operator, document, storage and telemetry
 endpoints do not accept service tokens. MCP continues to expose exactly the
-five tools in section 26; it gains authentication, not arbitrary HTTP access.
+seven tools in section 26; it gains scoped setup reads, not arbitrary HTTP
+access. There are no machine guide writes, source-mapping uploads, private
+operations checks, document transfer, or live-monitoring management tools.
 
 **Rotation, failure and custody**
 
@@ -3419,5 +3536,1617 @@ the replay window. For expired/revoked source credentials, rotate through the
 human source flow and update the sender; do not substitute an operator cookie or
 service credential. Patch First, File Integrity, End of Life and the other
 legacy templates still require their own reviewed driver and projector.
+
+## 55. Vendor-independent integration registry, sender, and observation coverage
+
+**Goal and boundary.** An adopter can bring a source from any vendor or their
+own stack without adding a vendor name to the application's core code. That
+does not mean accepting arbitrary raw payloads or removing storage and request
+limits. External adapters convert their provider's data into the version-one
+canonical contract. The private app verifies source credentials, application
+binding, allowed kinds, schemas, timestamps and replay identities before
+transactionally storing records and returning a receipt.
+
+There are three built-in admission drivers: narrow `canonical-push` for
+`log.event`, `canonical-events` for all 29 canonical kinds, and `trivy-report`
+for normalized observations from a validated raw Trivy report. The private app
+also supports human-installed custom canonical-push declarations. Eleven older
+scanner setup templates remain non-executing; a registered template alone is
+not an acquisition driver. The separate loopback workbench still enables only
+its original narrow log admission path.
+
+**Human setup, step by step**
+
+1. Register the application and environment in Onboarding. Host enrollment is
+   optional for these application-scoped sources.
+2. Choose **Sources → Add a source → Universal canonical events**, or select a
+   narrower integration type. Use a separate source per independently operated
+   feed, environment or trust boundary so its credential can be revoked alone.
+3. For reusable custom types, visit **Sources → Integrations**. Enter a unique
+   type ID, display name, source category, expected cadence and allowed record
+   kinds, or import complete manifest JSON. Registration does not fetch a URL,
+   download a module, execute a command or receive vendor credentials.
+4. Configure the source, then paste one real redacted normalized record for
+   validation. Supply the displayed `sourceId` and application `estateId`, a
+   stable record ID, a declared canonical kind, original RFC 3339 observation
+   time, and that kind's required payload fields. Keep this UI sample below
+   60 KiB. A full control-command body is limited to 64 KiB. No sample is stored
+   as telemetry, and validation does not report collection as healthy.
+5. Activate through the human workflow. Save the one-time source credential
+   directly into the external sender's secret manager or an owner-only file.
+   Keep it outside the checkout **and outside the application's managed state
+   directory**. The state directory rejects unrelated files on restart.
+6. Translate and send real batches using the sender below. Credential values
+   never belong in browser configuration, prompts, documents, command arguments
+   or source control. Vendor API credentials remain separate in the external
+   adapter; the SOC source credential authorizes only canonical admission.
+7. Open **Sources → Received observations** and inspect actual records. Filter
+   application, source and kind; inspect reported payloads and lifecycle labels.
+   The source's collection health changes only after durable admission. Cadence
+   is an expectation, not a polling schedule.
+8. Use **Sources → Integrations** to see which read surfaces accept those kinds.
+   A manifest's target routes describe intent. The actual coverage matrix is
+   owned by `server/integration-coverage.js`, independently of imported metadata.
+
+The source-category field is descriptive. The source's manifest
+`payload.recordKinds` is its admission allowlist. The universal driver permits
+all 29 kinds; use a custom definition with fewer kinds when that is the correct
+trust boundary. Neither kind nor payload data can grant console permissions,
+activate prompts/rules, send notifications, approve evidence or close risks.
+
+**Custom definitions and lifecycle**
+
+Custom manifests reuse the existing manifest schema with these stricter
+requirements: application scope; push delivery; `soc.canonical-records` schema
+version 1; `lines: forbidden`; `content: required`; no credential slots; no
+empty-payload health claim; and a required duration `cadence-seconds` field
+bounded within 60–31,536,000 seconds. Kind names come from the closed canonical
+schema, not arbitrary custom event types. Provider-specific facts fit within
+the allowed bounded scalar `payload.fields`, after upstream redaction.
+
+Type IDs begin with a lowercase letter and contain lowercase letters, digits,
+dots or hyphens, at most 80 characters. Built-in types cannot be replaced.
+Definitions are immutable. Create a new versioned type ID for an incompatible
+change and migrate sources deliberately; do not rewrite the meaning of stored
+history. Unused custom definitions may be removed. A source/connector reference,
+including an archived or removed tombstone, blocks removal of its definition.
+Pause, resume, update, archive, remove, revoke and rotate remain source-lifecycle
+operations; updating a source requires revalidation and fresh activation.
+
+The registry is saved in the same control-state transaction as its audit entry.
+Concurrent changes use the telemetry control revision and return 409 on a stale
+revision. Refresh and review before resubmitting. The registry is bounded to
+100 types: 14 built-ins and at most 86 custom definitions. Each custom manifest
+is at most 64 KiB; the installation request allows 66 KiB including its envelope.
+These are implementation bounds, not an allowlist of vendors or a claim of
+unlimited sources. Existing bounded control snapshots and telemetry capacity
+still apply. Do not increase those bounds without migration and workload tests.
+
+**Operator HTTP interfaces**
+
+These require a human browser session and the private same-origin policy.
+Bearer credentials, including service identities, are not accepted here. MCP
+can inspect the resulting connector snapshot but cannot install/remove types.
+
+| Interface | Input and result |
+| --- | --- |
+| GET /api/v1/integrations | No query. Catalog revision, capacity, manifests, built-in/custom origin, admission availability, removability, supported record kinds and actual coverage |
+| POST /api/v1/integrations | JSON `{manifest, expectedRevision}`. Human-only immutable installation; 201 and updated catalog |
+| DELETE /api/v1/integrations/TYPE | JSON `{expectedRevision}`. Remove an unused custom type; history references cause 409 |
+| GET /api/v1/integrations/observations | Optional sourceId, appId, comma-separated kinds, observedAfter, observedBefore, limit and offset. Canonical records plus source/application/lifecycle context and honest count/omission metadata |
+
+Observation timestamps are RFC 3339; `observedAfter` is inclusive and
+`observedBefore` exclusive. Invalid, repeated or unknown filters fail rather
+than silently broadening a query. Syntactically valid but unknown source/app
+IDs return zero matches. Results are newest first, at most 200 records and
+2 MiB of serialized stored records; the UI requests 25 rows per page. Offset is
+bounded to 1,000,000. A byte limit may make a page shorter. Offset pages can move
+when new records arrive or retention runs; this is not a stable export cursor.
+Retention counters describe retained data, not every event ever sent.
+
+**Canonical sender CLI and Node client**
+
+The sender uses the established `/api/v1/ingest` machine endpoint, never a human
+cookie or service-agent credential. Prepare a version-one batch with a stable
+receipt ID of 16–128 characters, original `sentAt`, source-bound records and
+producer-stable record IDs. It accepts at most 1,000 records and 1 MiB including
+JSON serialization. Oversized work is refused, not silently split or truncated.
+
+~~~sh
+npm run --silent send:events -- --file /absolute/private/batch.json --token-file /absolute/private/source-ingest-key --base-url http://127.0.0.1:8080
+~~~
+
+For remote private use, select the exact approved private HTTPS origin. The
+client rejects public destinations and redirects. Source-token files must be
+canonical absolute owner-only regular files outside the checkout, without
+symlinks/hardlinks. Use mode 0600; no raw-token argument or environment variable
+is accepted. The file is reread on each attempt to support rotation. Keep it
+outside the application's state directory too.
+
+Node integrations can import `createIntegrationClient` from
+`tools/integration-client.js`, create it with `{baseUrl, tokenFile}`, and call
+`sendBatch(batch)`. The returned value is a validated, correlated receipt, not
+untrusted remote text. The CLI prints the safe receipt on stdout and sanitized
+failures on stderr. Keep provider credentials and raw provider payloads inside
+your external adapter; this library starts at already-normalized batches.
+
+Default attempts are three, at most five. Timeouts, selected transport failures,
+429 and 502/503/504 may retry with a bounded delay and identical serialized body.
+Other 4xx responses do not retry. `Retry-After` greater than the client's bounded
+wait stops with retry-delay metadata rather than retrying early. The default
+request timeout is ten seconds. A timeout may occur after the server committed:
+retrying the unchanged batch is therefore essential. The sender is not a durable
+queue, tailer or scheduler; persist pending batches in your own worker. Retries
+beyond the seven-day default replay window fail. Never restamp old data to make
+it appear fresh, and never equate a receipt with exactly-once external actions.
+
+**Screen coverage and truthful interpretation**
+
+The Logs/Overview/Analytics path remains specifically `log.event`. Other typed
+records populate clearly labeled imported-observation views on relevant
+monitoring, response, investigation, scanner and estate categories. Examples:
+findings appear in Triage; rule descriptions in Rules; package/finding facts in
+Patch first and Dependencies; file-integrity facts in File integrity; identity
+facts in Access → Observations (`#/access?atab=observations`); backup claims in
+Backups. Access → Who remains the real local-account inventory. These are direct facts,
+not computed priorities, running detectors, verified backups or activated
+workflows. Generic scanner records never enter the specialized Trivy report
+summary; only the real report importer has that provenance.
+
+Native vendor/queue tabs are presentation selectors for these fallback views,
+not implied data classifiers. Their effective selectors are printed in the
+scope notice. Unsupported native detail/search parameters fail explicitly,
+rather than showing unrelated records as a requested case, event or rule.
+Use Received observations for real application/source/kind filtering. The
+static product layouts and specialized adapter slots remain available for
+adopters who implement full native projectors and authorized workflow commands.
+
+Imported governance, compliance, evidence and retention records remain
+observations. They cannot overwrite authored risks, attestations, document
+versions, local retention policy or agent configuration. Administration and
+Documents continue to own those mutation workflows.
+
+**Full integration review and remaining work**
+
+The repository's `docs/INTEGRATION-REVIEW.md` is the detailed implementation/gap
+matrix and adoption checklist. Agents may read it through
+`soc://documentation/integration-review`. The main remaining layers are:
+
+- Raw webhook signature verification and payload mapping; native OTLP/syslog
+  translation; practical framework/vendor presets and first-event diagnostics.
+- Additional reviewed pollers and vendor-secret resolution beyond the narrow
+  Sentry Cloud collector in chapter 57; generalized scheduling, job claims,
+  retry/dead-letter handling and incremental checkpoints.
+- Real detectors, case transitions, notification outboxes, remediation review,
+  native scanner acquisition and independently verified evidence.
+- Agent execution/run history, human least-privilege roles, stronger identity
+  policy, governed document links and risk import/export.
+- Reproducible private deployment, backup/restore/export tooling, upgrade
+  rollback, disk-pressure monitoring and realistic mixed HTTP/browser workloads.
+
+The source system is now extensible without core vendor edits, but those
+integration layers are not completed by registering metadata. For every new
+adapter prove denied access, exact source/application binding, schema failures,
+first delivery, duplicates, lost acknowledgements, rotation/revocation, stale
+health, retention, restart recovery and the actual intended screen behavior.
+No live production data, user credentials, demo feeds or private prompts are
+included in the public baseline. CI and release automation remain out of scope.
+
+## 56. Vendor adapters and durable delivery
+
+**Shipped implementation.** Ten checked-in v1 vendor mappings now support
+supplied exports and successful API response pages. Sources → Vendor imports
+provides human-managed preset installation, source-bound file preview, source
+sample validation and reviewed import. A separate Node CLI and SQLite outbox
+persist canonical deliveries before network submission. These are not ten
+automatically connected vendor accounts. This import pack adds no vendor
+credentials, account discovery, polling daemon or publicly exposed webhook.
+The separate, opt-in Sentry live collector is documented in chapter 57.
+
+This set covers cloud, identity, edge security, source control and application
+observability; it is not a claimed measured global popularity ranking. Sources
+not listed still use custom definitions or universal canonical events. Vendor
+presets are ordinary immutable custom definitions named `vendor.<adapter-id>`;
+installing all ten consumes ten of the existing 86 custom slots, not a new cap
+on vendors. Trivy report import remains a separate specialized path.
+
+**Setup for humans**
+
+1. Keep the application private on loopback or its explicitly configured
+   private HTTPS/tailnet origin; never expose it publicly to collect webhooks.
+2. Register your application/environment. Open Sources → Vendor imports,
+   expand the appropriate vendor and install its preset. Installation changes
+   only the data-only registry and is revision-checked/audited.
+3. Follow Configure source. Choose app/environment, display name and expected
+   cadence, then begin setup. An enrolled host is not required.
+4. Return to Vendor imports; select that vendor and its configured source.
+   Choose your own redacted JSON/NDJSON file and click Preview mapping. Up to
+   ten mapped records and the full accepted count appear. Nothing is stored.
+5. Click Validate source with preview sample. This uses the standard source
+   test contract, binding record IDs to the selected source and registered app.
+   Activate in Add a source, retaining the one-time credential privately.
+6. Refresh vendor setup and preview the file again. Active sources enable
+   Import reviewed events. The server requires the exact preview hash and
+   rechecks the source's state; selecting another file/source invalidates it.
+7. Inspect the committed receipt and Received observations. Repeating an
+   identical delivery returns a replay receipt. Imported claims never grant
+   local access, become verified security verdicts or trigger operational actions.
+
+The browser sends the selected raw file to the private server for mapping.
+Neither stores the original in durable application storage. Redact exports
+before selection and keep request bodies out of proxy/collector logs. The file
+selection is guarded against refresh/navigation loss and cleared after success.
+The Vendor imports panel adds no vendor API-key field, local storage or machine
+authority. The separate Live monitoring panel has a narrowly scoped private
+credential form for its reviewed Sentry collector and optional Slack delivery.
+
+**Supported inputs and source contracts**
+
+| Adapter ID | Supported event/page input | Canonical result | Acquisition requirements and caveats |
+| --- | --- | --- | --- |
+| aws-cloudtrail | CloudTrail Records; LookupEvents Events containing CloudTrailEvent JSON; single events/arrays | audit.event; supported principal-bound console authentication.event | External least-privilege AWS role. LookupEvents needs cloudtrail:LookupEvents, is regional, limited to recent management/Insights history, 50/page, two requests/sec/account/region, 90-day vendor window. Trail/data-event collection needs the appropriate object/log reader instead; follow NextToken externally |
+| entra-signin | Graph sign-in value pages, arrays or individual exported records | authentication.event | Graph v1.0 signIns, AuditLog.Read.All, applicable delegated reader role and P1/P2 licensing. Up to 1,000/page; collector follows nextLink. Missing user is event-unresolved; no fabricated identity or success |
+| gcp-audit | entries.list responses, typed AuditLog LogEntry arrays or individual entries | audit.event | logging.logEntries.list; Data Access additionally requires private log access and often explicit enablement. Intended projects/logs, pagination and completeness are collector responsibilities |
+| cloudflare-firewall | firewall_events Logpush records/arrays/NDJSON, not GraphQL aggregates | network.event | Select RayID, Datetime, Action, Source, RuleID, MatchIndex; use RFC3339ms/ns output. Numeric nanoseconds are refused to avoid precision loss. Logpush to adopter storage; collector downloads privately. Logs:Write manages jobs, separate storage read permission obtains files |
+| github-audit | Organization audit API/export events and arrays with _document_id | audit.event | Applicable plan and organization-owner visibility; classic/OAuth read:audit_log or supported fine-grained Administration read. No GitHub Actions, Dependabot, code scanning or webhook formats in this adapter |
+| gitlab-audit | Instance/group/project audit events or arrays | audit.event | Applicable Premium/Ultimate feature, read_api and appropriate role. Instance Administrator/group Owner/project Maintainer have broader visibility than lower roles; a successful page is not full coverage |
+| okta-system-log | System Log arrays or individual exports | authentication.event for closed known login types, otherwise audit.event | okta.logs.read. Follow server Link pagination/polling semantics; default 100/page, 90-day vendor retention. Published time alone is not a safe lossless cursor. Okta outcome is not proof that a third-party app completed sign-in |
+| auth0-logs | Management API arrays, logs/include_totals wrapper or individual exports | known login authentication.event, otherwise audit.event | read:logs; checkpoint export from/take and next Link; at most 100/request. Search retrieval's 1,000-result ceiling is not an unlimited export. Retention is plan-dependent |
+| sentry-events | Project/issue error-event arrays or supported event details | log.event, not a security finding | project:read for project list/details, event:read for issue event listing. Requires eventID and original dateCreated; transactions/replay/issue summaries are different contracts |
+| datadog-logs | Successful Logs v2 data pages, log-object arrays or individual log objects | log.event, not a security finding | logs_read_data and documented site-specific API/OAuth access in external collector. Follow cursors in a bounded query window; error, timeout or nonempty-warning results are refused |
+
+CloudTrail requires stable eventID/time/service/action. Google requires
+insertId/logName/time and typed audit payload with service/method; the log name
+and full original time participate in identity. Cloudflare RayID alone is not
+a unique rule-match event, so time/action/rule/source/match index are included.
+Entra requires id/createdDateTime; Okta uuid/published/eventType; Auth0
+log_id/date/type; GitHub _document_id/action/@timestamp (supported created_at
+fallback); GitLab id/created_at/entity_type; Sentry 32-hex eventID/dateCreated and
+supported error type; Datadog id/type:log/attributes.timestamp. Missing or
+invalid identity/time rejects the whole input, never substitutes current time.
+
+Vendor response cursors are not followed by these mappers. Event families,
+plan-specific visibility, filtering and sampling are not discovered or inferred.
+Source permissions belong to the external collector's least-privilege identity.
+Never paste vendor credentials into a source label, manifest, canonical event,
+documentation, prompt or generic source-registration form. Use only the reviewed
+Live monitoring credential form for the built-in collector described in chapter
+57; external import collectors keep their credentials outside this application.
+
+**Privacy and interpretation**
+
+Mappers use generated titles/messages, allowlisted enums and hashed identity/
+resource references. Unknown types/outcomes remain unknown; a failed application
+operation is not automatically a malicious event. Raw log messages, user emails,
+addresses, request bodies, credentials, headers, URLs, stack traces and arbitrary
+attributes are not copied into canonical records. This is deliberately not a
+full-fidelity log archive. Hash references are pseudonymous, not guaranteed
+anonymous or resistant to dictionary/correlation analysis. Provider level and
+reported outcome are not independent SOC severity or verified success.
+
+The source/application comes from the selected local registration, not vendor
+payload fields. Canonical IDs hash mapper version, vendor, source, application,
+kind and upstream identity. Records are sorted for deterministic receipt/body
+identity. Changed retained content for an existing upstream identity is refused,
+not overwritten. Some vendor mappers reject duplicate input IDs; otherwise
+identical duplicates may collapse but conflicting duplicates always reject.
+
+Inputs are bounded to 8 MiB and 1–1,000 events; normalized atomic delivery is
+bounded to 1 MiB. JSON arrays/wrappers and one-object-per-line NDJSON are accepted
+only where their constituent records match the chosen adapter. No automatic
+splitting, truncation or partial acceptance. Empty pages do not manufacture
+health. Preview shows the first ten records, not the entire raw document.
+
+Batch sentAt is the latest original event timestamp. This makes replay stable
+but means files whose latest event is outside the server's configured replay
+window (seven days by default) are refused. Do not replace timestamps with now
+to smuggle historical data past this boundary. A historical migration needs a
+separate reviewed process. Record retention (30 days default) is independent.
+
+**External collector CLI**
+
+~~~sh
+npm run --silent vendor -- list
+npm run --silent vendor -- normalize --adapter github-audit --file /absolute/private/audit-page.json --source-id YOUR_SOURCE_ID --app-id YOUR_APP_ID
+npm run --silent vendor -- enqueue --adapter github-audit --file /absolute/private/audit-page.json --source-id YOUR_SOURCE_ID --app-id YOUR_APP_ID --outbox-dir /absolute/private/soc-outbox --base-url http://127.0.0.1:8080
+npm run --silent vendor -- status --outbox-dir /absolute/private/soc-outbox
+npm run --silent vendor -- drain --outbox-dir /absolute/private/soc-outbox --source-id YOUR_SOURCE_ID --token-file /absolute/private/source-ingest-key --base-url http://127.0.0.1:8080 --limit 10
+~~~
+
+All paths above are placeholders. Use canonical absolute paths; macOS symlinked
+aliases must be resolved. The queue directory must be owner-only, outside the
+checkout, dedicated to this queue, and separate from the application state and
+token files. The source token file must be owner-only and outside the checkout.
+It contains the issued source-ingest credential, not vendor credentials, agent
+service access or browser cookies. The same private-origin enforcement as the
+canonical sender applies. Pending entries are pinned to their original origin
+and source; a drain invocation for another origin/source cannot reroute them.
+
+The Node API is normalizeVendorPayload/parseVendorText in tools/vendor-adapters.js
+and openOutbox in tools/integration-outbox.js. First persist the canonical batch
+with enqueue; advance your vendor cursor only after that succeeds. A crash before
+cursor persistence may replay the page, but stable identities make it detectable.
+Never rewrite pending bodies on an adapter upgrade. Store vendor secrets and
+cursor state in your external collector's approved facilities, not this outbox.
+
+**Durability, retries and recovery**
+
+The queue uses SQLite WAL/FULL transactions and keeps canonical bodies until
+a matching receipt is verified. It admits 10,000 identities and 64 MiB of pending
+bodies; acknowledged identities still count toward the lifetime entry bound.
+Delivered bodies are logically released while hashes/receipts remain. That is
+not a physical disk quota or guaranteed forensic erasure from the DB/WAL.
+
+Drain performs one bounded pass (10 deliveries default, 100 maximum). Your
+private scheduler/supervisor invokes it repeatedly; no background service is
+installed. Each attempt has a ten-second HTTP timeout, a 60-second claim lease,
+and claim fencing. Restart may reclaim expired leases; a stale worker cannot
+overwrite another claim's result. Lost acknowledgements preserve exact body,
+receipt ID and original times for replay.
+
+Network/timeout failures, 429, 502, 503 and 504 schedule another due time with
+backoff and Retry-After. That persisted cooldown gates all entries for the same
+source/destination, including new entries and restarted workers; manual retry
+does not shorten it. Permanent refusals, invalid receipts, ten-attempt
+exhaustion and expiry block a delivery for operator review. A failed delivery
+stops the current pass rather than flooding later batches. The worker does not
+sleep inside a retry loop: the next invocation processes due entries.
+
+Status provides global counts and a paginated metadata view. Use optional
+--state blocked, --source-id YOUR_SOURCE_ID, --offset 0 and --limit 100 to locate
+older blocked entries. Follow page.nextOffset while page.hasMore; offsets are
+bounded to 0–10,000 and pages to 1–100. Totals remain global even when the page
+is filtered. Each entry identifies its pinned private origin.
+
+Inspect status, correct source/credential/capacity issues and explicitly retry
+an unexpired blocked delivery:
+
+~~~sh
+npm run --silent vendor -- retry --outbox-dir /absolute/private/soc-outbox --id DELIVERY_ID
+~~~
+
+Retry resets its attempt budget, not body/origin/source/receipt/timestamps. The
+queue's seven-day age eligibility is measured from enqueue; the server can
+refuse sooner based on saved sentAt. Expired/blocked bodies are retained for
+investigation, not automatically deleted. Delivered entries cannot be retried.
+There is no purge command; resolve pending work before archiving the dedicated
+queue and starting a new one at capacity. Back up consistently with SQLite-aware
+handling; copying only a live main DB can omit WAL commits. Test restore to a
+separate private directory. Unknown/corrupt schemas, body/identity mismatch,
+linked or permissive files fail closed. Use a supported local filesystem, not
+a shared/distributed queue volume. Process-kill tests are not power-loss proof.
+
+CLI stdout contains canonical output, metadata or validated receipts, all still
+private telemetry. No vendor secret or remote error body is printed. Failed
+processed deliveries return nonzero; zero processed deliveries may mean nothing
+is due or work is blocked. Check status instead of treating that as completion.
+
+**HTTP and agent contract**
+
+GET /api/v1/integrations/vendors returns definitions and bounds. POST to
+/api/v1/integrations/vendors/preview takes adapterId, sourceId and text and
+returns normalized preview, sample, source revision and previewHash without
+storing records. POST to /api/v1/integrations/vendors/import takes the same
+fields plus previewHash and commits the exact reviewed delivery. At most two
+private uploads share the application's upload concurrency limit. All three
+endpoints require a human browser session; mutations require exact same origin.
+A machine Authorization header is refused even with a valid session cookie.
+
+An external collector sends canonical batches through /api/v1/ingest with the
+source's own credential. MCP remains documentation/management only. Agents can
+read the full vendor guide using soc://documentation/vendor-integrations and
+the review using soc://documentation/integration-review; no MCP file-upload,
+vendor-key storage, ingestion or execution tool was added.
+
+The checked-in docs/VENDOR-INTEGRATIONS.md contains provider-by-provider official
+references and detailed acquisition requirements. The next chapter adds one
+built-in Sentry Cloud collector with its own pagination/checkpoints, schedule
+and optional Slack delivery. Other vendor readers, real tenant commissioning,
+queue monitoring, restore/load drills and broader native workflows remain work.
+Tests use disposable synthetic data; no live-account commissioning or universal
+complete-collection claim has been made.
+
+## 57. Live monitoring: connect, collect, understand, notify, verify
+
+**Purpose and honest scope**
+
+Sources → Live monitoring is the first complete built-in automatic path: a
+Sentry Cloud project supplies error events, the private SOC retains minimized
+canonical observations and actionable local alerts, and an optional Slack
+incoming webhook delivers generated notifications. It is one managed collector,
+not ten automatically connected vendor accounts. The ten import mappings in
+chapter 56 still process supplied exports/API pages, and the universal/custom
+paths remain available for any other reviewed source.
+
+The private server owns collection. Closing the browser does not stop it;
+stopping the server does. The static preview makes no monitoring requests,
+stores no credentials and cannot connect a vendor. No account, event or secret
+is shipped. Controlled automated tests are not proof of access to your actual
+Sentry organization or Slack channel. Commission those yourself using an
+authorized project and the acceptance checks below.
+
+This collector does not instrument your application, install a Sentry SDK,
+create a Sentry project, execute a scanner, receive Internet webhooks, resolve
+upstream issues or modify code. It reads project error events, not transactions,
+replays, attachments or every Sentry product. Application errors are not verified
+security incidents, and a new event is not necessarily a new bug or issue.
+
+The selected SOC environment is local source attribution, not an upstream
+filter. The selected Sentry project's supported error feed is read as a whole.
+If production and staging share one Sentry project, both can populate the chosen
+SOC environment. Use a dedicated Sentry project per environment when isolation
+is needed. Do not infer upstream filtering from a local environment label.
+
+**Prerequisites and network setup**
+
+Run the private application with a locally provisioned operator and a persistent
+owner-only state directory outside the repository. Register the web application
+and its environments in Onboarding; no collector host is required. Your own
+application must already send approved errors to its Sentry Cloud project.
+Confirm an event in Sentry before troubleshooting empty SOC observations.
+
+Keep the SOC listener on loopback. Share it only through explicitly configured
+private Tailnet HTTPS with a restricted tailnet policy and normal private SOC
+sign-in. Do not expose this application to the public Internet. No inbound
+vendor webhook is needed: Sentry reads and optional Slack messages are outbound
+HTTPS from the private server. Do not disable TLS verification. Maintain a
+synchronized host clock and enough disk space for all private state.
+
+The browser calls only same-origin SOC endpoints, never Sentry or Slack directly.
+Current human operators have full deployment access; this feature does not add
+application-scoped human permissions or multi-tenant isolation. Optional TOTP
+is configured separately in Account security. An agent
+registration or service-access credential is not permission to read vendor keys.
+
+The operator must arrange process supervision and an independent private
+watchdog. The server does not install a daemon. If its process/host is stopped,
+the in-process collector cannot fetch events or send its own outage notification.
+Restart can show stale checkpoints and resume bounded catch-up, but cannot
+retroactively deliver a real-time outage warning during downtime.
+
+**Read-only vendor access and field meanings**
+
+Use a Sentry API bearer token with project:read and access to the intended
+project. Do not grant write/admin scope merely to make setup work. A Sentry SDK
+DSN is not an API token. Vendor identity/project permissions still apply in
+addition to the scope name. See the official
+[project error-event API reference](https://docs.sentry.io/api/events/list-a-projects-error-events/).
+
+Select the registered application and environment. Give the connection a useful
+name of 1–100 characters without sensitive incident detail. Supply the Sentry
+organization and project URL slugs, not full URLs or display names. Region
+default uses sentry.io, us uses us.sentry.io, and eu uses de.sentry.io. No custom
+or self-hosted API origin, arbitrary headers or uploaded collector code is
+accepted by this fixed built-in reader. Use a reviewed external collector for
+a different destination rather than weakening the origin boundary.
+
+Enter the API token only in the private password field. Do not paste it into
+agent prompts, chat, screenshots, shell arguments, environment values, issues
+or source-controlled configuration. Status never returns existing credentials.
+The browser writes no key to browser storage and clears secret inputs after a
+successful save or leaving the view. Failed saves can retain the current draft
+for correction; discard it explicitly when finished.
+
+Slack is optional. To enable it, provision a standard app incoming webhook for
+the approved channel and enter its secret URL in the private password field.
+The webhook's channel is the destination; this UI does not override its scope.
+Only the standard hooks.slack.com incoming-webhook protocol is supported, not
+GovSlack, Workflow Builder or an arbitrary HTTP callback. Use Slack's
+[incoming webhook guide](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/).
+Leave the field blank for in-app alerts only.
+
+Enabling Slack sends generated alert titles/bodies, the connection display name,
+counts/reported levels, SOC source/alert identifiers and, when present, a sample
+canonical record ID and Sentry event ID. Those labels and IDs can be sensitive.
+It does not send raw exception messages, stacks, request bodies, headers or
+user objects. Plain-text formatting prevents label text becoming channel/user
+mentions; URL/media unfurling is disabled. Approve this data transfer before
+adding a destination. A webhook URL is a credential, not a public configuration
+value to include in documentation or an agent conversation.
+
+**First-run walkthrough**
+
+1. Sign in privately, register your application and its environments in
+   Onboarding, then open Sources → Live monitoring.
+2. Select the application/environment and enter the connection name, region,
+   organization slug and project slug. Recheck the environment-scope notice.
+3. Enter the read-only Sentry token. Optionally enter the approved Slack webhook.
+4. Select Test access and start monitoring. The server reads and validates the
+   first actual event page before accepting the connection. It generates no
+   application error and does not create a fabricated success record.
+5. The service installs/reuses the reviewed Sentry preset, creates a managed
+   source and activates only its narrow internal collector. There is no manual
+   source-test sample, host setup, one-time external ingest token or CLI drain
+   job to configure for this path. Existing manually imported sources are not
+   silently converted.
+6. Starting is expected until an entire initial window is committed. Verify
+   Last successful completed poll and Completed through advance; access testing
+   alone is not complete collection. An empty completed window is healthy.
+7. Open View this source's observations. Accepted records are canonical log.event
+   observations bound to the managed source and selected application. Matching
+   log/overview/analytics/timeline projectors can show them; empty source data
+   stays empty rather than being filled with invented records.
+8. If Slack is configured, explicitly Send Slack test. Inspect the test alert's
+   delivery state and independently check the intended channel. This sends a
+   real test message; at most one accepted test per connection per minute.
+9. With authorization, generate one harmless recognizable error in your own
+   instrumented app. Confirm it in Sentry and then in the SOC observation/alert.
+   Do not disrupt production merely to exercise monitoring.
+10. Follow the alert evidence or displayed Sentry event ID. Acknowledge the SOC
+    alert after review. Local acknowledgment does not resolve the upstream issue,
+    cancel queued notifications, suppress future events or change application code.
+11. Perform controlled failure/restart/restore checks before relying on unattended
+    operation. Record connection/source ownership and coverage start privately.
+
+The same project/application/environment combination cannot be connected twice
+while that connection exists. A different local binding creates an independent
+collector/history, not an upstream filter. Keep one clear ownership model for
+each source rather than multiplying credentials and alerts accidentally.
+
+**Windows, durable checkpoints and latency**
+
+Initial lookback is 15 minutes, ending 30 seconds behind the server clock.
+Subsequent collection overlaps the completed checkpoint by five minutes and
+keeps the same 30-second settling delay. A catch-up window advances its end by
+at most one hour; the overlap can make the requested span slightly longer.
+Normal polling resumes after 60 seconds. Unfinished pagination or older backlog
+continues after five seconds. Each pass reads at most five pages of at most 100
+events; these are bounds, not a guaranteed throughput rate.
+
+Low-volume display latency includes the 60-second schedule, 30-second settling
+delay, upstream ingestion delay and up to 30 seconds for the browser refresh.
+Backlogs, rate limits or failures add delay. Do not treat these timings as a
+production alerting SLO. The UI pauses automatic refresh while a draft is open,
+but the private server continues collection.
+
+The collector requests compact events with sampling disabled. It checks
+pagination destinations, query/window consistency and cursor direction before
+building another fixed-origin request. Missing/repeated/changed pagination is
+a failure, never silently interpreted as the end of a window. Sentry's protocol
+is documented in the official [pagination reference](https://docs.sentry.io/api/pagination/).
+
+After validation the collector maps a page, persists its exact normalized batch
+and bounded recovery metadata, admits it through normal source/application
+validation and receipts, records new identities/alerts, then saves the next
+cursor. Completed through advances only after the final page commits. Accepted
+partial records do not prove complete coverage. A restart after admission but
+before checkpoint commit replays the identical saved body. Stable identities
+and retained seen-event state handle ordinary replay/overlap without duplicate
+observations or repeated event alerts.
+
+This replay starts only after the private application can open its state.
+A hard crash can leave an existing state lock, which intentionally blocks
+restart. Automatic stale-lock recovery is not implemented. Follow chapter 49:
+verify the recorded process is dead and no writer owns the directory, prevent
+a supervisor from starting a competing writer, and remove only the exact lock
+confirmed stale. Preserve all databases, keys, state and audit. If ownership
+is uncertain, investigate rather than deleting a lock or recreating state.
+The SIGKILL test proves replay after that explicit recovery, not unattended
+crash restart or power-loss durability.
+
+Late arrivals beyond the five-minute overlap can be missed. Sentry/SDK sampling,
+missing upstream data, plan limitations, deletions and retention expiry are not
+fixed by this collector. Completed through means the requested API window
+finished under the bounded contract, not that every error the application ever
+generated is present. No full-fidelity archive or universal exactly-once claim
+is made.
+
+Catch-up stops if the gap exceeds six days. Preserve and investigate the old
+history. If an operator deliberately removes/reconnects the project, the new
+connection begins a new 15-minute coverage period; it does not backfill the gap.
+A long pause can reach the same bound. Never re-date events or edit checkpoints
+to make an incomplete period look current.
+
+**Collection health is not event activity**
+
+Starting means no fully successful window yet. Healthy means recent complete
+collection and a current checkpoint. Degraded means a saved failure, incomplete
+window or lagging checkpoint needs attention. Offline means an inactive managed
+source or a complete success older than the five-minute freshness threshold.
+Paused is an intentional collection stop. Failure classification takes priority
+over age, so a connection may remain Degraded with old timestamps rather than
+changing to Offline. Inspect the times, not only the label/color.
+
+Last attempted poll can describe a failed request. Last successful completed
+poll describes a finished window. Coverage starts marks this connection's
+declared beginning; Completed through is its last fully committed upstream end.
+Next attempt is scheduling/backoff, not a promise if the process stops. Last
+event activity is the newest original event timestamp: an old value can be
+healthy when successful polls find no new errors. Events accepted counts unique
+event identities for the connection, not bugs, incidents or current retained
+records after telemetry expiry. Timestamps in this widget are UTC.
+
+Managed source health/history also record successful empty polls. That is a
+specialized verified reader result, not permission for generic empty canonical
+pushes to claim health. The dedicated Live monitoring alert/delivery state is
+authoritative for this workflow; it does not activate native triage/rules or
+general incident/remediation actions elsewhere in the SOC.
+
+**Alerts and evidence**
+
+Application-error alerts summarize newly seen events on a committed page, report
+how many were error/fatal, and point to one sample canonical record and Sentry
+event ID. This is new event identity detection, not a new-issue classifier or
+independent security analysis. Investigate the event, application behavior and
+recent deployments before deciding what to change.
+
+Collection-failed alerts mark the start of a continuing failure episode rather
+than sending one alert for every retry. Collection-recovered means a complete
+window succeeded afterward; review any historical gap. Notification-test is
+explicitly an operator-requested delivery check, not collection proof.
+
+When a supported Sentry issue identifier is available, the evidence link opens
+that issue's event. Otherwise it opens the organization's issue browser; use
+the displayed Sentry event ID to locate it. The link is fixed-host HTTPS and
+still requires separate vendor authorization. Raw event-provided links are not
+followed. The retained evidence identifiers are private, not anonymous data.
+
+The alert list is newest-first, up to 100 per page with Older/Newer controls.
+New alerts can shift offset pages. An explicit status refresh returns to the
+first page. Acknowledgment is local review bookkeeping, not an upstream action
+or indefinite archive; acknowledged alerts with terminal delivery can become
+eligible for capacity eviction.
+
+**Controls, secret rotation and removal**
+
+Poll now queues a bounded job and returns promptly; it does not bypass the saved
+next-attempt time, two-job concurrency or a provider cooldown. Pause stops
+collection and fences in-flight results, but queued Slack delivery can continue.
+Resume preserves cursor/history and cooldown. It does not erase a six-day gap.
+
+Rotate credentials in the connection's disclosure. Blank replacement fields
+preserve their existing values; explicitly check Remove Slack notifications to
+remove that destination. Saving a Sentry token is not collection proof: verify
+the next completed poll. Removing Slack cancels pending/blocked deliveries but
+cannot retract messages already delivered. Adding Slack later does not send old
+in-app-only alerts retroactively.
+
+Send Slack test creates an explicit delivery record; configured is not delivered.
+Retry blocked Slack notifications resets a bounded attempt budget, not due times
+or a connection-wide cooldown. Mutations use the current expectedRevision and
+refuse stale updates. Refresh after saving/discarding a stale draft; do not
+overwrite newer state blindly.
+
+Remove connection stops jobs, archives its managed source, deletes its active
+credential record and cancels pending/blocked notifications. Existing telemetry
+and alerts remain under their own retention rules. This does not revoke the
+upstream credential, erase backups, guarantee forensic deletion of SQLite/WAL
+bytes or delete Sentry events. Revoke unwanted vendor access at the vendor too.
+To change application/environment/project/region/name binding, deliberately
+remove and recreate a connection with a new historical boundary.
+
+Treat the source as managed. Independently disabling/archiving/revoking it in
+generic controls can stop admission. The collector does not silently revive
+that lifecycle. Repair it deliberately or reconnect; do not assign an external
+writer to this managed source.
+
+**Durable Slack semantics**
+
+Alerts are saved before delivery. In-app means no Slack destination was present
+when the alert was created. Pending means waiting for an attempt or retry.
+Delivered means Slack acknowledged the message, not that a person read it.
+Blocked means a permanent failure, exhausted attempt budget or unsupported retry
+delay. Cancelled means local delivery was stopped after removing Slack/connection.
+
+Transient failures persist exponential backoff and Retry-After. A maximum of ten
+attempts is allowed per budget; permanent errors stop sooner. Connection-wide
+cooldown applies across later alerts, tests, restart and manual retry. A vendor
+delay beyond the representable calendar blocks rather than being shortened.
+There is no exactly-once external delivery: a crash after Slack acceptance but
+before saving its receipt can cause a duplicate. The alert ID helps identify it.
+There is no recipient read receipt, escalation policy, general routing engine,
+message retraction, ticket synchronization or upstream issue resolution.
+
+**Fixed limits and capacity behavior**
+
+Twenty live connections and two concurrent jobs are supported. A pass has at
+most five pages, each with 100 events and a 2 MiB response cap; a vendor request
+has a ten-second timeout. Slack acknowledgment is bounded to 1 KiB. Monitoring
+mutations are capped at 16 KiB. There are at most 10,000 retained alerts and
+100,000 seen-event identities across connections. Seen identities older than
+seven days are pruned on page commit. Audit history retains the last 10,000
+lifecycle/acknowledgment entries. The six-day catch-up bound is separate from
+those retention and regular canonical admission/replay limits.
+
+At alert capacity, only old acknowledged alerts whose delivery is delivered,
+in-app or cancelled may be evicted in bounded batches. If none are eligible,
+new alert creation fails without advancing the collection checkpoint. Review
+old alerts and repair outstanding delivery; do not acknowledge unread items just
+to hide capacity pressure. Seen-identity exhaustion also preserves the incomplete
+checkpoint. Logical bounds are not disk quotas: DB indexes/WAL, authentication,
+documents, telemetry, administration, audit and backups consume additional space.
+
+Use a supported local filesystem, one writer per state directory and external
+capacity monitoring. Shared/distributed SQLite storage and distributed collector
+coordination are not supported by this feature. Do not treat process-restart
+tests as proof against all power/filesystem failures or unlimited load.
+
+**Encrypted state and consistent backup/restore**
+
+The existing private directory contains live-monitoring.sqlite and
+live-monitoring.key. The directory must be canonical, owner-only 0700 and outside
+the checkout without symlink ancestors. Regular state/key files are 0600,
+owner-controlled and not hard-linked; WAL/SHM receive private modes too.
+
+Secrets use AES-256-GCM with a random 32-byte key and connection-bound authenticated
+data. The key is beside the database: someone who can read the entire directory,
+backup or process memory can recover credentials. This is not an external KMS,
+HSM, shipped key-rotation system or substitute for OS security and encrypted
+backup custody. A missing/wrong key refuses startup rather than inventing new
+credentials. Restore its matching trusted state; never delete history to bypass
+the error.
+
+Retained monitoring state includes connection binding, encrypted secrets,
+windows/cursors, health, exact normalized pending batches, seen IDs, alert/evidence
+metadata, delivery attempts and audit. Canonical records are in the normal
+telemetry store. Raw event bodies are only in memory during mapping; discarded
+messages, stacks, headers and user objects are not saved. Normalized hashes,
+labels, evidence IDs and links remain private telemetry. Ensure reverse proxies
+and diagnostics do not log credential request bodies.
+
+For a conservative backup, stop the complete private app cleanly and confirm
+no writer remains. Save all SOC state as one consistent set: monitoring DB/key,
+remaining SQLite companions, authentication/database secrets, telemetry, registry,
+administration, documents and service access. Preserve ownership/modes and the
+compatible application version. Copying a live main DB alone can omit WAL commits.
+Keep backups secret and outside the repository.
+
+Restore first into an isolated canonical private directory on a supported local
+filesystem. Avoid dual collection/delivery: keep a restored copy's outbound
+network isolated while the original is active, and transfer ownership deliberately
+to exactly one writer. Inspect decryptability, source bindings, checkpoint age,
+pending pages and delivery state before approving collection. Test one complete
+poll and record any gap. An older restored state can resend events/messages that
+were processed after the backup; newer discarded deduplication state cannot
+protect it. Online consistent backup automation and restore tooling remain
+adopter responsibilities.
+
+**HTTP and agent-readable contract**
+
+GET /api/v1/monitoring returns schemaVersion, connections, alerts, totalAlerts,
+offset, nextOffset and limits. Optional offset is 0–10,000; limit is 1–100.
+Connection status includes IDs, local binding, vendor slugs/region, enabled,
+revision, health, attempt/success/activity times, next attempt, safe error,
+coverage start, completed checkpoint, pending-window summary, totalEvents,
+hasSlack and notificationStatus. It never returns the token/webhook.
+
+POST /api/v1/monitoring/connections takes appId, environment, displayName, region,
+organization, project, token and optional slackWebhook. Access validation returns
+a connection, not a completed-window guarantee. POST to that connection's
+/poll, /pause, /resume, /remove, /test-notification or /retry-notifications path
+takes expectedRevision. Poll returns promptly with queued true; cooldown still
+applies. POST /credentials takes expectedRevision and a replacement token and/or
+slackWebhook; omitted preserves, empty webhook removes. POST
+/api/v1/monitoring/alerts/:id/ack takes an empty object and acknowledges locally.
+Use returned identifiers and fresh revisions; unexpected fields/query parameters
+are refused on mutations.
+
+All monitoring endpoints require an authenticated human browser session; writes
+require exact same origin. An Authorization header is refused even alongside a
+valid cookie. MCP service tokens and source-ingest credentials do not grant this
+API. Never copy browser cookies into an external automation client.
+
+Agents can read soc://documentation/live-monitoring and the checked-in
+docs/LIVE-MONITORING.md to explain setup, plan approved integration work and
+understand the safety/retention contract. No new MCP secret-acquisition, monitoring
+mutation, execution, shell or telemetry tool is granted. Let the human enter
+credentials and approve connection/outbound-delivery changes in the private UI.
+A future machine management surface requires explicit scoped authorization.
+
+**Failure diagnosis and deployment acceptance**
+
+If no applications appear, register one and refresh after resolving drafts.
+If access testing fails, check region/slugs, token expiry/project permissions
+and project:read; do not substitute a DSN or arbitrarily grant admin. If healthy
+but empty, verify the application's SDK, selected project and original event
+times. If some records arrived but health is degraded, inspect pending pagination
+and the completed checkpoint. If Poll now does nothing immediately, inspect
+saved cooldown, source lifecycle and process state before clicking again.
+
+For denied credentials, rotate to a valid narrow token and verify a completed
+window. For invalid pagination, preserve state and investigate the supported API
+contract instead of discarding the window. For a gap over six days, preserve the
+historical boundary and reconnect only as an explicit new coverage period.
+For Slack problems, inspect each alert's delivery/due state and intended channel;
+repair the webhook, then explicitly retry blocked delivery under its cooldown.
+For a missing/wrong key, restore the matched backup. For total process outage,
+use the independent watchdog: this process cannot alert while stopped.
+
+Before relying on a deployment, a new operator should prove private sign-in and
+code-free connection setup, honest empty-window success, one harmless real
+application event with resolvable evidence, optional Slack test plus event delivery,
+local-only acknowledgment, pause/resume, controlled credential failure and recovery,
+same-state restart without ordinary replay duplication, cooldown-aware retry,
+history-preserving removal, an isolated consistent restore and an independent
+watchdog detecting a stopped SOC. Use disposable authorized connections for
+failure tests. Repository tests exercise controlled responses, not live tenant
+permissions or your operating environment. Record those real commissioning
+results privately before assigning a latency/availability expectation.
+
+## 58. Guided setup: Monitor my application and Check my setup
+
+Open Sources → Guided setup to assemble a complete application-monitoring path.
+This is a resumable guide over the existing connection services, not an arbitrary
+plugin installer or a second source registry. The static skeleton explains the
+workflow but performs no requests. Private sign-in and persistent private state
+are required to save choices or inspect evidence. Human operators retain full
+deployment access; choosing an application does not create tenant isolation.
+
+**Monitor my application**
+
+1. Register a new application and initial environment in the guide, or choose
+   an existing app and one of its declared environments. No host is needed for
+   application-scoped ingestion. Registration alone does not start monitoring.
+2. Choose a connection path: Sentry live collection, reviewed vendor imports,
+   custom/canonical push, or Trivy report import. Save the guide before leaving
+   for the connection panel. Saving stores only IDs, environment, path and
+   timestamps; never keys, file bytes, sample payloads, or a claimed pass state.
+3. Follow the guided connection link. App/environment choices carry into the
+   corresponding forms or source selectors. Inspect the actual displayed
+   binding before submitting. URL preselection is convenience, not authority.
+4. Complete that path's own access or source test and activation. Live Sentry
+   uses reviewed project access and a managed source; generic push/import paths
+   retain their sample validation and one-time source credential workflow.
+5. Use Return to saved setup guide, choose the source actually created, and
+   save its binding. The server rejects a source from another app, environment,
+   or incompatible path. A guide may be saved before any source exists.
+6. Run Check my setup. Deliver/import your first real reviewed event/report
+   when appropriate. A quiet successful Sentry poll can prove collection while
+   event admission and screen population correctly remain waiting.
+7. Open the matching destinations and inspect actual records. Optional Slack
+   testing is a separate explicit action in Live monitoring; independently
+   verify that the expected message reached the intended channel.
+
+Saved guides appear in the list and have local bookmark links. Resume after
+navigation or a clean restart with the same state directory. Unsaved edits are
+protected against accidental refresh/navigation. A stale revision conflicts
+instead of overwriting another operator's saved choices. Guide bindings to app
+and environment are immutable; use a separate guide for another binding.
+Changing path/source is explicit. Duplicate app/environment/path guides are
+refused; resume the existing one. Delete guide removes only the bookmark, not
+its source, collector, credential, events, alerts, or application.
+
+**Which path should I choose?**
+
+- Live: your web app already sends errors to Sentry Cloud. Follow chapter 57.
+  This is the only built-in automatic vendor reader; local environment labels
+  do not filter the Sentry project's upstream feed.
+- Vendor: you already have a supported vendor export or successful API response
+  page. Follow chapter 56. Importing a file does not install a scheduled collector.
+- Custom: your app or collector can produce normalized events. Follow chapter
+  55 for definitions and source registration, sample validation, activation,
+  exact source credentials, and a first real canonical batch. A data-only
+  manifest never installs executable third-party code.
+- Trivy: you already have an authorized supported package/vulnerability report.
+  Configure/test/activate its importer, then use the Trivy upload. The SOC does
+  not run a scan; zero reported vulnerabilities is not a coverage guarantee.
+
+**Check my setup: evidence, not completion checkboxes**
+
+Checks read local registry, retained canonical telemetry, implemented coverage,
+and live-monitoring status. They do not issue tokens, activate sources, call
+vendors, send Slack messages, launch scans, or create test events. A successful
+browser read proves this signed-in session reaches the SOC, not that a remote
+producer reaches its ingest endpoint.
+
+Each result has a timestamped state: Pass means the described local evidence
+exists now; Waiting means a step has not been demonstrated; Attention indicates
+an inactive, failed, stale, incompatible, or incomplete state; Not applicable
+means this selected path does not implement that capability. No overall badge
+certifies the application secure, production ready, or completely monitored.
+
+| Check | What it proves and what to do next |
+| --- | --- |
+| Application and source | Exact registered app/environment/source/path association. If waiting, configure and select the right source; never borrow another app's token |
+| Source activation | Active source with an enabled admission driver. If incomplete, finish sample/access validation and activation, or investigate lifecycle state |
+| Accepted canonical records | Records actually retained for this source, not a sample-validation result. Send/import a real event if needed; retention can remove older evidence |
+| Collection status | A recent complete live window or recent canonical delivery under its declared cadence. A successful empty live window is healthy; file import does not prove scheduling |
+| Screen population | Observations contain retained records; suggested destinations list actual matching counts and their limitations. Manifest target names alone do not implement a screen |
+| Notification provider | A retained Slack acknowledgment or an explicit pending/failed condition. Historical delivery does not retest current credentials; use an explicit Slack test |
+| Human receipt confirmation | Cannot be inferred automatically. Open the intended channel yourself; acknowledgment is not proof that a person saw the message |
+
+Destination links preserve actual source/application filters where supported.
+Time-limited screens can show fewer records than the retained source total.
+The specialized Trivy latest-report surface retains its separate semantics;
+generic scan records cannot impersonate a validated Trivy report. Imported
+observations do not enable detectors, approve remediation, close risks, or
+declare compliance.
+
+Recheck after delivery, source changes, or a restart. Read the check timestamp;
+saved guide choices are not persisted readiness results. A previously passing
+source can become stale or paused. Keep source ownership, upstream coverage,
+producer scheduling, notification channel membership, supervision and recovery
+as explicit operating responsibilities.
+
+**Storage and HTTP contract**
+
+The owner-only external state directory contains setup-guides.sqlite and any
+SQLite companions. Back it up with the whole private state. The bound is 200
+guides and mutations use a global optimistic revision. Startup rejects an
+unsupported/corrupt state file; never delete state or an unexplained runtime
+lock just to make setup appear successful. Unclean shutdown retains the manual
+verified-stale-lock recovery boundary in chapter 49 and chapter 57.
+
+- GET /api/v1/setup: schemaVersion, revision, plans, and compatible source choices.
+- POST /api/v1/setup/plans: expectedRevision, appId, environment, path and optional
+  sourceId. Path is live, vendor, custom or trivy; returns revision and plan.
+- PATCH /api/v1/setup/plans/:id: expectedRevision plus path and/or sourceId.
+  sourceId null clears selection. App/environment cannot be changed in place.
+- DELETE /api/v1/setup/plans/:id: expectedRevision; removes only saved choices.
+- GET /api/v1/setup/check: exact appId, environment, path and optional sourceId
+  query parameters; returns checkedAt, binding, checks, destinations and a
+  qualified summary. Repeated/unknown query keys and unknown body fields fail.
+
+These human endpoints require private browser sessions without machine bearer
+authorization. Mutations require the configured same origin. Responses contain
+no stored vendor keys or source-ingest credentials. The guide API is not a raw
+file store or a general execution interface. Agents can read the full public
+guide through the MCP resource soc://documentation/guided-setup; reading a
+resource alone grants no private runtime authority. Separately, an explicitly
+issued service identity with setup:read may use setup_guides and setup_check
+through the two fixed /api/v1/service/setup read endpoints. Browser cookies do
+not authorize those machine calls. The scope is deployment-wide, not per-app;
+see chapters 53 and 60. No machine guide mutations or access-granting steps are
+added, and a diagnostic result never certifies production readiness.
+
+## 59. Map a custom source: from reviewed sample to canonical delivery
+
+Open **Sources → Map a custom source**. Use this when your application or
+external collector already produces JSON but does not use one of the reviewed
+vendor importers. The mapper is a bounded field-selection tool, not a generic
+collector, executable plugin, automatic redactor, or source-discovery service.
+It can describe all 29 canonical record kinds, but the selected source's
+installed manifest must permit the particular kind you choose. Vendor presets
+and Trivy reports retain their own dedicated reviewed importers.
+
+**Prepare the application and source first**
+
+Register the web application and its environment. Configure a canonical-events,
+canonical-push, or eligible installed data-only custom source. The mapper lists
+registered bindings and compatible definitions; it cannot make an unavailable
+driver available. Select the exact app, environment and source rather than
+reusing another application's source identifier. Follow the source's host
+requirement only if that manifest is host-scoped; an application-scoped source
+does not need an invented server or host enrollment.
+
+A configured, tested or paused compatible source can be used to preview a
+mapping. That permission does not authorize delivery. Actual admission still
+requires an active source and its separate source-ingest credential. Archived,
+removed, mismatched or incompatible bindings cannot be used to make a new
+preview pass. The browser's selected values are not authority: preview checks
+the current registered binding and enabled driver again on the private server.
+
+**Inspect a real, redacted representative sample**
+
+Use UTF-8 JSON or NDJSON containing one object, an array of objects, or object
+records separated by newlines. Unwrap vendor response envelopes before using
+this general mapper; selecting an arbitrary wrapper is not a substitute for a
+reviewed vendor adapter. Do not use a manufactured event merely to make a
+monitoring screen look populated.
+
+Before inspection, remove credentials, authorization headers, cookies, private
+identifiers, unnecessary message content and anything your deployment should
+not retain. Review both field names and values. The acknowledgment in the form
+is an operator review step, not a security scan or automatic sanitization.
+Secret-bearing key names and unsafe paths are rejected, but a free-text
+message, URL, identifier, title or literal value can still contain sensitive
+material. Do not paste secrets into an otherwise innocently named field.
+
+The Inspect operation returns field metadata: JSON Pointer paths, observed
+scalar types and presence counts. It does not return a second copy of all raw
+sample values. Presence counts help identify paths that are absent from some
+records. A field that exists once is not necessarily safe to require in every
+record. Sample text is handled in browser/server memory for the request; this
+tool does not persist raw input or save a recipe into the source registry.
+
+**Choose the canonical meaning and map each field deliberately**
+
+1. Select one permitted canonical record kind for this recipe. Read its
+   required payload keys and supported enums in the catalog. Required title,
+   state and kind-specific fields must all be supplied with valid values.
+2. Map upstreamId from the original upstream event identity. It must be a
+   nonempty bounded string or safe integer. Do not use array position, a random
+   value generated during mapping, or the current time as the identity.
+3. Map observedAt from the original RFC 3339 event timestamp. There is no
+   automatic number-to-date conversion or replacement with now. A timestamp
+   more than five minutes in the future is rejected. The eventual ingest
+   endpoint also enforces its own replay/retention window; preview does not
+   override that policy for older records.
+4. Map each payload field from one own scalar leaf or a deliberate scalar
+   constant. Constants are useful for a stable category or reviewed state;
+   they must not invent a verdict or claim that a workflow was performed.
+5. Include only additional scalar fields you explicitly need. Optional
+   payload.fields names are explicit mappings, not permission to retain the
+   entire upstream object. Unmapped input is omitted from the canonical batch.
+
+Pointers use JSON Pointer escaping, including escaped slashes or tildes in
+field names, and may address numeric array indexes. They select own scalar
+leaves only. There are no wildcard queries, expressions, scripts, templates,
+implicit coercions, nested-object pass-through, network destinations or
+enrichment calls. If data needs parsing, coercion, enrichment or several
+different record kinds, perform those reviewed steps in your producer or build
+a dedicated adapter. Do not force incompatible values into a permissive kind
+simply to get a green preview.
+
+**Preview is not ingestion**
+
+Inspect the complete normalized recipe and canonical batch before exporting
+them. The whole preview fails if a required path is missing, a selected value
+is invalid, a type/enum is unsupported, a timestamp is invalid, duplicate
+identities disagree, or a structural/size limit is exceeded. No partial subset
+is silently imported. The response explicitly says imported is false and raw
+input is not persisted.
+
+Record identities are deterministic for the recipe's version, application,
+environment, source, kind and original event identity. Records are emitted in
+deterministic order; identical repeats inside the sample collapse. Reusing an
+upstream identity with conflicting normalized content fails rather than
+creating a fresh incident. The receipt identity depends on the resulting
+record set. Re-previewing does not make the same input new data, and editing a
+recipe after records were admitted may create an identity/content conflict.
+Review producer migrations and historical changes rather than rewriting time
+or identity to bypass deduplication.
+
+**Export, run offline and deliver through the existing sender**
+
+Copy the reviewed recipe and representative input into owner-only private files
+outside the checkout. Do not save operational samples in this public repository.
+The offline mapper is:
+
+~~~sh
+npm run --silent map:events -- --recipe /absolute/private/recipe.json --file /absolute/private/events.json
+~~~
+
+The command prints only the canonical batch to stdout. It neither sends that
+batch nor saves it. Both files and their immediate parent directory must be
+owner-only, use canonical absolute external paths, and be free of symbolic and
+hard links. The offline command cannot check whether the source still exists,
+is active, retains the same binding, or still has an enabled admission driver.
+Its structural success is not live registry validation.
+
+Inspect the batch, then use the canonical sender and durable outbox described
+in chapter 55. Keep the source credential in a separate approved private token
+file, not in the recipe, generated JSON, shell arguments or agent transcript.
+Configure upstream acquisition, scheduling, failure handling and format-change
+alerts in the external producer. This mapper does not supply those services.
+Return to the saved application guide, run Check my setup and inspect the
+actual ingest receipt and source-filtered retained observations. Only those
+later steps establish admission evidence.
+
+**Limits and human API**
+
+The current limits are 512 KiB input, 1–100 object records, depth 10, 20,000
+nodes, 512 distinct scalar paths, a 64 KiB recipe and a 1 MiB canonical batch.
+Split larger exports before processing, keeping original event identities and
+timestamps. An over-limit response is a refusal, not permission to drop fields
+or rows without telling the operator.
+
+| Human endpoint | Meaning |
+| --- | --- |
+| GET /api/v1/source-mapping | Registered application/source choices, eligible kinds, required/optional payload fields, enums and limits |
+| POST /api/v1/source-mapping/inspect | Exact body `{ text }`; inspect scalar paths/types/presence without storing sample records |
+| POST /api/v1/source-mapping/preview | Exact body `{ appId, environment, sourceId, text, recipe }`; recheck current scope and return recipe, batch and qualified summary |
+
+A recipe uses schemaVersion "1", documentType "source-mapping-recipe",
+appId, environment, sourceId, kind, upstreamId `{ path: "/original-id" }`,
+observedAt `{ path: "/original-time" }`, and payload mappings. Each mapping
+is exactly `{ path: "/field" }` or `{ value: scalar }`. Optional payload.fields
+uses explicit names with the same selector shape. The outer request and recipe
+bindings must agree. These endpoints require the private human session; neither
+the service-token API nor MCP exposes sample uploads or mapper mutations.
+
+## 60. Guided agent connection: purpose, credentials, configuration, evidence
+
+Open **Agents → Service Access**. The assistant makes the service-connection
+workflow explicit without pretending that an entry in the agent registry is a
+running agent. For related tasks, use its links to Add Agent, Prompts and
+Enrollment. Those management surfaces have different contracts and authority.
+
+**Separate the four concepts**
+
+- An agent registration records metadata, declared capabilities and lifecycle.
+  It does not provision an external machine or launch a model.
+- A prompt revision is literal managed configuration. Reading or activating a
+  prompt does not authorize arbitrary tools or start execution.
+- Enrollment issues and proves a purpose-bound bootstrap relationship for
+  the managed agent. It is not a general service API credential.
+- Service Access issues an expiring scoped identity for an external API/MCP
+  client. It is separate from enrollment values and source-ingest credentials.
+
+The shipped stdio facade is a client of canonical server APIs. It is not an
+agent scheduler, remote shell, generic network relay, raw-log search system,
+credential broker or telemetry collector. The adopter supplies and operates
+the actual MCP-capable host, model process, approval policy and scheduling.
+
+**Step 1: select the narrow purpose and review its exact permissions**
+
+The default registry-review purpose selects connector:read, agents:read and
+governance:read. Agent-registry-only and governance-only purposes select their
+respective read scope. The setup-observer purpose selects connector:read and
+the optional setup:read. Selecting a purpose clears earlier optional grants;
+it never adds writes or literal prompt bodies. Manual selection starts with no
+scopes so the operator can choose the exact set.
+
+Purpose is a local selection aid, not a stored authorization constraint.
+Enforcement comes from the scopes actually submitted and issued. All scopes
+are installation-wide, not restricted to the named agent, one application or
+one record. A friendly name or application mentioned in a prompt cannot narrow
+a token's authority. If installation-wide access is too broad for the job, do
+not issue the token and assume the prompt will provide tenant isolation.
+
+Prompt bodies require a deliberate prompts:read checkbox. Optional write
+grants remain individually listed and require a confirmation before issuance.
+Review the exact command and its production impact; the external agent host
+must still enforce human approval for destructive or impactful operations.
+The existing service boundary permanently blocks credential issuance and
+privilege-expanding commands described in chapter 53. A source-registration
+scope does not let an agent activate that source and retrieve its credential.
+
+Choose a recognizable non-secret identity name and short practical lifetime.
+The UI offers one hour, 24 hours, seven days or 30 days, with 24 hours selected
+initially. The server's permitted range is five minutes through 30 days.
+Changing scopes or renewing expiry requires a new identity; rotation changes
+the token but preserves its scopes and original expiry.
+
+**Step 2: save the one-time credential privately**
+
+Issue the identity only after reviewing its scopes. Save the one-time value in
+an owner-only regular file outside the checkout on the actual agent host.
+Use mode 0600, the launching user's ownership, and no symbolic/hard links.
+Create it with an approved secure editor or secret manager. The credential
+must not appear in an agent prompt, MCP configuration JSON, command arguments,
+an environment value, Document upload, log, transcript or source-control file.
+Environment variables may identify the file path, not carry the token itself.
+
+The one-time panel remains visible if a subsequent identity-list refresh fails.
+Save the value before navigating away, then use I saved it — clear credential.
+Clearing removes the browser copy; it does not verify the file's existence,
+permissions or contents. There is no readback endpoint. If a write response is
+lost, inspect the identity list to identify the outcome, then rotate the issued
+identity or revoke and replace it. Do not repeatedly mint new identities while
+assuming a timed-out request never completed.
+
+**Step 3: generate a secret-free client configuration**
+
+Select the active identity and enter three reviewed values: the absolute
+checkout path on the agent host, the absolute external token-file path on that
+same host, and the private SOC origin reachable from that host. The paths need
+not refer to the browser's computer or the SOC server. Install the checkout's
+dependencies and provide Node.js 22.13 or newer as node on the host's PATH.
+
+Generate the JSON server entry and merge it into the MCP client's supported
+configuration without replacing unrelated entries. The generated mcpServers
+entry invokes node with an argument array containing the absolute
+tools/agent-mcp.js path, --base-url, the private origin, --token-file and the
+file path. No credential value is embedded. MCP host configuration schemas
+vary; use the equivalent stdio command/arguments if that host uses another
+wrapper format.
+
+For POSIX paths, the assistant also provides a safely quoted equivalent launch
+command and a permissions command for the already securely created token file.
+Shell metacharacters in reviewed paths remain literal quoted arguments; the
+JSON argument array does not invoke a shell. Windows drive paths receive JSON
+arguments, not a misleading POSIX launch command. Set appropriate owner-only
+file access on that host. Starting a stdio MCP process in a plain terminal can
+wait silently for protocol input; silence is not proof of connectivity.
+
+The generator rejects relative paths, parent/dot segments, invalid separators,
+control characters and a token file lexically inside the checkout. It accepts
+plain HTTP only for exact loopback hosts and otherwise requires HTTPS on
+approved private address space or a validated tailnet hostname. Origins cannot
+contain user credentials, paths, query strings or fragments. For a remote host,
+its own loopback address points to itself, not to the SOC server: enter the
+actual private HTTPS origin instead.
+
+Generation is local to the browser. It does not inspect files, resolve DNS,
+verify TLS, inspect tailnet policy, transfer a credential, install an MCP host
+or connect the agent. The runtime independently checks the real token file and
+transport. Inputs and generated instructions remain only in page memory and
+are protected from automatic refresh until explicitly cleared or navigation is
+approved. The assistant's own evidence refresh retains generated instructions;
+leaving the page still discards them. Never treat a generated config as proof
+that it was saved, installed or launched elsewhere.
+
+**Step 4: verify a permitted read from the real external client**
+
+Start the shipped stdio client through the actual MCP host. Use a granted
+read-only operation: connector_snapshot for connector:read,
+administration_snapshot with the appropriate domain for agents:read or
+governance:read, or setup_guides for setup:read. Inspect the returned result
+inside that host, then refresh observed agent access in the SOC. Tool discovery
+and public documentation reads do not authenticate to the private server. A
+write-only token must not be tested by making an unnecessary write.
+
+The assistant distinguishes retained authorization from token issuance. It
+looks for an authorized audit event for the selected identity, newer than its
+issuance or rotation. Same-timestamp events at rotation are conservatively
+excluded. lastUsedAt alone is not success: a valid credential denied an
+operation for insufficient scope also updates that field. A denied request is
+shown separately; do not fix it by blindly granting every write permission.
+
+An authorization event says only that the server allowed that request. It does
+not prove that the command committed, a response reached the client, a model
+ran, a task succeeded, a schedule exists or the agent remains healthy. Inspect
+the client's actual response and the relevant connector/administration history
+for completion. Audit is bounded to the latest 100 displayed events across the
+installation; absence may mean old evidence aged out. Re-run an appropriate
+read when needed instead of manufacturing a pass flag.
+
+Expired/revoked identities cannot be described as current usable access.
+Rotation/revocation updates the displayed identity immediately even if the
+following list request fails. A failed evidence refresh invalidates earlier
+authorization proof rather than showing it as a newly successful check. An
+identity outside the current paginated list is not certified using a stale
+cached card. No browser/server test sends the one-time bearer value on the
+operator's behalf.
+
+**Seven MCP tools and the optional setup scope**
+
+The complete tool inventory is connector_snapshot, connector_command,
+administration_snapshot, administration_prompt, administration_command,
+setup_guides and setup_check. Chapter 26 lists their exact argument contracts;
+chapter 53 lists human management and service API permissions. New read tools
+do not widen old tokens: setup:read is optional and is absent from the normal
+default scope set.
+
+setup_guides takes an empty object and returns saved application/environment/
+source choices, compatible source declarations and the setup revision.
+setup_check takes appId, environment, path and optional sourceId, with path
+restricted to live, vendor, custom or trivy. It returns the same timestamped
+local evidence checks, destinations and limitations shown to a human operator.
+Both require a private service token file with setup:read and are unavailable
+in tokenless workbench mode. Their only HTTP destinations are:
+
+- GET /api/v1/service/setup
+- GET /api/v1/service/setup/check with the exact supported binding query
+
+There are no machine guide writes, source-mapping uploads, document transfers,
+private deployment checks, credential reads or live-monitoring management
+added to the facade. Read the public resource
+soc://documentation/guided-setup for instructions, then use authenticated setup
+reads for runtime evidence. Reading documentation by itself grants no authority.
+
+## 61. Guided document intake and supporting evidence
+
+Open **Documents** to add supported private files, assign tracking metadata and
+maintain immutable versions. The workflow is document management, not a scanner
+or a compliance decision engine. File bytes and document records remain in the
+private document store; they are not packaged into the public skeleton and are
+not sent through canonical telemetry merely because the document has a link.
+Chapter 50 describes the byte/metadata HTTP contracts and supported limits.
+
+**Choose scope and responsibility without inventing authorization**
+
+Select a registered application from the searchable application picker, or
+leave the document shared. Search narrows real registered choices rather than
+guessing an identifier. The selected application is useful for organization
+and filtering; it is not a tenant permission boundary. All provisioned human
+operators still have full access in this starter.
+
+Enter the owner, review date and appropriate document status deliberately. An
+owner is a tracking label, not an account grant or a routing rule. A review
+date does not install a scheduler or promise an email reminder. Assign someone
+responsible for reviewing due dates and stale evidence in the operating process.
+Do not imply the upload was reviewed merely because its metadata was filled in.
+
+**Attach a real risk or attestation when appropriate**
+
+Use the searchable risk/attestation picker for an existing local governance
+record. New or changed bindings are checked on the server; browser text is not
+sufficient to establish that a local target exists. Risks and attestations are
+currently deployment-wide and do not have application ownership. Selecting an
+application for the document does not rescope, reassign or isolate the linked
+governance record.
+
+Case and policy references are explicitly unverified external labels. They
+are not proof that a matching local case/policy exists, and no undocumented
+resolver is invoked to create one. Label them honestly and keep any external
+system-of-record responsibility clear. Do not use an arbitrary typed ID when
+the workflow offers a validated local governance picker.
+
+A document link expresses association, not sufficiency. It does not establish
+that a claim is supported, reduce a risk, change an attestation status, close a
+case, certify compliance or approve remediation. Review the bytes and their
+relevance, then use the separate governed status/lifecycle commands if a human
+decision warrants a change. Uploading or mapping an evidence.receipt canonical
+record never uploads a document or creates an authored attestation.
+
+**Inspect the receipt and preserve versions**
+
+After upload, inspect the actual document ID, immutable version number,
+filename, byte count, SHA-256 digest, uploader and saved timestamp. These are
+receipt facts. The hash identifies bytes; it does not prove authorship,
+authenticity, malware safety, legal sufficiency or independent verification.
+Do not upload credentials and do not treat accepted content as malware-scanned.
+
+Edit metadata to change owner, review date, status or links. Use Upload a new
+version for replacement bytes so prior versions remain available with their
+own identity and history. A new version is not an in-place overwrite. Downloads
+remain authenticated attachments under the document service's limits. Use
+archive/restore for lifecycle organization and observe the retained-capacity
+policy; archiving is not secure deletion and does not erase old versions.
+
+Revision checks prevent an old form from silently overwriting another
+operator's changes. On conflict, reload current metadata and review the new
+state rather than guessing a revision. Clear an association only when the
+operator explicitly intends to remove it. Changing links and uploading bytes
+are related operations but do not implicitly authorize each other's side
+effects.
+
+**Handle historical missing references honestly**
+
+A linked application, risk or attestation may later disappear. The document's
+historical tuple remains visible as missing. An unrelated metadata edit or new
+file version must not silently clear it or attach a different record that
+happens to occupy the first picker option. Preserve the unchanged historical
+tuple until an operator deliberately changes or clears the binding.
+
+When any part of the binding is explicitly changed, the new tuple must be valid
+under the current registry rules. Refresh the picker if a target changed
+concurrently. A missing label is actionable maintenance information, not a
+reason to fabricate a target or call the evidence current. Re-review document
+relevance and governance status independently after fixing a reference.
+
+## 62. Explain an empty screen without inventing data
+
+Supported private empty/error views display a compact **+** beside the page
+heading. Expand Explain this screen to read the implemented coverage contract, compatible
+source declarations, active-source count and matching retained-record count.
+This is an explicit opt-in local read. Merely opening an empty screen does not
+start a vendor connection, import a sample, create a source or fill a board with
+demonstration records.
+
+Use Setup checklist in the header to reopen the beginner guide after dismissal.
+It is offered once per loaded page on an unfiltered empty private view,
+not on a provider error. Its personal checkmarks are not automated readiness
+results. A filtered empty view does not prove a deployment has no sources.
+
+The helper does not replace the screen's query or conceal its original error.
+It answers a narrower question: what kinds or authored workflow feed this
+route, and what relevant local configuration/retained data exists in the
+supplied application/source scope? Its checkedAt timestamp belongs to that
+read, not to the last successful collection event.
+
+**Interpret configuration, data and projection separately**
+
+| Observed situation | Interpretation and next action |
+| --- | --- |
+| No compatible source declaration | Choose the appropriate collection path and configure a producer for the stated record kinds; do not assume a panel title is an installed adapter |
+| Compatible but inactive declarations | Review source lifecycle, required validation and activation; a declared integration does not prove delivery |
+| Active declaration without retained matching records | Inspect source-specific checks, sender receipts and retention; deliver a real reviewed event/report if the integration has not yet sent one |
+| Retained matching records but this screen is empty | Inspect time range, filters, supported projector and specialized workflow semantics; generic kind overlap may not satisfy this particular view |
+| Locally authored workflow | Use its native document, agent, governance or other record-management controls; generic telemetry does not create authored management records |
+| Local facts cannot be read | Re-establish the private session or investigate server availability; failure is not an empty successful result or proof the system is healthy |
+
+The counts apply supplied appId/sourceId filters but are not the full native
+view query. Time windows, detail selectors, latest-report selection and
+specialized projector requirements may produce fewer visible rows than the
+retained matching count. The helper does not reproduce every panel's filtering
+algorithm or assert that all compatible records are currently rendered.
+
+Only validated Trivy report imports populate the specialized latest-report
+surface. Generic scan.result or vulnerability.finding records cannot impersonate
+a Trivy import receipt. Conversely, a historical record can remain after its
+source was removed or reconfigured. Retained data without a current producer
+is historical evidence, not proof of a fresh collector.
+
+The helper lists at most 50 compatible source declarations and explicitly
+reports the omitted count. Do not infer that an unlisted declaration does not
+exist. Source state active is a lifecycle fact, not a freshness, authentication,
+cadence or upstream-coverage proof. Use Check my setup for source-specific
+delivery evidence and Sources → Observations for actual retained facts.
+
+**Human-only endpoint and failure boundary**
+
+GET /api/v1/setup-assistance/screen accepts an exact route, optional tab only
+for /scans, and optional appId/sourceId. Unknown or duplicate keys, unsupported
+views and invalid or mismatched scope are rejected. Both filters must refer to
+a coherent current binding when supplied together. A human operator session is
+required; this is not an unauthenticated inventory or a service-token API.
+
+The response identifies the route's title, recordKinds, implementation
+limitation, configuredSources, activeSources, retainedRecords, bounded sources
+list and omittedSources count. An authored workflow may use no telemetry kinds
+and report retainedRecords as not applicable rather than zero. Zero, unknown,
+not applicable and failed reads are not interchangeable.
+
+Every run clears the prior explanation before requesting fresh facts. A failed
+or invalid response must not leave an earlier result presented as a new pass.
+The helper offers links to source setup and retained observations with supported
+scope filters. Those links do not grant access, activate a producer, execute a
+scan or remedy the underlying condition by themselves.
+
+## 63. Private deployment, supervision, backup and recovery guidance
+
+Open **Sources → Private deployment**. This assistant organizes six operating
+responsibilities: private access, operator/persistent-state setup, continuous
+operation, real data and delivery, backup/restore, and deliberate crash
+recovery. It is a guide with local observations, not an installer or automated
+infrastructure controller. The preferred model is a tailnet-only deployment
+with no public internet exposure.
+
+**1. Keep the service private and verify the actual exposure**
+
+The private application listens on IPv4 loopback. For authorized remote access,
+configure the real private HTTPS origin and use Tailscale Serve with restrictive
+tailnet access rules. Do not use public Funnel, router port forwarding or a
+public reverse proxy for this SOC. Keep operators and approved service clients
+inside the intended private access boundary; configure the server origin to
+match the actual route they use.
+
+A loopback listener alone does not prove internet inaccessibility. A reverse
+proxy, shared node, forwarding rule or separate tunnel could expose it. Likewise,
+a configured HTTPS origin does not prove certificate validity, correct DNS,
+tailnet membership, device policy or restrictive ACLs. Independently test the
+intended permitted path and verify absence of public reachability from outside
+the tailnet. This page does not probe public addresses or change network rules.
+
+**2. Provision the operator and keep persistent state outside the checkout**
+
+Use the one-time localhost administrator form on a new installation, or the
+documented local account CLI, to provision the human operator; there is
+no default password or public signup. Use a dedicated owner-only private state
+directory outside the repository and retain that directory across restarts.
+Do not put credentials or encryption keys in public bootstrap configuration,
+prompts, documentation or the repository. Follow chapter 49 for precise private
+account and origin setup.
+
+The local check examines current state-entry metadata: directory/file type,
+ownership, permissions and unexpected links. It does not read or return secret
+file contents or the private state-directory path. Owner-only entries are not
+proof that the disk, swap, snapshots or backup media are encrypted, or that a
+compromised operating-system account cannot read them. Review those protections
+at the host/storage layer.
+
+**3. Arrange continuous operation and independent failure detection**
+
+Choose an OS supervisor appropriate to the deployment. Define who owns start,
+stop, restart and upgrade operations, and ensure only one writer uses a private
+state directory. The guide does not install a daemon, change supervisor policy
+or certify that automatic restart is configured correctly.
+
+Use a separate private watchdog for process or host outage. The SOC cannot
+collect, report its own health or send Slack alerts while its process is down.
+A live source showing healthy before shutdown is historical information, not
+proof that the process is still running. Have the watchdog and operator process
+cover delayed collection, repeated restarts, disk pressure and upstream failure
+without treating a stopped collector as a clean application.
+
+**4. Prove the real data path and optional delivery separately**
+
+Use Monitor my application to bind a real source and Check my setup to inspect
+activation, retained records, collection checkpoints and supported destinations.
+Use the first real reviewed event/report appropriate to that integration;
+registration and sample validation are not admitted telemetry. A completed
+empty live poll can prove collection without proving event activity.
+
+If Slack is configured, request an explicit test in Live monitoring and then
+inspect the actual destination channel. Provider acknowledgment, client receipt
+and human attention are separate facts. Private deployment checks do not send a
+test, rotate credentials, poll a vendor, advance a checkpoint or start Trivy.
+Keep application-source ownership and upstream coverage explicit after upgrades.
+
+**5. Back up a coordinated state set and test restoration in isolation**
+
+Use an approved maintenance window and stop the application cleanly before
+taking a coordinated whole-state backup. Include all private databases, any
+SQLite journal companions and the matching monitoring encryption key. A copy of
+an encrypted credential database without its corresponding key is not a usable
+monitoring backup. Account, document, telemetry, service-access, setup-guide and
+monitoring state have related but distinct stores; do not assume one database
+contains the whole application.
+
+Preserve the only known-good copy. Restore into an isolated private directory
+with correct ownership and permissions, using the documented recovery process.
+Prevent the restored copy from polling or notifying until collection ownership
+is deliberately transferred. Starting two copies against upstream services can
+create duplicate collection or notifications even when they use separate local
+directories. Do not use a supposed verification step to mutate the original
+state or contact production vendors unintentionally.
+
+Independently test that operators can sign in, document versions can be read,
+source identities/receipts remain coherent and monitoring recovery uses the
+matching key and checkpoints. Record what was tested and any coverage gaps.
+This assistant never performs a backup/restore or certifies its success; a local
+permissions check and a present file are not recovery proof.
+
+**6. Recover a crashed instance deliberately**
+
+After an unclean shutdown, an existing runtime lock may block startup. Stop
+competing supervisors and investigate the recorded process ownership before
+changing anything. Only remove a lock confirmed stale after verifying no live
+writer owns that state directory. A process ID alone can be reused; investigate
+the actual process and directory ownership, not just whether a number exists.
+
+Do not delete databases, encryption keys, journals or an unexplained lock to
+make a startup error disappear. Preserve evidence of corruption, restore a
+trusted state set if required and follow the exact startup/recovery guidance in
+chapter 57. Restart recovery can replay a pending local batch safely but cannot
+reconstruct events that the upstream service never retained or that have aged
+past its collection/replay policy. Recheck actual collection and record gaps.
+This page does not stop processes, remove locks or reset a blocked collector.
+
+**Interpret local deployment facts with their stated limits**
+
+Choose Check local deployment facts to request a point-in-time local read.
+Observed means the particular reported fact was read; Operator verification
+required means the server cannot establish the responsibility; Needs attention
+means a detected condition needs review. There is no deployment-ready or
+internet-isolated certification badge.
+
+| Local result | Actual evidence and limitation |
+| --- | --- |
+| Local listener | Application configuration uses IPv4 loopback; proxies, forwarding and remote reachability are not inspected |
+| Configured origin | Reports the configured origin and whether HTTPS is selected; not a certificate, DNS or ACL test |
+| Private state file permissions | Current directory/entry metadata matches owner-only expectations; not disk or backup encryption proof |
+| Available filesystem space | Available bytes now; under 100 MiB raises attention, but a larger value is not a capacity guarantee or growth forecast |
+| Retention and capacity | Current retained telemetry count against configured capacity; auth and document storage are separate and need their own capacity review |
+| Supervision and watchdog | Explicit manual responsibility; this diagnostic neither discovers nor installs a working supervisor |
+| Backup and restore proof | Explicit manual responsibility; no file copy, recovery attempt or verification has occurred |
+
+Free-space read failure is unknown, not zero and not a pass. Record/count/age/
+byte/deduplication limits described in Retention still apply independently of
+filesystem free space. Plan growth, alerts and cleanup policy; do not infer
+that the presence of space guarantees future durable admission.
+
+The human-only endpoint is GET /api/v1/setup-assistance/operations with no query
+parameters. It reads local configuration, state-entry metadata, filesystem free
+space and telemetry counters. Responses contain a checkedAt timestamp, origin,
+listener/port facts and bounded explanatory checks; they do not expose secret
+contents or private directory paths. Repeated/unknown query parameters and
+mutation methods are refused. A failed read clears the prior result and leaves
+verification incomplete. No MCP operation is added for these private host facts.
+
+## 64. AI-assisted setup and beginner checklist
+
+The header's Setup checklist is a resumable beginner guide, not a certification.
+Start with private access and account security, then register your web app and
+environment, choose a supported source path, verify real delivery, add approved
+documents, and optionally connect an AI client. Personal checkmarks do not
+validate these tasks; use source-specific checks and independent network and
+recovery tests. The compact + beside an empty page heading opens contextual
+help without keeping a large explanation above every empty screen.
+
+Open **Agents → Service Access** to connect an external AI host. The client
+selector provides appropriate configuration/instructions for Claude, Codex,
+Hermes and OpenClaw, and explains limitations for Perplexity/Grok. Formats and
+local capabilities differ; generated configuration is not a claim that every
+vendor/version has been commissioned. A model name is not an MCP transport.
+
+The shipped bridge is local stdio: the host launches Node with this checkout's
+tools/agent-mcp.js, the private SOC origin, and an absolute token-file path.
+It is not a hosted remote MCP listener. Paths belong to the client machine;
+localhost also refers to that machine. A client on another tailnet device needs
+private HTTPS reachability and its own reviewed installation. Keep the SOC
+private; never use Funnel/public tunneling to satisfy a hosted client's URL
+field. Tool results may still leave the tailnet through the host's model API.
+Review provider disclosure and retention; do not send secrets or raw telemetry.
+
+Generate configuration using file paths, never token values. Store the one-time
+service credential owner-only outside the checkout. Better Auth human sessions,
+service identities and source credentials are separate. A managed agent record
+does not start an external agent or grant MCP access. Default read scopes do not
+allow writes. Optional setup:read enables qualified setup evidence. To prepare
+new declarations, explicitly approve connector:app.register,
+connector:source.setup and connector:source.test. These grants cover the whole
+deployment, not only an app named in a prompt. Existing-source changes require
+their own exact scopes. Do not grant every mutation to avoid a denial.
+
+Read **docs/AI-SETUP.md**, also published as soc://documentation/ai-setup, for the
+complete connection, preparation, commissioning and troubleshooting runbook.
+Clients supporting MCP prompts can select **setup_application**, which takes
+no arguments and returns that public runbook as a user message. Retrieval makes
+no private API call and grants no authority. This fixed setup prompt is not a
+private managed-agent prompt revision and does not require prompts:read.
+Clients without prompt UI can use the Service Access generated setup text.
+
+The workflow is discover, ask scope, propose, obtain approval, prepare and test,
+pause for human credentials/activation, observe real delivery, and report known
+facts and gaps. Agents must read actual manifests/contracts, reuse stable IDs,
+respect revisions and idempotency, and stop on unavailable drivers. Source
+activation, credential issuance, agent privilege expansion and prompt activation
+remain blocked through private MCP. Live collector creation, vendor imports,
+document upload, guide writes and generic filesystem/shell access are not tools
+in this bridge. Human or separately approved external-host work is required.
 
 End of version-1 technical implementation manual.

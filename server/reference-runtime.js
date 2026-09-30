@@ -5,10 +5,12 @@ const ConnectorContract = require("../public/connector-contract");
 const { validateIngestBatch, validateNormalizedRecord, validateTimestamp } = require("../tools/ingest-contract");
 const { currentOperator } = require("./operator-context");
 const {
-  REFERENCE_CONNECTOR_MANIFESTS,
-  getReferenceManifest,
   scaledHealthThresholds
 } = require("./reference-manifest");
+const {
+  MAX_INTEGRATION_MANIFESTS, MAX_CUSTOM_INTEGRATIONS, getIntegrationManifests,
+  getIntegrationManifest, validateCustomManifest
+} = require("./integration-catalog");
 const { createPageEnvelope, createIndexedPageEnvelope } = require("./reference-pages");
 const {
   MAX_RECORDS, MAX_RECEIPTS, ReferenceStateStore, clone, generateCredential,
@@ -20,6 +22,11 @@ const INGEST_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 const CONNECTION_STALE_MS = 15 * 60 * 1000;
 const CONNECTION_OFFLINE_MS = 60 * 60 * 1000;
 const REQUEST_FUTURE_SKEW_MS = 5 * 60 * 1000;
+const LIVE_SENTRY_HEALTH_MESSAGES = Object.freeze({
+  healthy: "Sentry collection completed successfully; an empty result means no events in the checked window.",
+  degraded: "Sentry collection is delayed or failed; monitoring coverage may be incomplete.",
+  offline: "Sentry collection is unavailable; monitoring coverage is incomplete."
+});
 
 class ReferenceControlError extends Error {
   constructor(code, message, options = {}) {
@@ -168,9 +175,8 @@ class ReferenceControlPlane {
     if (!Number.isSafeInteger(this.ingestTtlMs) || this.ingestTtlMs < 60_000 || this.ingestTtlMs > INGEST_TTL_MS) {
       throw new TypeError("Reference ingest TTL must be from one minute through one year.");
     }
-    this.manifests = REFERENCE_CONNECTOR_MANIFESTS.map(ConnectorContract.validateConnectorManifest);
     this.enabledConnectorTypes = new Set(options.enabledConnectorTypes || ["canonical-push"]);
-    if ([...this.enabledConnectorTypes].some((type) => !["canonical-push", "trivy-report"].includes(type))) throw new TypeError("An unimplemented connector driver cannot be enabled.");
+    if ([...this.enabledConnectorTypes].some((type) => !["canonical-push", "canonical-events", "trivy-report"].includes(type))) throw new TypeError("An unimplemented connector driver cannot be enabled.");
     this.store = options.store || new ReferenceStateStore({ directory: options.stateDirectory, clock: this.clock });
   }
 
@@ -186,9 +192,80 @@ class ReferenceControlPlane {
     return typeof this.store.controlSnapshot === "function" ? this.store.controlSnapshot() : this.store.snapshot();
   }
 
+  connectorAvailable(type, state = this.controlState()) {
+    return this.enabledConnectorTypes.has(type) || (this.enabledConnectorTypes.has("canonical-events")
+      && (state.integrationManifests || []).some((manifest) => manifest.connectorType === type));
+  }
+
+  listIntegrations() {
+    const state = this.controlState();
+    const manifests = getIntegrationManifests(state);
+    const custom = new Set((state.integrationManifests || []).map((manifest) => manifest.connectorType));
+    return {
+      schemaVersion: "1", documentType: "integration-catalog", revision: state.revision,
+      capacity: { maximum: MAX_INTEGRATION_MANIFESTS, installed: manifests.length,
+        customMaximum: MAX_CUSTOM_INTEGRATIONS, customInstalled: custom.size },
+      integrations: manifests.map((manifest) => ({ manifest, origin: custom.has(manifest.connectorType) ? "custom" : "built-in",
+        available: this.connectorAvailable(manifest.connectorType, state),
+        removable: custom.has(manifest.connectorType)
+          && !state.sources.some((source) => source.connectorType === manifest.connectorType)
+          && !state.connectorInstances.some((connector) => connector.connectorType === manifest.connectorType) }))
+    };
+  }
+
+  assertIntegrationRequest(input, allowed) {
+    if (!currentOperator().startsWith("operator:")) throw new ReferenceControlError("not-authorized", "An authenticated human operator is required to manage integrations.", { status: 403 });
+    if (!this.enabledConnectorTypes.has("canonical-events")) throw new ReferenceControlError("connector-unavailable", "Custom integrations require the private canonical-events admission driver.", { status: 422 });
+    if (!input || typeof input !== "object" || Array.isArray(input)
+        || ![Object.prototype, null].includes(Object.getPrototypeOf(input))
+        || Reflect.ownKeys(input).some((key) => typeof key !== "string" || !allowed.includes(key)
+          || Object.getOwnPropertyDescriptor(input, key).get || Object.getOwnPropertyDescriptor(input, key).set)
+        || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) {
+      throw new ReferenceControlError("validation-failed", "Integration request fields or expectedRevision are invalid.", { status: 422 });
+    }
+  }
+
+  installIntegration(input) {
+    this.assertIntegrationRequest(input, ["manifest", "expectedRevision"]);
+    let manifest;
+    try { manifest = validateCustomManifest(input.manifest); }
+    catch (error) { throw new ReferenceControlError("validation-failed", error.message, { status: 422 }); }
+    this.store.transact({ action: "integration.install", actor: currentOperator(), targetType: "integration",
+      targetId: manifest.connectorType, detail: "installed immutable data-only canonical push declaration" }, (next) => {
+      if (next.revision !== input.expectedRevision) throw new ReferenceControlError("revision-conflict", "Integration catalog revision changed; refresh and retry.", { status: 409 });
+      if (getIntegrationManifest(next, manifest.connectorType)) throw new ReferenceControlError("already-exists", "Connector type already exists. Declarations are immutable; choose a new versioned type.", { status: 409 });
+      if ((next.integrationManifests || []).length >= MAX_CUSTOM_INTEGRATIONS) throw new ReferenceControlError("connector-unavailable", "Custom integration registry capacity is exhausted.", { status: 507 });
+      if (!next.integrationManifests) next.integrationManifests = [];
+      next.integrationManifests.push(clone(manifest));
+    });
+    return this.listIntegrations();
+  }
+
+  removeIntegration(input) {
+    this.assertIntegrationRequest(input, ["connectorType", "expectedRevision"]);
+    if (typeof input.connectorType !== "string" || !/^[a-z][a-z0-9.-]{0,79}$/.test(input.connectorType)) {
+      throw new ReferenceControlError("validation-failed", "Integration connectorType is invalid.", { status: 422 });
+    }
+    this.store.transact({ action: "integration.remove", actor: currentOperator(), targetType: "integration",
+      targetId: input.connectorType, detail: "removed unused custom integration declaration" }, (next) => {
+      if (next.revision !== input.expectedRevision) throw new ReferenceControlError("revision-conflict", "Integration catalog revision changed; refresh and retry.", { status: 409 });
+      if (!(next.integrationManifests || []).some((manifest) => manifest.connectorType === input.connectorType)) {
+        throw new ReferenceControlError("not-found", "Only an installed custom integration can be removed.", { status: 404 });
+      }
+      if (next.sources.some((source) => source.connectorType === input.connectorType)
+          || next.connectorInstances.some((connector) => connector.connectorType === input.connectorType)) {
+        throw new ReferenceControlError("activation-blocked", "Sources or connector history still reference this integration, including archived or removed tombstones.", { status: 409 });
+      }
+      next.integrationManifests = next.integrationManifests.filter((manifest) => manifest.connectorType !== input.connectorType);
+    });
+    return this.listIntegrations();
+  }
+
   getSnapshot(request) {
     ConnectorContract.validateControlRequest(request);
     const state = this.controlState();
+    const manifests = getIntegrationManifests(state);
+    const manifestsByType = new Map(manifests.map((manifest) => [manifest.connectorType, manifest]));
     const now = dateAt(this.clock);
     const hosts = state.hosts.map((host) => {
       const projected = clone(host);
@@ -202,7 +279,7 @@ class ReferenceControlPlane {
     const projectedSources = state.sources.map((source) => {
       const projected = clone(source);
       const cadence = source.config["cadence-seconds"];
-      const thresholds = scaledHealthThresholds(source.connectorType, cadence);
+      const thresholds = scaledHealthThresholds(source.connectorType, cadence, manifestsByType.get(source.connectorType));
       if (source.state === "active" && source.health.lastSuccessAt) {
         const ageSeconds = Math.max(0, (now.getTime() - Date.parse(source.health.lastSuccessAt)) / 1000);
         if (ageSeconds > thresholds.offlineAfterSeconds) {
@@ -220,7 +297,7 @@ class ReferenceControlPlane {
     const document = {
       schemaVersion: "1",
       documentType: "connector-control-snapshot",
-      connectorTypes: this.manifests,
+      connectorTypes: manifests,
       apps: state.apps,
       hosts,
       connectorInstances: state.connectorInstances,
@@ -241,7 +318,7 @@ class ReferenceControlPlane {
   execute(requestValue) {
     let request = ConnectorContract.validateCommandRequest(requestValue);
     if (request.command === "source.setup") {
-      const manifest = getReferenceManifest(request.input.connectorType);
+      const manifest = getIntegrationManifest(this.controlState(), request.input.connectorType);
       if (!manifest) throw new TypeError("connector command request.input.connectorType is unavailable in reference mode.");
       request = ConnectorContract.validateCommandRequest(requestValue, manifest);
     }
@@ -385,7 +462,7 @@ class ReferenceControlPlane {
     const state = this.controlState();
     const app = state.apps.find((entry) => entry.appId === request.input.appId);
     const host = state.hosts.find((entry) => entry.hostId === request.input.hostId);
-    const manifest = getReferenceManifest(request.input.connectorType);
+    const manifest = getIntegrationManifest(state, request.input.connectorType);
     if (!app || (request.input.hostId !== undefined && (!host || host.appId !== app.appId))) throw new ReferenceControlError("not-found", "The requested application or optional collector was not found.", { status: 404 });
     if (manifest.scope === "host" && !host) throw new ReferenceControlError("activation-blocked", "This scanner requires an enrolled collector.", { status: 422 });
     if (host && host.state !== "enrolled") throw new ReferenceControlError("activation-blocked", "Enroll the selected collector before configuring a source.", { status: 422 });
@@ -433,7 +510,7 @@ class ReferenceControlPlane {
     }
     if (source.revision !== request.input.expectedRevision) throw new ReferenceControlError("revision-conflict", "Source revision changed; refresh and retry.", { status: 409 });
     if (source.state !== "configured" || connector.state !== "configured") throw new ReferenceControlError("test-failed", "Only a configured source can be tested.", { status: 422 });
-    if (!this.enabledConnectorTypes.has(source.connectorType)) {
+    if (!this.connectorAvailable(source.connectorType, state)) {
       throw new ReferenceControlError(
         "connector-unavailable",
         "This installed scan manifest is a data-only connection template. Install its reviewed server driver before testing or activation.",
@@ -448,6 +525,19 @@ class ReferenceControlPlane {
       throw new ReferenceControlError("test-failed", "Complete the one-time connection check before testing this source.", { status: 422 });
     }
     if (source.connectorType === "canonical-push" && !source.hostId && !request.input.sample) throw new ReferenceControlError("test-failed", "Paste a real, redacted log sample before activating this application source.", { status: 422 });
+    const canonicalIntegration = source.connectorType === "canonical-events"
+      || (state.integrationManifests || []).some((manifest) => manifest.connectorType === source.connectorType);
+    if (canonicalIntegration && !request.input.recordSample) throw new ReferenceControlError("test-failed", "Provide a real, redacted complete canonical record before activating this integration source.", { status: 422 });
+    if (request.input.recordSample) {
+      try {
+        const sample = validateNormalizedRecord(request.input.recordSample);
+        const manifest = getIntegrationManifest(state, source.connectorType);
+        if (sample.sourceId !== source.sourceId || sample.estateId !== source.appId || !manifest.payload.recordKinds.includes(sample.kind)
+            || Date.parse(sample.observedAt) > dateAt(this.clock).getTime() + REQUEST_FUTURE_SKEW_MS) throw new TypeError("Sample binding does not match.");
+      } catch {
+        throw new ReferenceControlError("test-failed", "The canonical sample kind, source/application binding, timestamp or payload is invalid.", { status: 422 });
+      }
+    }
     if (request.input.sample) {
       try {
         validateNormalizedRecord({ schemaVersion: "1", documentType: "normalized-record", recordId: request.requestId,
@@ -494,7 +584,7 @@ class ReferenceControlPlane {
     }
     if (source.revision !== request.input.expectedRevision) throw new ReferenceControlError("revision-conflict", "Source revision changed; refresh and retry.", { status: 409 });
     if (source.state !== "tested" || connector.state !== "tested") throw new ReferenceControlError("activation-blocked", "Only a successfully tested source can be activated.", { status: 422 });
-    if (!this.enabledConnectorTypes.has(source.connectorType)) {
+    if (!this.connectorAvailable(source.connectorType, state)) {
       throw new ReferenceControlError("connector-unavailable", "A data-only connection template cannot be activated without its reviewed server driver.", { status: 422 });
     }
     const revision = source.revision + 1;
@@ -546,6 +636,9 @@ class ReferenceControlPlane {
     }
     if (source.revision !== request.input.expectedRevision) throw new ReferenceControlError("revision-conflict", "Source revision changed; refresh and retry.", { status: 409 });
     const action = request.command.slice(7);
+    if (["resume", "rotate"].includes(action) && !this.connectorAvailable(source.connectorType, state)) {
+      throw new ReferenceControlError("connector-unavailable", "The requested source admission driver is not enabled.", { status: 422 });
+    }
     const allowed = {
       update: ["configured", "tested", "active", "paused"], pause: ["active"], resume: ["paused"],
       archive: ["configured", "tested", "active", "paused"], remove: ["archived"],
@@ -565,7 +658,7 @@ class ReferenceControlPlane {
           ...(request.input.displayName !== undefined ? { displayName: request.input.displayName } : {}),
           ...(request.input.config !== undefined ? { config: request.input.config } : {}),
           ...(request.input.credentialReferences !== undefined ? { credentialReferences: request.input.credentialReferences } : {})
-        }, getReferenceManifest(source.connectorType));
+        }, getIntegrationManifest(state, source.connectorType));
       } catch {
         throw new ReferenceControlError("validation-failed", "The source changes do not match the installed connector manifest.", { status: 422 });
       }
@@ -652,6 +745,125 @@ class ReferenceControlPlane {
     }
   }
 
+  // Internal server capability, deliberately absent from public control commands
+  // and MCP. The caller must first validate a real read-only Sentry response.
+  // Its synthetic operator identity identifies that trusted collector in audit;
+  // it does not assert that a human session performed each scheduled poll.
+  assertLiveSentrySource(sourceId, expectedState) {
+    if (!currentOperator().startsWith("operator:")) {
+      throw new ReferenceControlError("not-authorized", "The trusted live collector requires operator authority.", { status: 403 });
+    }
+    const state = this.controlState();
+    const source = state.sources.find(item => item.sourceId === sourceId);
+    const connector = source && state.connectorInstances.find(item => item.connectorInstanceId === source.connectorInstanceId);
+    const { vendorManifest } = require("../tools/vendor-adapters");
+    const manifest = getIntegrationManifest(state, "vendor.sentry-events");
+    if (!source || !connector || source.connectorType !== "vendor.sentry-events"
+        || connector.connectorType !== source.connectorType || source.sourceKind !== "sentry-events"
+        || source.hostId !== undefined || connector.appId !== source.appId
+        || !manifest || canonicalHash(manifest) !== canonicalHash(vendorManifest("sentry-events"))) {
+      throw new ReferenceControlError("not-authorized", "Live collection requires the exact installed application-scoped Sentry preset.", { status: 403 });
+    }
+    if (!this.connectorAvailable(source.connectorType, state)) {
+      throw new ReferenceControlError("connector-unavailable", "The Sentry canonical admission driver is not enabled.", { status: 422 });
+    }
+    if (source.state !== expectedState || connector.state !== expectedState) {
+      throw new ReferenceControlError("activation-blocked", "The live source is not in the required lifecycle state.", { status: 409 });
+    }
+    return { source, connector };
+  }
+
+  activateLiveSentrySource(sourceId) {
+    const { source, connector } = this.assertLiveSentrySource(sourceId, "configured");
+    const now = dateAt(this.clock).toISOString();
+    this.store.transact({ action: "source.live-sentry.activate", actor: currentOperator(), targetType: "source", targetId: sourceId,
+      detail: "trusted live collector validated read-only Sentry access; activated without a source-ingest credential" }, next => {
+      const mutableSource = next.sources.find(item => item.sourceId === sourceId);
+      const mutableConnector = next.connectorInstances.find(item => item.connectorInstanceId === connector.connectorInstanceId);
+      if (mutableSource.state !== "configured" || mutableSource.revision !== source.revision || mutableConnector.state !== "configured") {
+        throw new ReferenceControlError("revision-conflict", "Source lifecycle changed before live activation.", { status: 409 });
+      }
+      mutableSource.state = mutableConnector.state = "active";
+      mutableSource.revision += 1;
+      mutableConnector.revision += 1;
+      mutableSource.updatedAt = mutableConnector.updatedAt = now;
+      mutableSource.health = makeHealth(mutableSource, now, "pending", "awaiting-first-delivery", {
+        nextExpectedAt: null, message: "Validated read-only Sentry access; awaiting the first scheduled collection."
+      });
+      addChange(next, "connector-instance", connector.connectorInstanceId, "connector-instance.activated", "succeeded", now, "Live Sentry access validated.");
+      addChange(next, "source", sourceId, "source.activated", "succeeded", now, "Live Sentry access validated; no source-ingest credential issued.");
+    });
+    return clone(this.controlState().sources.find(item => item.sourceId === sourceId));
+  }
+
+  updateLiveSentryHealth(sourceId, input) {
+    const { source } = this.assertLiveSentrySource(sourceId, "active");
+    const keys = ["state", "message", "lastAttemptAt", "lastSuccessAt", "nextExpectedAt"];
+    if (!input || typeof input !== "object" || Array.isArray(input)
+        || ![Object.prototype, null].includes(Object.getPrototypeOf(input))
+        || Reflect.ownKeys(input).some(key => typeof key !== "string" || !keys.includes(key)
+          || Object.getOwnPropertyDescriptor(input, key).get || Object.getOwnPropertyDescriptor(input, key).set)
+        || !Object.hasOwn(LIVE_SENTRY_HEALTH_MESSAGES, input.state)
+        || (input.message !== undefined && input.message !== LIVE_SENTRY_HEALTH_MESSAGES[input.state])) {
+      throw new ReferenceControlError("validation-failed", "Live collection health requires a known state and fixed safe message.", { status: 422 });
+    }
+    const now = dateAt(this.clock).toISOString();
+    let health;
+    try {
+      for (const key of ["lastAttemptAt", "lastSuccessAt", "nextExpectedAt"]) {
+        const value = input[key];
+        if (value === null && key !== "lastAttemptAt") continue;
+        if (typeof value !== "string" || new Date(validateTimestamp(value, key)).toISOString() !== value) throw new TypeError();
+      }
+      const observedAttemptAt = new Date(Math.max(Date.parse(input.lastAttemptAt),
+        input.lastSuccessAt === null ? 0 : Date.parse(input.lastSuccessAt))).toISOString();
+      if (Date.parse(input.lastAttemptAt) < Date.parse(source.createdAt)
+          || Date.parse(observedAttemptAt) < Date.parse(source.health.lastAttemptAt || source.createdAt)
+          || (source.health.lastSuccessAt !== null && (input.lastSuccessAt === null
+            || Date.parse(input.lastSuccessAt) < Date.parse(source.health.lastSuccessAt)))
+          || (input.state === "healthy" && (input.lastSuccessAt === null
+            || Date.parse(input.lastSuccessAt) < Date.parse(input.lastAttemptAt)))
+          || (input.state !== "healthy" && input.lastSuccessAt !== source.health.lastSuccessAt)
+          || (input.nextExpectedAt !== null && Date.parse(input.nextExpectedAt) < Date.parse(input.lastAttemptAt))) throw new TypeError();
+      // The monitoring connection retains request-start time separately. The
+      // source-health contract records the attempt observation at completion,
+      // so its lastAttemptAt cannot precede its successful completion time.
+      // No invented event, replay receipt, or delivery counter is generated.
+      health = ConnectorContract.validateSourceHealthSnapshot(makeHealth({ ...source, revision: source.revision + 1 }, now,
+        input.state, input.state === "healthy" ? "none" : "connector-error", {
+          ...input, lastAttemptAt: observedAttemptAt,
+          message: LIVE_SENTRY_HEALTH_MESSAGES[input.state]
+        }));
+    } catch {
+      throw new ReferenceControlError("validation-failed", "Live collection health timestamps or state transition are invalid.", { status: 422 });
+    }
+    this.store.transact({ action: "source.live-sentry.health", actor: currentOperator(), targetType: "source", targetId: sourceId,
+      detail: "trusted live collector updated collection health without fabricating event observations" }, next => {
+      const mutableSource = next.sources.find(item => item.sourceId === sourceId);
+      if (mutableSource.state !== "active" || mutableSource.revision !== source.revision) {
+        throw new ReferenceControlError("revision-conflict", "Source lifecycle changed before collection health update.", { status: 409 });
+      }
+      mutableSource.revision += 1;
+      mutableSource.updatedAt = now;
+      mutableSource.health = clone(health);
+    });
+    return clone(this.controlState().sources.find(item => item.sourceId === sourceId));
+  }
+
+  ingestVendorAsOperator(batchValue, bodyHash, adapterId) {
+    const { vendorManifest } = require("../tools/vendor-adapters");
+    const manifest = vendorManifest(adapterId);
+    const source = this.controlState().sources.find(item => item.sourceId === batchValue?.sourceId);
+    if (!source || source.connectorType !== manifest.connectorType || source.sourceKind !== adapterId) {
+      throw new ReferenceControlError("not-authorized", "Vendor imports require a source bound to that installed adapter preset.", { status: 403 });
+    }
+    try { return this.admitBatch(batchValue, null, bodyHash, true, false, true); }
+    catch (error) {
+      if (error.name === "TelemetryStoreError") throw new ReferenceControlError(error.code, error.message, { status: error.status });
+      throw error;
+    }
+  }
+
   ingestScanner(batchValue, credentialValue, bodyHash) {
     try { return this.admitBatch(batchValue, credentialValue, bodyHash, false, true); }
     catch (error) {
@@ -676,14 +888,11 @@ class ReferenceControlPlane {
     return clone(source);
   }
 
-  admitBatch(batchValue, credentialValue, bodyHash, operatorImport, scannerImport = false) {
+  admitBatch(batchValue, credentialValue, bodyHash, operatorImport, scannerImport = false, vendorImport = false) {
     if (operatorImport && !currentOperator().startsWith("operator:")) {
       throw new ReferenceControlError("not-authorized", "An authenticated operator is required for report imports.", { status: 403 });
     }
     const batch = validateIngestBatch(batchValue);
-    if (!this.enabledConnectorTypes.has("trivy-report") && batch.records.some((record) => record.kind !== "log.event")) {
-      throw new ReferenceControlError("validation-failed", "Reference mode accepts only canonical log.event records.", { status: 422, field: "records.kind" });
-    }
     if (typeof bodyHash !== "string" || !/^[a-f0-9]{64}$/.test(bodyHash)) throw new TypeError("A SHA-256 body hash is required.");
     const presentedHash = hashCredential(credentialValue);
     if (!operatorImport && !presentedHash) throw new ReferenceControlError("not-authorized", "Source ingest credential is invalid.", { status: 401 });
@@ -701,14 +910,14 @@ class ReferenceControlPlane {
     if (!operatorImport && sourceCredential.sourceId !== batch.sourceId) throw new ReferenceControlError("not-authorized", "Credential is not bound to this source.", { status: 403 });
     const source = state.sources.find((entry) => entry.sourceId === batch.sourceId);
     if (!source || source.state !== "active") throw new ReferenceControlError("activation-blocked", "Source is not active.", { status: 409 });
-    if (!this.enabledConnectorTypes.has(source.connectorType)) {
-      throw new ReferenceControlError("connector-unavailable", "Reference ingest is available only to the canonical log push driver.", { status: 422 });
+    if (!this.connectorAvailable(source.connectorType, state)) {
+      throw new ReferenceControlError("connector-unavailable", "The requested source admission driver is not enabled.", { status: 422 });
     }
-    const allowedKinds = source.connectorType === "canonical-push" ? ["log.event"] : ["scan.result", "software.package", "vulnerability.finding"];
+    const allowedKinds = getIntegrationManifest(state, source.connectorType).payload.recordKinds;
     if (batch.records.some((record) => !allowedKinds.includes(record.kind))) {
       throw new ReferenceControlError("validation-failed", "Record kind is not implemented by this source's driver.", { status: 422, field: "records.kind" });
     }
-    if (operatorImport && source.connectorType !== "trivy-report") throw new ReferenceControlError("not-authorized", "Operator import is restricted to the installed report driver.", { status: 403 });
+    if (operatorImport && !vendorImport && source.connectorType !== "trivy-report") throw new ReferenceControlError("not-authorized", "Operator import is restricted to the installed report driver.", { status: 403 });
     if (source.connectorType === "trivy-report" && !scannerImport) throw new ReferenceControlError("validation-failed", "Trivy sources require the validated report-import endpoint.", { status: 422 });
     if (scannerImport && source.connectorType !== "trivy-report") throw new ReferenceControlError("validation-failed", "Report-import credentials must belong to a Trivy report source.", { status: 422 });
     if (batch.records.some((record) => record.estateId !== source.appId)) {
@@ -794,6 +1003,7 @@ module.exports = {
   CONNECTION_STALE_MS,
   ENROLLMENT_TTL_MS,
   INGEST_TTL_MS,
+  LIVE_SENTRY_HEALTH_MESSAGES,
   REQUEST_FUTURE_SKEW_MS,
   ReferenceControlError,
   ReferenceControlPlane,

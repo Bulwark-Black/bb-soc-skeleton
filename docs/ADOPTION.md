@@ -1,5 +1,12 @@
 # Adoption guide
 
+For source-first adoption, use the [integration review](INTEGRATION-REVIEW.md)
+alongside this guide. The private starter now accepts all 29 canonical kinds
+through Universal canonical events and human-installed custom definitions;
+vendor translation remains in an external adapter. Sources → Integrations
+shows actual screen coverage, and Received observations confirms live data.
+Imported read-only observations do not implement native workflow actions.
+
 This guide is for teams that want to take the public interface skeleton from a
 source checkout, place it in an existing stack, and supply authorized SOC page
 models, or run the included private Node application. The repository supplies
@@ -144,8 +151,9 @@ contract and UI integration aid, not a deployment base.
 
 For a private MCP-capable implementation agent, issue a scoped credential from
 Agents → Service Access and run `npm run --silent start:agent-mcp -- --base-url http://127.0.0.1:8080 --token-file /absolute/private/agent-credential` using its
-protected external file. The stdio process exposes checked-in documentation/contracts and exactly five fixed
-connector/administration tools; it refuses credential issuance, arbitrary URLs,
+protected external file. The stdio process exposes checked-in documentation/contracts and exactly seven fixed
+connector/administration/setup tools; optional `setup:read` enables read-only
+saved-guide and diagnostic checks. It refuses credential issuance, arbitrary URLs,
 shell/SQL/filesystem access, telemetry, and secret retrieval. See
 [AGENTS.md](AGENTS.md#optional-mcp-facade). Private service routes enforce the
 issued scopes server-side and never accept browser cookies. Without a token

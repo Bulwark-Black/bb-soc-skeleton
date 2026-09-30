@@ -7,8 +7,11 @@ authorization-policy mechanism.
 ## Server launch configuration
 
 `npm start` runs the private application, not the static preview. It requires
-Node.js 22.13 or newer, `npm ci`, an operator provisioned through `npm run account`,
-and an absolute persistent state directory outside this checkout. Follow
+Node.js 22.13 or newer, `npm ci`, and an absolute persistent state directory
+outside this checkout. On first local sign-in, create the first administrator
+with the one-time localhost form, or provision an operator through `npm run account`.
+Complete bootstrap before enabling the private Tailnet origin; browser setup
+is not available through a proxy. Follow
 [AUTHENTICATION.md](AUTHENTICATION.md) for the complete first-account procedure.
 
 | Server setting | CLI alternative | Purpose |
@@ -38,7 +41,14 @@ editor. Retention pruning runs on successful state mutations, not a background
 timer. Review actual counters in Retention → Policy/Reality and the detailed
 limits and migration rules in [technical manual section 52](../public/technical-reference.md#52-storage-limits-reliability-acceptance-and-remaining-parity-work).
 
-Private mode installs `canonical-push` and `trivy-report`; the eleven legacy
+Private mode installs `canonical-push`, `canonical-events` and `trivy-report`,
+plus custom canonical-push definitions registered by a human operator in
+Sources → Integrations. Definitions live in the transactional telemetry control
+state; no plugin directory or executable module is loaded. They are immutable,
+with 86 custom/100 total slots and 64 KiB per definition. Use Sources → Received
+observations for all supported kinds. See the
+[integration review](INTEGRATION-REVIEW.md) for the sender, lifecycle and limits.
+The eleven legacy
 scanner setup templates remain non-executing. Trivy import is under Scans →
 Trivy and `/api/v1/scanners/trivy/import?sourceId=...`, using an operator session
 or source-bound bearer, never a service-agent credential. The importer does not

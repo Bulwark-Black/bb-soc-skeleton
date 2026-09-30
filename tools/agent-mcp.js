@@ -27,6 +27,7 @@ const LEGACY_PROTOCOLS = Object.freeze([
 const SERVER_INFO = Object.freeze({ name: "bulwark-black-soc", version: "0.1.0" });
 const SERVER_INSTRUCTIONS = [
   "Read the implementation resources before issuing a command.",
+  "For guided setup, read soc://documentation/ai-setup or select the user-controlled setup_application prompt.",
   "This facade calls the canonical connector and administration services; it is not a second registry.",
   "Never send telemetry or plaintext credentials through MCP.",
   "Credential-issuing commands are intentionally blocked; use the protected operator flow.",
@@ -52,9 +53,30 @@ const RESOURCE_DEFINITIONS = Object.freeze([
   resource("soc://documentation/agent-guide", "agent-guide", "Agent integration guide",
     "Focused private-deployment, agent-administration, MCP, and completion guidance.",
     "docs/AGENTS.md", "text/markdown"),
+  resource("soc://documentation/readme", "readme", "Project setup and capability overview",
+    "Installation prerequisites, shipped features, private access and adoption boundaries.",
+    "README.md", "text/markdown"),
+  resource("soc://documentation/authentication", "authentication", "Private authentication and account security",
+    "One-time owner setup, Better Auth sessions, optional TOTP, recovery and private identity boundaries.",
+    "docs/AUTHENTICATION.md", "text/markdown"),
   resource("soc://documentation/connectors", "connector-guide", "Connector integration guide",
     "Connector manifests, source lifecycle, canonical ingest, projectors, and secret-reference rules.",
     "docs/CONNECTORS.md", "text/markdown"),
+  resource("soc://documentation/integration-review", "integration-review", "Integration capability and adoption review",
+    "Implemented transports, custom definitions, canonical sender, screen coverage, limits, remaining work and acceptance checks.",
+    "docs/INTEGRATION-REVIEW.md", "text/markdown"),
+  resource("soc://documentation/vendor-integrations", "vendor-integrations", "Vendor adapters and durable delivery",
+    "Ten reviewed vendor export mappings, private import setup, source binding, persistent delivery queue, recovery and acquisition boundaries.",
+    "docs/VENDOR-INTEGRATIONS.md", "text/markdown"),
+  resource("soc://documentation/live-monitoring", "live-monitoring", "Live application monitoring",
+    "Guided Sentry collection, encrypted credential custody, checkpoints, collection health, alerts, Slack notifications and private operations.",
+    "docs/LIVE-MONITORING.md", "text/markdown"),
+  resource("soc://documentation/guided-setup", "guided-setup", "Guided application setup and diagnostics",
+    "Resumable application/source setup, read-only evidence checks, supported paths, storage, private API and recovery limits.",
+    "docs/GUIDED-SETUP.md", "text/markdown"),
+  resource("soc://documentation/ai-setup", "ai-setup", "Private AI-assisted application setup",
+    "Client connection choices, least-privilege setup workflow, human credential checkpoints and evidence-based completion.",
+    "docs/AI-SETUP.md", "text/markdown"),
   resource("soc://documentation/architecture", "architecture", "Architecture guide",
     "Trust planes, adopter boundaries, and production architecture responsibilities.",
     "docs/ARCHITECTURE.md", "text/markdown"),
@@ -128,6 +150,15 @@ const ADMINISTRATION_REQUEST_SCHEMA = deepFreeze({
 });
 
 const TOOL_DEFINITIONS = Object.freeze([
+  tool("setup_guides", "Read saved setup guides",
+    "Read saved application/source bindings and compatible choices. Requires a private service credential with setup:read; does not create guides or grant access.",
+    { type: "object", additionalProperties: false, properties: {} }, true),
+  tool("setup_check", "Check application setup evidence",
+    "Read local source activation, retained records, collection and delivery evidence. Requires setup:read. Never polls vendors, sends notifications, scans, or certifies production readiness.",
+    { type: "object", additionalProperties: false, required: ["appId", "environment", "path"], properties: {
+      appId: { type: "string", minLength: 1, maxLength: 128 }, environment: { type: "string", minLength: 1, maxLength: 128 },
+      path: { type: "string", enum: ["live", "vendor", "custom", "trivy"] }, sourceId: { type: "string", minLength: 1, maxLength: 128 }
+    } }, true),
   tool("connector_snapshot", "Read connector registry snapshot",
     "Read the authorized connector manifest, app, host, source, health, and change projection. This never returns credentials.",
     {
@@ -390,6 +421,52 @@ function safeCommandProjection(value) {
   return projected;
 }
 
+function validateSetupInput(input) {
+  assertObject(input, "Setup check", ["appId", "environment", "path", "sourceId"]);
+  for (const key of ["appId", "environment", ...(input.sourceId === undefined ? [] : ["sourceId"])]) {
+    if (typeof input[key] !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(input[key])) throw new TypeError("Setup identifiers are invalid.");
+  }
+  if (!["live", "vendor", "custom", "trivy"].includes(input.path)) throw new TypeError("Setup path is invalid.");
+  return input;
+}
+function validateSetupDocument(value, input) {
+  const text = (candidate, max = 4000) => typeof candidate === "string" && candidate.length <= max;
+  const id = candidate => typeof candidate === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(candidate);
+  const time = candidate => text(candidate, 35) && Number.isFinite(Date.parse(candidate));
+  const href = candidate => candidate === undefined || text(candidate, 2048) && /^#\/(?!\/)[a-z0-9/-]*(?:\?[^#\s\\<>]*)?$/.test(candidate);
+  const ensure = valid => { if (!valid) throw new Error("Invalid setup response."); };
+  ensure(value?.schemaVersion === "1" && !containsProtectedMaterial(value));
+  if (input) {
+    assertObject(value, "Setup diagnostic", ["schemaVersion", "checkedAt", "appId", "environment", "sourceId", "path", "checks", "destinations", "summary"]);
+    ensure(time(value.checkedAt) && value.appId === input.appId && value.environment === input.environment && value.path === input.path
+      && value.sourceId === (input.sourceId || null) && text(value.summary) && Array.isArray(value.checks) && value.checks.length <= 20
+      && Array.isArray(value.destinations) && value.destinations.length <= 100);
+    for (const item of value.checks) {
+      assertObject(item, "Setup check result", ["id", "title", "state", "detail", "href"]);
+      ensure(id(item.id) && text(item.title, 200) && ["pass", "waiting", "attention", "not-applicable"].includes(item.state) && text(item.detail) && href(item.href));
+    }
+    for (const item of value.destinations) {
+      assertObject(item, "Setup destination", ["title", "href", "detail"]);
+      ensure(text(item.title, 200) && typeof item.href === "string" && href(item.href) && text(item.detail));
+    }
+  } else {
+    assertObject(value, "Setup guides", ["schemaVersion", "revision", "plans", "choices"]);
+    ensure(Number.isSafeInteger(value.revision) && value.revision >= 0 && Array.isArray(value.plans) && value.plans.length <= 200
+      && Array.isArray(value.choices) && value.choices.length <= 20000);
+    for (const item of value.plans) {
+      assertObject(item, "Setup plan", ["id", "appId", "environment", "path", "sourceId", "createdAt", "updatedAt"]);
+      validateSetupInput({ appId: item.appId, environment: item.environment, path: item.path, ...(item.sourceId === null ? {} : { sourceId: item.sourceId }) });
+      ensure(id(item.id) && time(item.createdAt) && time(item.updatedAt));
+    }
+    for (const item of value.choices) {
+      assertObject(item, "Setup source choice", ["appId", "environment", "path", "sourceId", "displayName", "state"]);
+      validateSetupInput({ appId: item.appId, environment: item.environment, path: item.path, sourceId: item.sourceId });
+      ensure(text(item.displayName, 120) && text(item.state, 40));
+    }
+  }
+  return value;
+}
+
 class ControlPlaneClient {
   #baseUrl;
   #fetch;
@@ -414,6 +491,18 @@ class ControlPlaneClient {
   }
 
   get baseUrl() { return this.#baseUrl; }
+
+  async setupGuides() {
+    if (!this.#tokenFile) throw new TypeError("Setup reads require a private service token file with setup:read.");
+    const document = await this.#request("GET", "/api/v1/setup");
+    try { return validateSetupDocument(document); } catch { throw new ControlPlaneError("invalid-response"); }
+  }
+
+  async setupCheck(input) {
+    if (!this.#tokenFile) throw new TypeError("Setup reads require a private service token file with setup:read.");
+    const query = validateSetupInput(input), document = await this.#request("GET", "/api/v1/setup/check", query);
+    try { return validateSetupDocument(document, query); } catch { throw new ControlPlaneError("invalid-response"); }
+  }
 
   async #request(method, endpoint, query, body) {
     if (this.#tokenFile) endpoint = endpoint.replace("/api/v1/", "/api/v1/service/");
@@ -574,8 +663,14 @@ function completeResult(value, modern, cache) {
 }
 
 function capabilities() {
-  return { resources: { subscribe: false, listChanged: false }, tools: { listChanged: false } };
+  return { resources: { subscribe: false, listChanged: false }, tools: { listChanged: false }, prompts: { listChanged: false } };
 }
+
+const SETUP_PROMPT = Object.freeze({
+  name: "setup_application",
+  description: "Guide private application/source setup with discovery, explicit approval, human credential checkpoints and real evidence. Reading this prompt performs no operations.",
+  arguments: Object.freeze([])
+});
 
 function toolResult(value, modern) {
   return completeResult({
@@ -684,6 +779,21 @@ function createMcpServer(options = {}) {
       const content = await readResource(value.uri);
       return completeResult({ contents: [content] }, modern, { ttlMs: 60_000, cacheScope: "public" });
     }
+    if (method === "prompts/list") {
+      validateListParams(params);
+      return completeResult({ prompts: [clonePublicDefinition(SETUP_PROMPT)] }, modern, { ttlMs: 300_000, cacheScope: "public" });
+    }
+    if (method === "prompts/get") {
+      const value = methodParams(params, ["name", "arguments"]);
+      if (value.name !== SETUP_PROMPT.name) throw new McpProtocolError(-32602, "Unknown prompt name.");
+      try { assertObject(value.arguments === undefined ? {} : value.arguments, "Setup prompt arguments", []); }
+      catch { throw new McpProtocolError(-32602, "The setup prompt accepts no arguments."); }
+      const guide = await readResource("soc://documentation/ai-setup");
+      return completeResult({
+        description: SETUP_PROMPT.description,
+        messages: [{ role: "user", content: { type: "text", text: "Help me set up my private SOC using this runbook. Begin with discovery and questions; request approval before changes.\n\n" + guide.text } }]
+      }, modern, { ttlMs: 60_000, cacheScope: "public" });
+    }
     if (method === "tools/list") {
       validateListParams(params);
       return completeResult({ tools: TOOL_DEFINITIONS.map(clonePublicDefinition) }, modern, {
@@ -700,6 +810,14 @@ function createMcpServer(options = {}) {
       }
       const args = value.arguments === undefined ? {} : value.arguments;
       try {
+        if (value.name === "setup_guides") {
+          assertObject(args, "setup_guides arguments", []);
+          return toolResult(await client.setupGuides(), modern);
+        }
+        if (value.name === "setup_check") {
+          validateSetupInput(args);
+          return toolResult(await client.setupCheck(args), modern);
+        }
         if (value.name === "connector_snapshot") {
           assertObject(args, "connector_snapshot arguments", ["reason", "knownRevision"]);
           return toolResult(await client.connectorSnapshot(args), modern);

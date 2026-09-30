@@ -3,19 +3,38 @@
 const SCANNER_PAGE_ROUTES = Object.freeze(["/scans"]);
 const MAX_ROWS = 200;
 
+function selectScannerSources(state, query = {}) {
+  if (!query || typeof query !== "object" || Array.isArray(query) || ![Object.prototype, null].includes(Object.getPrototypeOf(query))
+      || Reflect.ownKeys(query).some(key => !["appId", "sourceId"].includes(key) || !Object.hasOwn(Object.getOwnPropertyDescriptor(query, key), "value"))) {
+    throw new TypeError("Trivy scope accepts only exact application and source identifiers.");
+  }
+  for (const key of ["appId", "sourceId"]) if (query[key] !== undefined
+      && (typeof query[key] !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(query[key]))) throw new TypeError("Trivy scope identifier is invalid.");
+  if (query.appId && !state.apps.some(app => app.appId === query.appId)) throw new TypeError("Trivy application scope is not registered.");
+  if (query.sourceId) {
+    const source = state.sources.find(item => item.sourceId === query.sourceId);
+    if (!source || source.connectorType !== "trivy-report" || (query.appId && source.appId !== query.appId)) throw new TypeError("Trivy source scope is not registered to the selected application or is not a Trivy report source.");
+  }
+  return state.sources.filter(source => source.connectorType === "trivy-report"
+    && (!query.appId || source.appId === query.appId) && (!query.sourceId || source.sourceId === query.sourceId));
+}
+
 function table(id, title, columns, rows, description) {
   return { id, type: "table", title, caption: title, description,
     columns: columns.map(([key, label]) => ({ key, label })), rows: rows.slice(0, MAX_ROWS).map((row) => columns.map(([key]) => row[key])) };
 }
 
-function createScannerPageEnvelope(route, query, state, records, now) {
+function createScannerPageEnvelope(route, query = {}, state, records, now) {
   if (route !== "/scans") throw new TypeError("Scanner projector supports /scans only.");
+  if (!query || typeof query !== "object" || Array.isArray(query) || Object.keys(query).some(key => !["tab", "appId", "sourceId"].includes(key))) throw new TypeError("The specialized Trivy page accepts only tab, appId and sourceId.");
+  const scope = Object.fromEntries(["appId", "sourceId"].filter(key => query[key] !== undefined).map(key => [key, query[key]]));
+  const scopedSources = selectScannerSources(state, scope);
   const envelope = { schemaVersion: "1", route, updatedAt: new Date(now === undefined ? Date.now() : now).toISOString(),
     state: "empty", title: "Trivy report imports", summary: "No Trivy vulnerability report has been imported.", panels: [] };
   if (query && query.tab && query.tab !== "trivy") {
     return { ...envelope, title: "No scanner provider supplied", summary: "This scanner tab still requires an adopter-supplied driver. Trivy imports do not populate other scanners." };
   }
-  const sourceById = new Map(state.sources.filter((source) => source.connectorType === "trivy-report").map((source) => [source.sourceId, source]));
+  const sourceById = new Map(scopedSources.map((source) => [source.sourceId, source]));
   const apps = new Map(state.apps.map((app) => [app.appId, app]));
   const label = (sourceId) => {
     const source = sourceById.get(sourceId), app = source && apps.get(source.appId);
@@ -36,6 +55,7 @@ function createScannerPageEnvelope(route, query, state, records, now) {
   const totalPackages = reports.reduce((sum, record) => sum + record.payload.fields.packageCount, 0);
   envelope.state = reports.length ? "ready" : "empty";
   envelope.summary = reports.length ? "Latest retained report per source; imported observations, not live scan execution or a clean-application guarantee." : envelope.summary;
+  if (scope.sourceId || scope.appId) envelope.summary += " Scoped to the selected " + (scope.sourceId ? "source" : "application") + "; no other application's reports are included.";
   envelope.panels = [{ id: "trivy-import-scope", type: "notice", title: "Reported vulnerability coverage only", tone: "info",
     body: "This page uses the latest retained report timestamp per Trivy source. Zero findings does not prove complete coverage. Old reports remain historical records; importing a report does not close cases, attestations or remediation. Each table shows at most 200 retained rows. The totals come from report summaries and can exceed the visible rows." },
   { id: "trivy-import-metrics", type: "metrics", title: "Latest report observations", items: [
@@ -64,4 +84,4 @@ function createScannerPageEnvelope(route, query, state, records, now) {
   return envelope;
 }
 
-module.exports = { SCANNER_PAGE_ROUTES, createScannerPageEnvelope };
+module.exports = { SCANNER_PAGE_ROUTES, createScannerPageEnvelope, selectScannerSources };

@@ -10,13 +10,22 @@ and agent/governance administration.
 
 `npm start` runs the private Better Auth application with SQLite identity and
 versioned document stores, application/environment registration, optional
-collectors, canonical log push, Trivy report import and agent/governance lifecycle
+collectors, canonical log/universal push, Trivy report import and agent/governance lifecycle
 management. Private telemetry and scoped service credentials use dedicated
 SQLite stores; administration retains the bounded JSON reference core. All
 operators have full access, while service identities have exact installation-
 wide scopes. Granular resource authorization and multitenancy remain adopter
 work. There is no scheduler, durable queue, vendor polling, agent runner or
 remote MCP listener. The stdio MCP client uses scoped private service access.
+
+The custom integration registry stores immutable data-only manifests within
+the telemetry control transaction. It reuses canonical admission; it never
+loads untrusted modules, invokes vendor URLs, or resolves secret references.
+The source manifest's allowed record kinds govern admission, and an independent
+coverage catalog governs actual read-only observation screens. Upstream facts
+cannot mutate authored governance, permissions, rules or agent prompts.
+The sender SDK/CLI retries a stable batch with source credentials, but is not a
+durable spool or scheduler. See [the integration review](INTEGRATION-REVIEW.md).
 
 `npm run start:static` retains the dependency-free static preview. A separate
 opt-in development workbench (`start:connectors`) exercises source and

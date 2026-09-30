@@ -8,6 +8,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { startPrivateApplication, validatePrivateRequest } = require("../server/private-application");
 const { validateDocument } = require("../tools/validate-provider");
+const { runAsOperator } = require("../server/operator-context");
 
 test("private origin rejects public hosts, foreign origins and browser CSRF without trusting proxy headers", () => {
   const origin = "http://127.0.0.1:8080";
@@ -64,6 +65,41 @@ test("private sign-in gates all operator APIs and documents persist with authent
   assert.equal(access.state, "ready");
   assert.doesNotThrow(() => validateDocument(access));
   assert.deepEqual(access.panels.find((panel) => panel.id === "who-has-full-access").rows, [["Test owner", "Full operator", "All private application reads and writes"]]);
+  // Imported identity facts have their own explicit tab and cannot substitute
+  // for, or grant, actual local application permissions.
+  let accessSequence = 0;
+  const accessCommand = (command, input) => {
+    const result = runAsOperator("access-projection-test", () => app.runtime.execute({ schemaVersion: "1", documentType: "connector-command-request",
+      requestId: "access-proof-" + (++accessSequence), requestedAt: new Date().toISOString(), command, input }));
+    assert.equal(result.status, "succeeded");
+    return result.output;
+  };
+  const externalApp = accessCommand("app.register", { displayName: "External identity provider", environments: ["test"], publicPages: [] });
+  const externalSource = accessCommand("source.setup", { appId: externalApp.appId, environment: "test", connectorType: "canonical-events", sourceKind: "identity.access",
+    displayName: "External access claims", config: { "cadence-seconds": 300 }, credentialReferences: [] });
+  const identityFact = { schemaVersion: "1", documentType: "normalized-record", recordId: "external-access-claim", sourceId: externalSource.sourceId,
+    estateId: externalApp.appId, kind: "identity.access", observedAt: new Date().toISOString(),
+    payload: { title: "External provider access claim", state: "active", identityRef: "external-identity" } };
+  const testedSource = accessCommand("source.test", { sourceId: externalSource.sourceId, connectorInstanceId: externalSource.connectorInstanceId,
+    expectedRevision: externalSource.revision, recordSample: identityFact });
+  const activeSource = accessCommand("source.activate", { sourceId: externalSource.sourceId, connectorInstanceId: externalSource.connectorInstanceId,
+    expectedRevision: testedSource.revision });
+  const identityBatch = { schemaVersion: "1", documentType: "ingest-batch", sourceId: externalSource.sourceId,
+    receiptId: "external-access-receipt", sentAt: new Date().toISOString(), records: [identityFact] };
+  app.runtime.ingest(identityBatch, activeSource.oneTimeCredential.value, crypto.createHash("sha256").update(JSON.stringify(identityBatch)).digest("hex"));
+  const importedAccess = await (await request("/api/v1/pages?route=%2Faccess&atab=observations")).json();
+  assert.doesNotThrow(() => validateDocument(importedAccess));
+  assert.equal(importedAccess.state, "ready");
+  assert.equal(importedAccess.panels.find((panel) => panel.id === "imported-observations").rows.length, 1);
+  assert.match(JSON.stringify(importedAccess), /External provider access claim/);
+  assert.match(importedAccess.panels[0].body, /Who tab for actual local application permissions/);
+  assert.equal(importedAccess.panels.some((panel) => panel.id === "who-has-full-access"), false);
+  for (const suffix of ["", "&atab=who"]) {
+    const actualAccess = await (await request("/api/v1/pages?route=%2Faccess" + suffix)).json();
+    assert.doesNotThrow(() => validateDocument(actualAccess));
+    assert.deepEqual(actualAccess.panels.find((panel) => panel.id === "who-has-full-access").rows, [["Test owner", "Full operator", "All private application reads and writes"]]);
+    assert.equal(actualAccess.panels.some((panel) => panel.id === "imported-observations"), false);
+  }
   const upload = async (metadata, bytes) => request("/api/v1/documents/upload", { method: "POST", headers: {
     "Content-Type": "application/octet-stream", "X-Document-Metadata": encodeURIComponent(JSON.stringify(metadata))
   }, body: bytes });

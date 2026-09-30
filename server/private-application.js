@@ -9,10 +9,18 @@ const { ReferenceControlPlane, ReferenceControlError } = require("./reference-ru
 const { ReferenceAdministrationRuntime } = require("./reference-administration-runtime");
 const { createPrivateAuth, validatePrivateOrigin } = require("./private-auth");
 const { createDocumentStore } = require("./document-store");
+const { validateDocumentBinding } = require("./document-bindings");
 const { runAsOperator, runAsService, operatorId } = require("./operator-context");
 const { createServiceAccessStore, handleServiceManagement, handleServiceRequest, isServicePath } = require("./service-access");
 const { handleScannerImport } = require("./scanner-ingest");
+const { handleVendorImport, VENDOR_BASE } = require("./vendor-import");
+const { createLiveMonitoring, handleLiveMonitoring, MONITORING_BASE } = require("./live-monitoring");
+const { createSetupGuides, handleSetupGuides, SETUP_BASE } = require("./setup-guides");
+const { MAPPING_BASE, handleSourceMapping } = require("./source-mapping");
+const { ASSISTANCE_BASE, handleSetupAssistance } = require("./setup-assistance");
 const { SqliteTelemetryStore } = require("./sqlite-telemetry-store");
+const { INTEGRATION_COVERAGE } = require("./integration-coverage");
+const { RECORD_KINDS } = require("../tools/ingest-contract");
 const {
   createRequestHandler, buildBrowserProviderSource, addSecurityHeaders,
   parseRequestUrl, distinctHeader, readJsonBody, sendJson, sendBuffer, serveStatic,
@@ -22,9 +30,57 @@ const {
 const MACHINE_PATHS = new Set(["/api/v1/ingest", "/api/v1/connection-check", "/api/v1/agents/connection"]);
 const UPLOAD_LIMIT = 10 * 1024 * 1024;
 const SCANNER_IMPORT_PATH = "/api/v1/scanners/trivy/import";
+const FIRST_RUN_PATH = "/api/v1/first-run";
 
 function fail(status, message) {
   return new ReferenceControlError(status === 401 ? "not-authenticated" : "request-rejected", message, { status });
+}
+
+// Bootstrap is deliberately local-only. A forwarded loopback connection is not
+// proof of a local owner, and a configured Tailnet origin must use the CLI or
+// complete setup on loopback before enabling the proxy.
+function browserFirstRunAllowed(request, baseURL) {
+  const origin = new URL(baseURL);
+  return origin.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(origin.hostname)
+    && ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(request.socket?.remoteAddress)
+    && !Object.keys(request.headers).some(name => /^(?:forwarded|x-forwarded(?:-.*)?|x-real-ip|via|x-bb-soc-client-ip)$/i.test(name));
+}
+
+function createFirstRunHandler(authentication, origin) {
+  let inFlight = false, windowStart = 0, attempts = 0;
+  return async (request, response, url) => {
+    if (url.search) throw fail(400, "First-run setup does not accept query parameters.");
+    if (distinctHeader(request, "authorization") !== undefined) throw fail(401, "First-run setup does not accept machine credentials.");
+    if (!["GET", "POST"].includes(request.method)) throw fail(405, "Use GET or POST for first-run setup.");
+    const { setupRequired } = authentication.firstRunStatus();
+    const allowed = browserFirstRunAllowed(request, origin);
+    if (request.method === "GET") {
+      sendJson(response, 200, { schemaVersion: "1", setupRequired, browserSetupAllowed: setupRequired && allowed });
+      return;
+    }
+    if (!setupRequired) throw fail(409, "Initial account setup is already complete. Sign in or use local account recovery.");
+    if (!allowed) throw fail(403, "Create the first administrator directly on this machine using loopback, or use the local account CLI.");
+    const now = Date.now();
+    if (!windowStart || now - windowStart >= 60000) { windowStart = now; attempts = 0; }
+    if (inFlight || attempts >= 5) {
+      response.setHeader("Retry-After", String(inFlight ? 2 : Math.max(1, Math.ceil((60000 - (now - windowStart)) / 1000))));
+      throw fail(429, "Initial setup is busy or has received too many attempts. Wait and check setup status before retrying.");
+    }
+    attempts += 1; inFlight = true;
+    try {
+      if (distinctHeader(request, "content-encoding") !== undefined) throw fail(415, "Compressed setup requests are not accepted.");
+      const { value } = await readJsonBody(request, 16384);
+      const keys = ["name", "email", "password", "confirmPassword"];
+      if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== keys.length
+          || Object.keys(value).some(key => !keys.includes(key)) || keys.some(key => typeof value[key] !== "string")) {
+        throw fail(400, "Supply only name, email, password, and confirmPassword as text.");
+      }
+      if (value.password !== value.confirmPassword) throw fail(400, "Password confirmation does not match.");
+      await authentication.createFirstOperator({ name: value.name, email: value.email, password: value.password });
+      // Deliberately do not create a session or reflect identity/password fields.
+      sendJson(response, 201, { schemaVersion: "1", created: true });
+    } finally { inFlight = false; }
+  };
 }
 
 function validatePrivateRequest(request, baseURL) {
@@ -127,7 +183,7 @@ function queryOptions(url, allowed) {
   return result;
 }
 
-async function handleDocuments(request, response, url, documents, actor) {
+async function handleDocuments(request, response, url, documents, actor, runtime, administrationRuntime) {
   const base = "/api/v1/documents";
   const relative = url.pathname.slice(base.length);
   if (request.method === "GET" && relative === "") {
@@ -140,6 +196,7 @@ async function handleDocuments(request, response, url, documents, actor) {
     if (!encoded || encoded.length > 8192) throw fail(400, "Upload metadata is required and must fit in 8 KiB.");
     let metadata;
     try { metadata = JSON.parse(decodeURIComponent(encoded)); } catch { throw fail(400, "Upload metadata is invalid."); }
+    if (metadata && !metadata.documentId) validateDocumentBinding(metadata.metadata, { runtime, administrationRuntime });
     const bytes = await readUpload(request);
     sendJson(response, 201, documents.upload({ ...metadata, bytes, actor }));
     return;
@@ -157,6 +214,7 @@ async function handleDocuments(request, response, url, documents, actor) {
   if (request.method === "GET" && !match[2]) { sendJson(response, 200, documents.get(id)); return; }
   if (request.method === "PATCH" && !match[2] && !match[3]) {
     const { value } = await readJsonBody(request, 16384);
+    validateDocumentBinding(value?.patch, { runtime, administrationRuntime, previous: documents.get(id).document });
     sendJson(response, 200, documents.update({ ...value, id, actor }));
     return;
   }
@@ -168,13 +226,53 @@ async function handleDocuments(request, response, url, documents, actor) {
   throw fail(405, "Document method is not supported.");
 }
 
+async function handleIntegrations(request, response, url, runtime) {
+  const base = "/api/v1/integrations";
+  if (request.method === "GET" && url.pathname === base + "/observations") {
+    const query = {};
+    for (const [key, value] of url.searchParams) {
+      if (!["kinds", "sourceId", "appId", "observedAfter", "observedBefore", "limit", "offset"].includes(key) || Object.hasOwn(query, key) || !value || value.length > 1024) throw fail(400, "Invalid observation filters.");
+      if (["limit", "offset"].includes(key) && !/^(0|[1-9][0-9]*)$/.test(value)) throw fail(400, "Observation pagination must use decimal integers.");
+      query[key] = key === "kinds" ? value.split(",") : ["limit", "offset"].includes(key) ? Number(value) : value;
+    }
+    const selection = runtime.store.queryObservations(query);
+    const state = runtime.controlState();
+    const selectedIds = new Set(selection.records.map((record) => record.sourceId));
+    const sourceContexts = state.sources.filter((source) => selectedIds.has(source.sourceId)).map((source) => ({
+      sourceId: source.sourceId, displayName: source.displayName, appId: source.appId,
+      application: state.apps.find((app) => app.appId === source.appId)?.displayName || source.appId,
+      environment: source.environment || "default", state: source.state
+    }));
+    sendJson(response, 200, { schemaVersion: "1", documentType: "integration-observations", ...selection, sourceContexts });
+    return;
+  }
+  if (url.search) throw fail(400, "Integration catalog endpoints do not accept query parameters.");
+  if (request.method === "GET" && url.pathname === base) {
+    sendJson(response, 200, { ...runtime.listIntegrations(), recordKinds: RECORD_KINDS, coverage: INTEGRATION_COVERAGE });
+    return;
+  }
+  if (request.method === "POST" && url.pathname === base) {
+    const { value } = await readJsonBody(request, 67584);
+    sendJson(response, 201, runtime.installIntegration(value));
+    return;
+  }
+  const remove = /^\/api\/v1\/integrations\/([a-z][a-z0-9.-]{0,79})$/.exec(url.pathname);
+  if (request.method === "DELETE" && remove) {
+    const { value } = await readJsonBody(request, 1024);
+    if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => key !== "expectedRevision")) throw fail(400, "Supply only the expected catalog revision.");
+    sendJson(response, 200, runtime.removeIntegration({ connectorType: remove[1], expectedRevision: value.expectedRevision }));
+    return;
+  }
+  throw fail(405, "Integration endpoint or method is not supported.");
+}
+
 async function startPrivateApplication(options = {}) {
   const port = options.port === 0 ? 0 : parsePort(options.port, 8080);
   if (typeof options.stateDirectory !== "string" || !path.isAbsolute(options.stateDirectory)) throw new TypeError("An absolute external state directory is required.");
   const project = path.resolve(__dirname, "..");
   const requested = path.resolve(options.stateDirectory);
   if (requested === project || requested.startsWith(project + path.sep)) throw new TypeError("Private state must be outside the repository.");
-  let authentication, documents, runtime, administrationRuntime, serviceAccess;
+  let authentication, documents, runtime, administrationRuntime, serviceAccess, monitoring, setupGuides;
   let activeUploads = 0;
   let origin = options.baseURL || "http://127.0.0.1:" + port;
   const server = http.createServer();
@@ -187,15 +285,18 @@ async function startPrivateApplication(options = {}) {
     origin = validatePrivateOrigin(origin);
     if (origin.startsWith("http:") && Number(new URL(origin).port || 80) !== server.address().port) throw new TypeError("Local origin port must match the listener port.");
     authentication = await createPrivateAuth({ stateDir: requested, baseURL: origin });
+    const handleFirstRun = createFirstRunHandler(authentication, origin);
     const realState = fs.realpathSync(requested);
     if (realState === project || realState.startsWith(project + path.sep)) throw new TypeError("Private state must be outside the repository.");
     documents = createDocumentStore({ stateDir: realState });
     serviceAccess = createServiceAccessStore({ stateDir: realState });
     runtime = new ReferenceControlPlane({
       store: new SqliteTelemetryStore({ directory: realState, retention: options.telemetryRetention }),
-      enabledConnectorTypes: ["canonical-push", "trivy-report"]
+      enabledConnectorTypes: ["canonical-push", "canonical-events", "trivy-report"]
     });
     administrationRuntime = new ReferenceAdministrationRuntime({ stateDirectory: realState });
+    monitoring = createLiveMonitoring({ stateDir: realState, runtime, ...options.monitoring });
+    setupGuides = createSetupGuides({ stateDir: realState, runtime, monitoring });
     const providerSource = buildBrowserProviderSource() + "\n(" + browserPrivateAuth.toString() + ")(window);\n";
     const referenceHandler = createRequestHandler({ runtime, administrationRuntime, browserSource: providerSource, validateAuthority() {} });
     server.requestTimeout = 30000;
@@ -208,6 +309,10 @@ async function startPrivateApplication(options = {}) {
       try {
         const url = parseRequestUrl(request.url || "/");
         validatePrivateRequest(request, origin);
+        if (url.pathname === FIRST_RUN_PATH) {
+          await handleFirstRun(request, response, url);
+          return;
+        }
         if (url.pathname.startsWith("/api/auth/")) {
           if (url.search) throw fail(400, "Auth endpoint query is not supported.");
           const headers = requestHeaders(request);
@@ -235,7 +340,7 @@ async function startPrivateApplication(options = {}) {
           return;
         }
         if (isServicePath(url.pathname)) {
-          await handleServiceRequest({ request, response, url, store: serviceAccess, runtime, administrationRuntime, runAsService });
+          await handleServiceRequest({ request, response, url, store: serviceAccess, runtime, administrationRuntime, setupGuides, runAsService });
           return;
         }
         if (url.pathname === SCANNER_IMPORT_PATH && distinctHeader(request, "authorization") !== undefined) {
@@ -249,6 +354,32 @@ async function startPrivateApplication(options = {}) {
         const session = await authentication.getSession(requestHeaders(request));
         if (url.pathname === "/api/v1/session" && request.method === "GET") { sendJson(response, 200, sessionView(session)); return; }
         if (!session || !session.user) throw fail(401, "Sign in to access this private application.");
+        if (url.pathname === MAPPING_BASE || url.pathname.startsWith(MAPPING_BASE + "/")) {
+          await handleSourceMapping(request, response, url, runtime); return;
+        }
+        if (url.pathname === ASSISTANCE_BASE || url.pathname.startsWith(ASSISTANCE_BASE + "/")) {
+          handleSetupAssistance(request, response, url, { runtime, stateDir: realState, origin, port: server.address().port }); return;
+        }
+        if (url.pathname === SETUP_BASE || url.pathname.startsWith(SETUP_BASE + "/")) {
+          await handleSetupGuides(request, response, url, setupGuides, operatorId(session.user.id));
+          return;
+        }
+        if (url.pathname === MONITORING_BASE || url.pathname.startsWith(MONITORING_BASE + "/")) {
+          await handleLiveMonitoring(request, response, url, monitoring, operatorId(session.user.id));
+          return;
+        }
+        if (url.pathname === VENDOR_BASE || url.pathname.startsWith(VENDOR_BASE + "/")) {
+          if (request.method === "POST") {
+            if (activeUploads >= 2) throw fail(429, "Two uploads are already in progress. Retry after they complete.");
+            activeUploads += 1; uploadLease = true;
+          }
+          await runAsOperator(session.user.id, () => handleVendorImport(request, response, url, runtime));
+          return;
+        }
+        if (url.pathname === "/api/v1/integrations" || url.pathname.startsWith("/api/v1/integrations/")) {
+          await runAsOperator(session.user.id, () => handleIntegrations(request, response, url, runtime));
+          return;
+        }
         if (request.method === "GET" && url.pathname === "/api/v1/telemetry/storage") {
           if (url.search) throw fail(400, "Storage status does not accept query parameters.");
           sendJson(response, 200, runtime.store.stats());
@@ -292,7 +423,7 @@ async function startPrivateApplication(options = {}) {
             if (activeUploads >= 2) throw fail(429, "Two uploads are already in progress. Retry after they complete.");
             activeUploads += 1; uploadLease = true;
           }
-          await handleDocuments(request, response, url, documents, operatorId(session.user.id));
+          await handleDocuments(request, response, url, documents, operatorId(session.user.id), runtime, administrationRuntime);
           return;
         }
         await runAsOperator(session.user.id, () => referenceHandler(request, response));
@@ -303,16 +434,18 @@ async function startPrivateApplication(options = {}) {
       } finally { if (uploadLease) activeUploads -= 1; }
     });
     let closed = false;
-    return { server, url: origin, authentication, documents, runtime, administrationRuntime, serviceAccess,
+    return { server, url: origin, authentication, documents, runtime, administrationRuntime, serviceAccess, monitoring, setupGuides,
       async close() {
         if (closed) return;
         closed = true;
         await new Promise((resolve) => server.close(resolve));
+        await monitoring.close();
+        setupGuides.close();
         runtime.dispose(); administrationRuntime.dispose(); documents.close(); serviceAccess.close(); await authentication.close();
       }
     };
   } catch (error) {
-    server.close(); runtime?.dispose(); administrationRuntime?.dispose(); documents?.close(); serviceAccess?.close(); await authentication?.close();
+    server.close(); await monitoring?.close(); setupGuides?.close(); runtime?.dispose(); administrationRuntime?.dispose(); documents?.close(); serviceAccess?.close(); await authentication?.close();
     throw error;
   }
 }
@@ -327,6 +460,7 @@ async function main(argv = process.argv.slice(2), environment = process.env) {
   const app = await startPrivateApplication(options);
   console.log("Bulwark Black private application: " + app.url);
   console.log("Single-tenant starter; all provisioned operators have full access. No public signup.");
+  if (app.authentication.firstRunStatus().setupRequired) console.log("First administrator setup is required. Open the sign-in page directly on loopback, or use npm run account -- create with this state directory.");
   console.log("Keep the listener on loopback. Use private Tailnet HTTPS Serve, never Funnel or public ingress.");
   const stop = () => { void app.close().catch(() => { process.exitCode = 1; }); };
   process.once("SIGINT", stop); process.once("SIGTERM", stop);
@@ -334,4 +468,4 @@ async function main(argv = process.argv.slice(2), environment = process.env) {
 }
 
 if (require.main === module) main().catch((error) => { console.error(error.message); process.exitCode = 1; });
-module.exports = { startPrivateApplication, validatePrivateRequest, sessionView, telemetryStoragePage, handleDocuments, main };
+module.exports = { startPrivateApplication, validatePrivateRequest, browserFirstRunAllowed, sessionView, telemetryStoragePage, handleDocuments, handleIntegrations, main };

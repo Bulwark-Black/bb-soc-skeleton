@@ -99,6 +99,8 @@
 
   function providerQuery(route, params) {
     const result = queryObject(params);
+    delete result.setupId; // Local guided-navigation context is never a page-provider filter.
+    if (route === "/sources" || (route === "/scans" && (!result.tab || result.tab === "trivy"))) delete result.environment;
     if (route === "/sources") delete result.setupFor;
     if (route === "/access" && result.atab === "offboarding" && result.id) {
       result.oview = "records";
@@ -265,6 +267,7 @@
     let autoRefreshId = null;
     let refreshPromise = null;
     let privateViewCleanup = null;
+    let assistanceCleanup = null;
     let privateViewRoute = null;
     let commandSequence = 0;
     let goShortcutPending = false;
@@ -438,8 +441,15 @@
         clerk: "Honeypots — Clerk Honey Account"
       };
       const sourceTitles = {
+        setup: "Sources — Guided Setup",
+        mapping: "Sources — Map a Custom Source",
+        operations: "Sources — Private Deployment",
         expected: "Sources — Dead-man Board",
         add: "Sources — Add",
+        integrations: "Sources — Integrations",
+        live: "Sources — Live Monitoring",
+        vendors: "Sources — Vendor Imports",
+        observations: "Sources — Received Observations",
         changes: "Sources — Registry Changes"
       };
       return page.path === "/phishing" && state.query.get("id")
@@ -465,7 +475,9 @@
 
     function pageHeader(page) {
       const fragment = documentRef.createDocumentFragment();
-      const adapterLabel = page.localOnly
+      const adapterLabel = page.path === "/sources" && ["setup", "mapping", "operations", "integrations", "live", "vendors", "observations"].includes(state.query.get("stab"))
+        ? global.SOC_PRIVATE_APPLICATION ? "private integration services" : "integration services unavailable"
+        : page.localOnly
         ? page.variant === "document-library" ? "private document library" : "built-in technical reference"
         : provider
           ? `adapter · ${state.providerState}`
@@ -1262,7 +1274,7 @@
       }, [
         node("summary", { text: `${manifest.displayName} configuration` }),
         node("p", { className: "muted", text: manifest.description || "Installed connector manifest" }),
-        node("p", { className: "muted", text: `Produces ${manifest.payload.recordKinds.join(", ")} · populates ${coverage}` }),
+        node("p", { className: "muted", text: `Allows ${manifest.payload.recordKinds.join(", ")} · declared target routes ${coverage}. See Sources → Integrations for actual screen coverage; targets alone do not implement a workflow.` }),
         fields.length ? node("div", { className: "workflow-fields connector-manifest-fields" }, fields)
           : node("p", { className: "muted", text: "This connector needs no additional configuration or credential reference." })
       ]);
@@ -1374,10 +1386,17 @@
         attrs: interactive ? { "data-command-form": "" } : {}
       }, [fields, actionNodes]);
       if (interactive && panel.id === "declare-source") {
+        const requestedApp = state.controlSnapshot.apps.find(item => item.appId === state.query.get("appId"));
+        if (requestedApp) {
+          controls.querySelector('[name="appId"]').value = requestedApp.appId;
+          if ((requestedApp.environments || ["default"]).includes(state.query.get("environment"))) controls.querySelector('[name="environment"]').value = requestedApp.appId + ":" + state.query.get("environment");
+        }
         const profile = scanProfilesBySetupFor.get(state.query.get("setupFor"));
         const matches = profile ? matchingScanManifests(profile) : [];
         const reportImporter = matches.find((manifest) => manifest.connectorType === "trivy-report");
-        syncSourceSetupForm(controls, reportImporter ? reportImporter.connectorType : matches.length === 1 ? matches[0].connectorType : "");
+        const requestedType = state.query.get("connectorType");
+        const configuredType = state.controlSnapshot.connectorTypes.some((item) => item.connectorType === requestedType) ? requestedType : "";
+        syncSourceSetupForm(controls, configuredType || (reportImporter ? reportImporter.connectorType : matches.length === 1 ? matches[0].connectorType : ""));
       }
       const table = panel.columns.length ? structuralTable(panel.title, panel.columns) : null;
       const meta = interactive ? "Server-authorized connector workflow" : panel.meta || "Command boundary";
@@ -1471,13 +1490,18 @@
       if (panel.id === "pending-source-setups") {
         const rows = snapshot.setups.map((setup) => {
           const manifest = snapshot.connectorTypes.find((item) => item.connectorType === setup.connectorType);
+          const canonicalSample = setup.connectorType === "canonical-events" || (manifest && manifest.scope === "application" && manifest.healthPolicy.deliveryMode === "push" && !["canonical-push", "trivy-report"].includes(setup.connectorType));
           const actions = [];
           if (["draft", "configured"].includes(setup.state)) actions.push(node("form", { attrs: { "data-command-form": "" } }, [
             setup.connectorType === "canonical-push" ? node("label", {}, [
               node("span", { text: "Paste a real redacted log message" }),
               node("textarea", { attrs: { name: "sampleMessage", rows: "3", maxlength: "2000", required: !setup.hostId, disabled: state.commandPending } })
+            ]) : canonicalSample ? node("label", {}, [
+              node("span", { text: "Paste one real redacted normalized record (JSON)" }),
+              node("small", { className: "muted", text: "Use sourceId " + setup.sourceId + ", estateId " + setup.appId + ", and an allowed record kind. Keep the redacted sample below 60 KiB. This validates shape without storing the sample or claiming live delivery." }),
+              node("textarea", { attrs: { name: "recordSample", rows: "6", maxlength: "60000", required: true, disabled: state.commandPending } })
             ]) : null,
-            controlActionButton("source.test", setup.connectorType === "canonical-push" ? "Validate sample" : "Test connector", {
+            controlActionButton("source.test", setup.connectorType === "canonical-push" || canonicalSample ? "Validate sample" : "Test connector", {
             type: "submit",
             "data-source-id": setup.sourceId,
             "data-connector-instance-id": setup.connectorInstanceId,
@@ -1511,6 +1535,7 @@
             node("p", { text: "Use a stable recordId for each event and a stable receiptId when retrying the same exact batch. A sample validation checks shape; only accepted live delivery marks collection healthy." }),
             node("a", { text: "Exact event and batch schema", attrs: { href: "#/docs" } })
           ]));
+          actions.push(node("a", { className: "resource-action", text: "Received observations", attrs: { href: "#/sources?stab=observations&sourceId=" + encodeURIComponent(source.sourceId) } }));
           if (source.state === "active") actions.push(controlActionButton("source.pause", "Pause", attributes));
           if (source.state === "paused") actions.push(controlActionButton("source.resume", "Resume", attributes));
           if (["active", "paused"].includes(source.state)) {
@@ -1562,7 +1587,8 @@
       if (["application-source-start", "connect-each-host"].includes(panel.id)) {
         return panelShell(panel.title, node("div", { className: "panel-body" }, [
           node("p", { text: "Register your application and its environments, then choose a source. Application log push works without an enrolled host; scanners may require a collector." }),
-          node("a", { className: "resource-action", text: panel.id === "connect-each-host" ? "Add a source" : "Add an application", attrs: { href: panel.id === "connect-each-host" ? "#/sources?stab=add" : "#/onboard" } })
+          node("a", { className: "resource-action", text: panel.id === "connect-each-host" ? "Add a source" : "Add an application", attrs: { href: panel.id === "connect-each-host" ? "#/sources?stab=add" : "#/onboard" } }),
+          node("a", { className: "resource-action", text: "Monitor my application — guided setup", attrs: { href: "#/sources?stab=setup" } })
         ]), "Application setup", undefined, { id: panel.id });
       }
       if (panel.type === "log-results") return logResultsPanel(panel);
@@ -3328,6 +3354,11 @@
       const output = result.output || {};
       const oneTime = output.oneTimeCredential || output.enrollmentCredential || null;
       const oneTimePurpose = oneTime && oneTime.purpose === "source-ingest" ? "source ingest" : "host connection-check";
+      const credentialSource = state.controlSnapshot && [...state.controlSnapshot.sources, ...state.controlSnapshot.setups].find(item => item.sourceId === output.sourceId);
+      const credentialManifest = credentialSource && state.controlSnapshot.connectorTypes.find(item => item.connectorType === credentialSource.connectorType);
+      const ingestInstructions = credentialSource && credentialSource.connectorType === "trivy-report"
+        ? `Use Scans → Trivy or the validated /api/v1/scanners/trivy/import endpoint with this source credential. Source ID: ${output.sourceId}. Do not send generic canonical batches to a Trivy report source.`
+        : `Send JSON batches to /api/v1/ingest using this credential in the Authorization: Bearer header. Source ID: ${output.sourceId}. Each batch needs schemaVersion 1, documentType ingest-batch, sourceId, a stable receiptId, original sentAt, and normalized records allowed by this source: ${credentialManifest ? credentialManifest.payload.recordKinds.join(", ") : "consult the installed manifest"}. Vendor presets also support Sources → Vendor imports. Do not put the credential in JSON or browser code.`;
       return node("section", { className: "notice command-result-notice", attrs: {
         role: succeeded ? "status" : "alert",
         "data-tone": succeeded ? "ok" : "bad"
@@ -3342,7 +3373,7 @@
             node("code", { text: oneTime.value || oneTime }),
             oneTime.expiresAt ? node("small", { className: "muted", text: `Expires ${oneTime.expiresAt}` }) : null,
             node("small", { className: "muted", text: "Store this in the application sender's secret store now. It will not appear in the registry or audit trail again." }),
-            oneTime.purpose === "source-ingest" ? node("p", { text: `Send JSON batches to /api/v1/ingest using this credential in the Authorization: Bearer header. Source ID: ${output.sourceId}. Each batch needs schemaVersion 1, documentType ingest-batch, sourceId, a unique receiptId, sentAt, and normalized log.event records. Do not put the credential in JSON or browser code.` }) : null,
+            oneTime.purpose === "source-ingest" ? node("p", { text: ingestInstructions }) : null,
             oneTime.purpose === "source-ingest" ? node("a", { text: "Read the exact ingest contract", attrs: { href: "#/docs" } }) : null
           ]) : null
         ]),
@@ -3819,7 +3850,7 @@
       if (technicalDocs.schemaVersion !== VERSION || technicalDocs.documentType !== "technical-manual") return null;
       if (typeof technicalDocs.title !== "string" || technicalDocs.title.length < 1 || technicalDocs.title.length > 200) return null;
       if (technicalDocs.source !== "technical-reference.md") return null;
-      if (typeof technicalDocs.markdown !== "string" || technicalDocs.markdown.length < 20000 || technicalDocs.markdown.length > 200000) return null;
+      if (typeof technicalDocs.markdown !== "string" || technicalDocs.markdown.length < 20000 || technicalDocs.markdown.length > 300000) return null;
       if (!Array.isArray(technicalDocs.sections) || technicalDocs.sections.length < 20 || technicalDocs.sections.length > 100) return null;
       const ids = new Set();
       let priorLine = 0;
@@ -4122,6 +4153,7 @@
         return;
       }
       if (privateViewCleanup) { privateViewCleanup(); privateViewCleanup = null; }
+      if (assistanceCleanup) { assistanceCleanup(); assistanceCleanup = null; }
       privateViewRoute = null;
       updateNavigation();
       updateShellState();
@@ -4154,10 +4186,30 @@
       if (page.hidden || queryDetail) wrapper.append(breadcrumbs(page));
       wrapper.append(pageHeader(page));
 
+      const setupId = state.query.get("setupId");
+      if (page.path !== "/sources" || state.query.get("stab") !== "setup") {
+        if (typeof setupId === "string" && /^setup-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(setupId)) wrapper.append(node("section", { className: "notice", attrs: { role: "note" } }, [
+          node("p", { text: "Complete this connection step, then return to your saved setup guide to select the source and check real delivery. These instructions do not grant access or prove readiness." }),
+          node("a", { className: "resource-action", text: "Return to saved setup guide", attrs: { href: "#/sources?stab=setup&setupId=" + encodeURIComponent(setupId) } })
+        ]));
+      }
+
       if (config.auth && config.auth.required && !state.session.authenticated) {
         wrapper.append(authGate(page));
         root.replaceChildren(wrapper);
         return;
+      }
+
+      if (global.SOC_PRIVATE_APPLICATION && global.SocSetupAssistance && !page.hidden) {
+        const screenNeedsHelp = !page.localOnly
+          && (state.providerError || ["empty", "error"].includes(state.envelope && state.envelope.state));
+        const emptyUnfilteredView = !state.providerError && state.providerState === "empty"
+          && state.envelope && state.envelope.state === "empty"
+          && !["appId", "sourceId", "q", "sq", "id"].some(key => state.query.has(key));
+        const help = node("section", { className: "setup-assistance" });
+        wrapper.append(help);
+        assistanceCleanup = global.SocSetupAssistance.render({ container: help, controlsContainer: wrapper.querySelector("#page-title"),
+          mode: screenNeedsHelp ? "screen" : "checklist", offerChecklist: Boolean(emptyUnfilteredView), route: page.path, query: state.query }) || null;
       }
 
       if (page.localOnly && page.variant === "technical-documentation") {
@@ -4178,6 +4230,33 @@
           container.append(node("section", { className: "panel empty-state" }, [
             node("h2", { text: "Document storage is not connected" }),
             node("p", { text: "Start the private application and sign in to upload, version, download, and track your own documents. No documents are included in the skeleton." })
+          ]));
+        }
+        return;
+      }
+
+      if (page.path === "/sources" && ["setup", "mapping", "operations", "integrations", "live", "vendors", "observations"].includes(tabState.values.stab)) {
+        wrapper.append(routeTabs(page, tabState));
+        const container = node("section", { className: "administration-workspace", attrs: { id: "active-page-panels", role: "tabpanel", "aria-labelledby": "page-title" } });
+        wrapper.append(container);
+        root.replaceChildren(wrapper);
+        const integrationView = tabState.values.stab === "setup" ? global.SocSetupGuides : tabState.values.stab === "mapping" ? global.SocSourceMapping : tabState.values.stab === "operations" ? global.SocSetupAssistance : tabState.values.stab === "live" ? global.SocLiveMonitoring : tabState.values.stab === "vendors" ? global.SocVendorImport : global.SocIntegrationCenter;
+        if (integrationView && (global.SOC_PRIVATE_APPLICATION || ["setup", "mapping", "operations", "live"].includes(tabState.values.stab))) {
+          privateViewCleanup = integrationView.render({ container, mode: tabState.values.stab, query: state.query, sourceId: state.query.get("sourceId") || "", onError: showToast,
+            onSelection(id) {
+              if (!state.mounted || state.route !== "/sources" || state.query.get("stab") !== "setup" || !global.history?.replaceState) return;
+              if (id !== null && (typeof id !== "string" || !/^setup-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id))) return;
+              if (id) state.query.set("setupId", id); else state.query.delete("setupId");
+              const selectedRoute = routeHash(state.route, queryObject(state.query));
+              global.history.replaceState(null, "", selectedRoute);
+              privateViewRoute = selectedRoute;
+            }
+          }) || null;
+          privateViewRoute = routeKey;
+        } else {
+          container.append(node("section", { className: "panel empty-state" }, [
+            node("h2", { text: "Integration services are not connected" }),
+            node("p", { text: "Start the private application and sign in to register your own integration definitions, inspect source-to-screen coverage, and browse received canonical observations. No records are included in the static shell." })
           ]));
         }
         return;
@@ -4254,6 +4333,22 @@
         ? node("section", { className: "notice", attrs: { "data-tone": "warn" } }, [
           node("strong", { text: "Unknown view" }), node("span", { text: "The requested tab was not recognized; the default view is shown." })
         ]) : documentRef.createDocumentFragment();
+
+      if (!isAdministrationPage && suppliedPanels.has("imported-observation-scope") && suppliedPanels.has("imported-observations")) {
+        // Keep navigation, but do not advertise native workflow counters,
+        // filters, or actions that an imported fact list cannot implement.
+        wrapper.append(renderTabs(page, tabState), invalidTabs());
+        const observations = node("div", { className: "tab-panel", attrs: { id: "active-page-panels", role: "tabpanel", "aria-labelledby": "page-title" } });
+        for (const panel of state.envelope.panels) observations.append(renderAdapterPanel(panel));
+        observations.append(node("p", { className: "muted" }, [
+          node("a", { text: "Filter all received observations", attrs: { href: "#/sources?stab=observations" } }),
+          documentRef.createTextNode(" · "), node("a", { text: "Connect a canonical source", attrs: { href: "#/sources?stab=add&connectorType=canonical-events" } })
+        ]));
+        wrapper.append(observations);
+        root.replaceChildren(wrapper);
+        applyPageFilter();
+        return;
+      }
 
       if (isAdministrationPage) {
         wrapper.append(routeTabs(page, tabState), invalidTabs());
@@ -4349,7 +4444,7 @@
         const container = node("section", { className: "scanner-import" });
         wrapper.append(container);
         privateViewCleanup = global.SocScannerImport.render({
-          container, sources: state.controlSnapshot ? state.controlSnapshot.sources : [], onError: showToast,
+          container, sources: state.controlSnapshot ? state.controlSnapshot.sources : [], query: state.query, onError: showToast,
           onImported: () => refresh("manual")
         }) || null;
         privateViewRoute = routeKey;
@@ -4529,7 +4624,7 @@
         finishRouteRender(reason, routeChanged, previousTabLabel);
         return;
       }
-      if (page.localOnly) {
+      if (page.localOnly || (page.path === "/sources" && ["setup", "mapping", "operations", "integrations", "live", "vendors", "observations"].includes(state.query.get("stab")))) {
         state.providerState = provider ? "idle" : "absent";
         state.controlState = commands ? "idle" : "absent";
         state.controlError = false;
@@ -4758,6 +4853,11 @@
           expectedRevision: Number(trigger && trigger.dataset.expectedRevision)
         };
         if (action === "source.test" && values.sampleMessage) input.sample = { message: values.sampleMessage };
+        if (action === "source.test" && values.recordSample) {
+          if (new TextEncoder().encode(values.recordSample).length > 60 * 1024) throw new TypeError("Use a smaller redacted validation sample (at most 60 KiB). Live batches have their own separate limits.");
+          try { input.recordSample = JSON.parse(values.recordSample); }
+          catch { throw new TypeError("The record sample must be valid JSON. No data was submitted."); }
+        }
         if (action === "source.update") {
           const source = state.controlSnapshot.sources.find((item) => item.sourceId === input.sourceId);
           input.displayName = values.displayName;
@@ -4788,7 +4888,8 @@
           input: commandInput(action, commandValues(form), trigger)
         };
       } catch (error) {
-        showToast("The connector action could not be prepared.");
+        showToast(error instanceof TypeError && typeof error.message === "string"
+          ? error.message.slice(0, 240) : "The connector action could not be prepared.");
         return;
       }
       state.commandPending = true;
@@ -5246,6 +5347,7 @@
       state.mounted = false;
       state.requestSerial += 1;
       if (privateViewCleanup) { privateViewCleanup(); privateViewCleanup = null; }
+      if (assistanceCleanup) { assistanceCleanup(); assistanceCleanup = null; }
       if (autoRefreshId !== null) global.clearInterval(autoRefreshId);
       autoRefreshId = null;
       clearGoShortcut();

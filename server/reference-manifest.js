@@ -1,5 +1,7 @@
 "use strict";
 
+const { RECORD_KINDS } = require("../tools/ingest-contract");
+
 // Manifests are declarative data, never executable connector modules. The
 // reference server enables canonical-push; the private application additionally
 // enables the bundled trivy-report importer. The eleven *-template scan entries
@@ -127,6 +129,22 @@ const TRIVY_REPORT_MANIFEST = deepFreeze({
   credentialSlots: [],
   healthPolicy: { deliveryMode: "push", expectedIntervalSeconds: 86400, staleAfterSeconds: 129600,
     offlineAfterSeconds: 259200, emptyPayloadIsHealthy: false }
+});
+
+const CANONICAL_EVENTS_MANIFEST = deepFreeze({
+  schemaVersion: "1", documentType: "connector-manifest", connectorType: "canonical-events", connectorVersion: "1.0.0",
+  displayName: "Universal canonical events",
+  description: "Application-scoped admission for all 29 canonical record kinds. An external sender normalizes and redacts vendor events; admission never executes a connector, fetches an endpoint, or verifies a scanner's coverage.",
+  scope: "application", supportedSourceKinds: [...RECORD_KINDS],
+  payload: { schemaId: "soc.canonical-records", schemaVersion: "1", recordKinds: [...RECORD_KINDS], lines: "forbidden", content: "required" },
+  targets: [
+    { route: "/logs", surfaces: ["log-results"], recordKinds: ["log.event"] },
+    { route: "/sources", surfaces: ["expected-sources"], recordKinds: [...RECORD_KINDS] }
+  ],
+  configFields: [cadenceField("Expected seconds between successful normalized pushes. This is not a collector schedule.")],
+  credentialSlots: [],
+  healthPolicy: { deliveryMode: "push", expectedIntervalSeconds: 300, staleAfterSeconds: 450,
+    offlineAfterSeconds: 900, emptyPayloadIsHealthy: false }
 });
 
 const REFERENCE_SCAN_CONNECTOR_MANIFESTS = deepFreeze([
@@ -375,6 +393,7 @@ const REFERENCE_SCAN_CONNECTOR_MANIFESTS = deepFreeze([
 
 const REFERENCE_CONNECTOR_MANIFESTS = deepFreeze([
   REFERENCE_CONNECTOR_MANIFEST,
+  CANONICAL_EVENTS_MANIFEST,
   TRIVY_REPORT_MANIFEST,
   ...REFERENCE_SCAN_CONNECTOR_MANIFESTS
 ]);
@@ -383,9 +402,10 @@ function getReferenceManifest(connectorType) {
   return REFERENCE_CONNECTOR_MANIFESTS.find((manifest) => manifest.connectorType === connectorType) || null;
 }
 
-function scaledHealthThresholds(connectorType, cadenceSeconds) {
-  const manifest = getReferenceManifest(connectorType);
+function scaledHealthThresholds(connectorType, cadenceSeconds, manifestOverride) {
+  const manifest = manifestOverride || getReferenceManifest(connectorType);
   if (!manifest) throw new TypeError("Reference connector type is unavailable.");
+  if (manifest.connectorType !== connectorType) throw new TypeError("Source health manifest does not match the connector type.");
   if (!Number.isSafeInteger(cadenceSeconds) || cadenceSeconds < 1 || cadenceSeconds > 31_536_000) {
     throw new TypeError("Reference source cadence must be a positive bounded integer.");
   }
@@ -398,6 +418,7 @@ function scaledHealthThresholds(connectorType, cadenceSeconds) {
 }
 
 module.exports = {
+  CANONICAL_EVENTS_MANIFEST,
   TRIVY_REPORT_MANIFEST,
   REFERENCE_CONNECTOR_MANIFEST,
   REFERENCE_CONNECTOR_MANIFESTS,

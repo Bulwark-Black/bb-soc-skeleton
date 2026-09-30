@@ -32,6 +32,39 @@ const requiredTextFiles = new Set([
   "docs/DESIGN-SYSTEM.md",
   "docs/FEATURES.md",
   "docs/AGENTS.md",
+  "docs/INTEGRATION-REVIEW.md",
+  "docs/VENDOR-INTEGRATIONS.md",
+  "docs/LIVE-MONITORING.md",
+  "docs/GUIDED-SETUP.md",
+  "docs/AI-SETUP.md",
+  "server/live-monitoring.js",
+  "server/live-monitoring-transport.js",
+  "public/live-monitoring.js",
+  "test/live-monitoring.test.js",
+  "test/live-monitoring-transport.test.js",
+  "test/live-source-runtime.test.js",
+  "test/live-monitoring-ui.test.js",
+  "test/private-live-monitoring.test.js",
+  "server/setup-guides.js",
+  "public/setup-guides.js",
+  "test/setup-guides.test.js",
+  "test/setup-guides-ui.test.js",
+  "test/private-setup-guides.test.js",
+  "test/setup-agent.test.js",
+  "server/source-mapping.js",
+  "public/source-mapping.js",
+  "tools/map-events.js",
+  "test/source-mapping.test.js",
+  "test/source-mapping-ui.test.js",
+  "test/map-events.test.js",
+  "server/document-bindings.js",
+  "test/document-bindings.test.js",
+  "test/document-library-ui.test.js",
+  "test/agent-connection-ui.test.js",
+  "server/setup-assistance.js",
+  "public/setup-assistance.js",
+  "test/setup-assistance.test.js",
+  "test/setup-assistance-ui.test.js",
   "examples/better-auth-reference/README.md",
   "examples/better-auth-reference/better-auth-bridge.js",
   "examples/keycloak-reference/README.md",
@@ -44,8 +77,34 @@ const requiredTextFiles = new Set([
   "public/private-sign-in.js",
   "public/document-library.js",
   "public/service-access.js",
+  "public/integration-center.js",
+  "public/vendor-import.js",
+  "server/vendor-import.js",
+  "tools/vendor-adapters.js",
+  "tools/vendor-cli.js",
+  "tools/integration-outbox.js",
+  "tools/vendors/cloud.js",
+  "tools/vendors/identity.js",
+  "tools/vendors/devops.js",
+  "test/vendor-cloud.test.js",
+  "test/vendor-identity.test.js",
+  "test/vendor-devops.test.js",
+  "test/vendor-adapters.test.js",
+  "test/vendor-cli.test.js",
+  "test/vendor-import-ui.test.js",
+  "test/integration-outbox.test.js",
+  "test/private-vendor-import.test.js",
   "public/scanner-import.js",
   "server/service-access.js",
+  "server/integration-catalog.js",
+  "server/integration-coverage.js",
+  "test/integration-runtime.test.js",
+  "test/integration-projections.test.js",
+  "test/integration-client.test.js",
+  "test/integration-center.test.js",
+  "test/private-integrations.test.js",
+  "tools/integration-client.js",
+  "tools/send-events.js",
   "server/scanner-ingest.js",
   "server/scanner-pages.js",
   "test/scanner-ingest.test.js",
@@ -61,6 +120,9 @@ const requiredTextFiles = new Set([
   "tools/private-account.js",
   "test/private-auth.test.js",
   "test/private-application.test.js",
+  "test/first-run-ui.test.js",
+  "test/mfa-http.test.js",
+  "test/first-run-http.test.js",
   "test/private-source-workflow.test.js",
   "test/private-recovery.test.js",
   "tools/benchmark-private.js",
@@ -190,7 +252,53 @@ const browserDocumentationFiles = new Set(["public/technical-docs.js"]);
 // These opt-in private application modules may issue same-origin HTTP requests.
 // The empty static shell still has connect-src 'none'; all other browser
 // restrictions (storage, sockets, unsafe HTML, and tokens) remain in force.
-const privateApplicationClients = new Set(["public/private-sign-in.js", "public/document-library.js", "public/service-access.js", "public/scanner-import.js"]);
+const privateApplicationClients = new Set(["public/private-sign-in.js", "public/document-library.js", "public/service-access.js", "public/scanner-import.js", "public/integration-center.js", "public/vendor-import.js", "public/live-monitoring.js", "public/setup-guides.js", "public/source-mapping.js", "public/setup-assistance.js"]);
+
+// Exact public reference pages, not general vendor hosts or deployment URLs.
+const publicReferenceUrls = new Set([
+  "https://code.claude.com/docs/en/mcp",
+  "https://learn.chatgpt.com/docs/extend/mcp?surface=cli",
+  "https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference",
+  "https://docs.openclaw.ai/tools/mcp",
+  "https://www.perplexity.ai/help-center/en/articles/11502712-local-and-remote-mcps-for-perplexity",
+  "https://docs.x.ai/grok/connectors/custom-mcp-tunneling",
+  "https://sentry.io",
+  "https://us.sentry.io",
+  "https://de.sentry.io",
+  "https://docs.sentry.io/api/",
+  "https://docs.sentry.io/api/pagination/",
+  "https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/",
+  "https://survey.stackoverflow.co/2025/technology",
+  "https://www.okta.com/reports/businesses-at-work-archive/businesses-at-work-2025/",
+  "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-event-reference-record-contents.html",
+  "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/view-cloudtrail-events-cli.html",
+  "https://docs.aws.amazon.com/awscloudtrail/latest/APIReference/API_LookupEvents.html",
+  "https://docs.cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry",
+  "https://docs.cloud.google.com/logging/docs/reference/v2/rest/v2/entries/list",
+  "https://docs.cloud.google.com/logging/docs/reference/audit/auditlog/rest/Shared.Types/AuditLog",
+  "https://docs.cloud.google.com/logging/docs/audit",
+  "https://docs.cloud.google.com/logging/docs/audit/configure-data-access",
+  "https://developers.cloudflare.com/logs/logpush/logpush-job/datasets/zone/firewall_events/",
+  "https://developers.cloudflare.com/logs/logpush/logpush-job/log-output-options/",
+  "https://developers.cloudflare.com/logs/logpush/permissions/",
+  "https://learn.microsoft.com/en-us/graph/api/signin-list?view=graph-rest-1.0",
+  "https://learn.microsoft.com/en-us/graph/api/resources/signin?view=graph-rest-1.0",
+  "https://developer.okta.com/docs/reference/system-log-query/",
+  "https://developer.okta.com/docs/reference/api/event-types/",
+  "https://developer.okta.com/docs/api/oauth2/",
+  "https://auth0.com/docs/deploy-monitor/logs/retrieve-log-events-using-mgmt-api",
+  "https://auth0.com/docs/customize/log-streams/event-filters",
+  "https://auth0.com/docs/tenant-logs",
+  "https://docs.github.com/en/enterprise-cloud%40latest/rest/orgs/orgs#get-the-audit-log-for-an-organization",
+  "https://docs.gitlab.com/api/audit_events/",
+  "https://docs.gitlab.com/user/compliance/audit_event_schema/",
+  "https://docs.gitlab.com/security/tokens/access_token_scopes/",
+  "https://docs.sentry.io/api/events/list-a-projects-error-events/",
+  "https://docs.sentry.io/api/events/retrieve-an-event-for-a-project/",
+  "https://docs.sentry.io/api/events/list-an-issues-events/",
+  "https://docs.datadoghq.com/api/latest/logs/search-logs-post/",
+  "https://docs.datadoghq.com/logs/guide/access-your-log-data-programmatically/"
+]);
 
 function relative(file) {
   return path.relative(root, file).split(path.sep).join("/");
@@ -227,6 +335,7 @@ function isAllowedUrl(value) {
   if (normalized === "http://" || normalized === "https://") return true; // Scheme literal, not an endpoint.
   if (normalized === "http://www.w3.org/2000/svg") return true;
   if (normalized === "https://json-schema.org/draft/2020-12/schema") return true;
+  if (publicReferenceUrls.has(normalized)) return true;
   try {
     const candidate = new URL(normalized);
     if (candidate.protocol === "http:"
@@ -344,6 +453,9 @@ function audit() {
     if (privateTailnetHost) report(findings, "operations.private-tailnet-host", entry.file, text, privateTailnetHost.index);
 
     if (!selfReferential.has(rel)) {
+      const reviewedReferences = [...text.matchAll(/https?:\/\/[^\s)`'"<>]+/gi)]
+        .filter(match => publicReferenceUrls.has(match[0].replace(/[.,;:]$/, "")))
+        .map(match => [match.index, match.index + match[0].length]);
       for (const [rule, pattern] of secretPatterns) {
         const match = pattern.exec(text);
         if (match) report(findings, rule, entry.file, text, match.index);
@@ -354,7 +466,7 @@ function audit() {
         }
       }
       for (const match of text.matchAll(/\b[A-Za-z0-9_+/=-]{28,}\b/g)) {
-        if (entropy(match[0]) >= 4.35) {
+        if (entropy(match[0]) >= 4.35 && !reviewedReferences.some(([start, end]) => match.index >= start && match.index + match[0].length <= end)) {
           report(findings, "secret.high-entropy-token", entry.file, text, match.index);
         }
       }

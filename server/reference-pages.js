@@ -9,6 +9,8 @@ const path = require("node:path");
 const vm = require("node:vm");
 const { validateNormalizedRecord } = require("../tools/ingest-contract.js");
 const { scaledHealthThresholds } = require("./reference-manifest.js");
+const { getIntegrationManifests } = require("./integration-catalog.js");
+const { pageObservationQuery, createObservationEnvelope } = require("./integration-coverage.js");
 
 const SUPPORTED_PAGE_ROUTES = Object.freeze(["/", "/sources", "/logs", "/analytics", "/health"]);
 const SUPPORTED_ROUTE_SET = new Set(SUPPORTED_PAGE_ROUTES);
@@ -185,6 +187,7 @@ function normalizeConnectors(state) {
 function normalizeSources(state, records, nowDate, indexedCounts) {
   const hosts = new Map(normalizeHosts(state).map((host) => [host.hostId, host]));
   const connectors = new Map(normalizeConnectors(state).map((connector) => [connector.connectorInstanceId, connector]));
+  const manifests = new Map(getIntegrationManifests(state).map((manifest) => [manifest.connectorType, manifest]));
   const recordCounts = indexedCounts || new Map();
   records.forEach((record) => recordCounts.set(record.sourceId, (recordCounts.get(record.sourceId) || 0) + 1));
 
@@ -214,7 +217,7 @@ function normalizeSources(state, records, nowDate, indexedCounts) {
       : source.lastSeenAt;
     const lastSeenAt = optionalTimestamp(declaredLastSeen, `${label}.lastSeenAt`);
     const declaredHealth = source.health && typeof source.health.state === "string" ? source.health.state : null;
-    const thresholds = scaledHealthThresholds(connector.connectorType, cadenceSeconds);
+    const thresholds = scaledHealthThresholds(connector.connectorType, cadenceSeconds, manifests.get(connector.connectorType));
     const health = sourceHealth(connector.state, declaredHealth, lastSeenAt, thresholds, nowDate);
     const applicationName = state.apps.find((app) => app.appId === source.appId)?.displayName || "Application";
     const environment = source.environment || "default";
@@ -237,7 +240,7 @@ function normalizeSources(state, records, nowDate, indexedCounts) {
 }
 
 function sourceHealth(connectorState, declaredHealth, lastSeenAt, thresholds, nowDate) {
-  if (["error", "degraded", "disabled"].includes(declaredHealth)) {
+  if (["error", "degraded", "offline", "disabled"].includes(declaredHealth)) {
     const state = boundedText(declaredHealth, "source.health.state", 40);
     return { state, tone: healthTone(state), detail: healthDetail(state) };
   }
@@ -646,6 +649,26 @@ function createPageEnvelope(route, query, state, now) {
   });
   const checkedState = validateState(state);
   const nowDate = normalizeNow(now);
+  const observationQuery = pageObservationQuery(route, request.query, nowDate);
+  if (observationQuery) {
+    const appSources = observationQuery.appId ? new Set(state.sources.filter((source) => source.appId === observationQuery.appId).map((source) => source.sourceId)) : null;
+    const records = state.records.filter((record) => observationQuery.kinds.includes(record.kind)
+      && (!observationQuery.sourceId || record.sourceId === observationQuery.sourceId)
+      && (!appSources || appSources.has(record.sourceId))
+      && (!observationQuery.observedAfter || Date.parse(record.observedAt) >= Date.parse(observationQuery.observedAfter))
+      && (!observationQuery.observedBefore || Date.parse(record.observedAt) < Date.parse(observationQuery.observedBefore)))
+      .sort((left, right) => Date.parse(right.observedAt) - Date.parse(left.observedAt) || right.recordId.localeCompare(left.recordId));
+    const selected = [];
+    let selectedBytes = 0;
+    for (const record of records.slice(observationQuery.offset, observationQuery.offset + observationQuery.limit)) {
+      const bytes = Buffer.byteLength(JSON.stringify(record));
+      if (selectedBytes + bytes > 2 * 1024 * 1024) break;
+      selectedBytes += bytes;
+      selected.push(record);
+    }
+    return runtime.validateEnvelope(createObservationEnvelope(route, request.query, state, { records: selected, count: records.length,
+      omitted: records.length - selected.length, offset: observationQuery.offset }, nowDate), route);
+  }
   if (!SUPPORTED_ROUTE_SET.has(route)) {
     return runtime.validateEnvelope({
       schemaVersion: "1",
@@ -675,10 +698,14 @@ function createIndexedPageEnvelope(route, query, store, now) {
   const request = runtime.validateRequest({ schemaVersion: "1", route, query: query || {}, reason: "navigation" });
   const state = store.controlSnapshot();
   const nowDate = normalizeNow(now);
+  const observationQuery = pageObservationQuery(route, request.query, nowDate);
+  if (observationQuery) return runtime.validateEnvelope(createObservationEnvelope(route, request.query, state, store.queryObservations(observationQuery), nowDate), route);
   if (!SUPPORTED_ROUTE_SET.has(route)) {
     if (route === "/scans") {
+      if (Object.keys(request.query).some((key) => !["tab", "appId", "sourceId"].includes(key))) throw new TypeError("The specialized Trivy page accepts only tab, appId and sourceId.");
       const { createScannerPageEnvelope } = require("./scanner-pages");
-      const selection = store.latestScannerRecords();
+      const scope = Object.fromEntries(["appId", "sourceId"].filter(key => request.query[key] !== undefined).map(key => [key, request.query[key]]));
+      const selection = store.latestScannerRecords(scope);
       const envelope = createScannerPageEnvelope(route, request.query, state, selection.records, nowDate);
       if (selection.total > selection.records.length) envelope.summary += ` Showing a bounded ${selection.records.length} of ${selection.total} records belonging to the selected latest reports; additional details are omitted.`;
       if (selection.sourceLimit) envelope.summary += " Latest-report summaries are limited to the 200 most recent reporting sources.";

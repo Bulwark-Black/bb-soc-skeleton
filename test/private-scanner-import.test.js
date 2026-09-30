@@ -9,6 +9,60 @@ const path = require("node:path");
 const { startPrivateApplication } = require("../server/private-application");
 const { normalizeTrivyReport } = require("../server/scanner-ingest");
 const { spawn } = require("node:child_process");
+const vm = require("node:vm");
+
+class ScannerElement {
+  constructor(tag) { this.tagName = tag; this.children = []; this.style = {}; this.dataset = {}; this.attributes = {}; this.listeners = {}; this.text = ""; this._value = ""; this.files = []; this.disabled = false; }
+  append(...children) { for (const child of children) { child.parentNode = this; this.children.push(child); } }
+  replaceChildren(...children) { this.children = []; this.text = ""; this.append(...children); }
+  set textContent(value) { this.text = value; this.children = []; }
+  get textContent() { return this.text + this.children.map(child => child.textContent).join(""); }
+  set value(value) { this._value = value; }
+  get value() { if (this.tagName !== "select") return this._value; return this.children.some(child => child.value === this._value) ? this._value : this.children[0]?.value || ""; }
+  setAttribute(name, value) { this.attributes[name] = value; }
+  addEventListener(name, listener) { this.listeners[name] = listener; }
+  all(tag) { return this.children.flatMap(child => [...(child.tagName === tag ? [child] : []), ...child.all(tag)]); }
+  reset() { for (const node of this.all("select")) node.value = ""; for (const node of this.all("input")) { node.value = ""; node.files = []; } }
+  click() { if (!this.disabled) return this.listeners.click?.(); }
+}
+function scannerUiFixture(t, query = {}) {
+  const container = new ScannerElement("main"), requests = [], eventListeners = new Map();
+  const sources = [
+    { sourceId: "source-first", appId: "app-one", environment: "production", connectorType: "trivy-report", sourceKind: "trivy.scan", state: "active", displayName: "First scanner" },
+    { sourceId: "source-selected", appId: "app-one", environment: "production", connectorType: "trivy-report", sourceKind: "trivy.scan", state: "active", displayName: "Selected scanner" },
+    { sourceId: "source-paused", appId: "app-one", environment: "production", connectorType: "trivy-report", sourceKind: "trivy.scan", state: "paused", displayName: "Paused scanner" },
+    { sourceId: "source-other", appId: "app-other", environment: "production", connectorType: "trivy-report", sourceKind: "trivy.scan", state: "active", displayName: "Other scanner" }
+  ];
+  const context = vm.createContext({ document: { createElement: tag => new ScannerElement(tag) }, SOC_PRIVATE_APPLICATION: true, AbortController, setTimeout, clearTimeout,
+    addEventListener: (name, listener) => eventListeners.set(name, listener), removeEventListener: name => eventListeners.delete(name),
+    fetch: async (url, init) => { requests.push({ url, init }); return new Response(JSON.stringify({ receipt: { replay: false }, summary: { packageCount: 1, vulnerabilityCount: 0 } })); } });
+  context.window = context; vm.runInContext(fs.readFileSync(path.join(__dirname, "../public/scanner-import.js"), "utf8"), context);
+  const cleanup = context.SocScannerImport.render({ container, sources, query: new URLSearchParams(query) }); t.after(cleanup);
+  return { container, requests, cleanup, events: eventListeners, select: () => container.all("select")[0], file: () => container.all("input")[0],
+    discard: () => container.all("button").find(node => node.textContent === "Discard selection"), form: () => container.all("form")[0] };
+}
+
+test("Trivy importer preserves exact source scope through discard and upload without defaulting to another source", async t => {
+  const h = scannerUiFixture(t, { appId: "app-one", environment: "production", sourceId: "source-selected" });
+  assert.deepEqual(h.select().children.map(node => node.value), ["source-selected"]); assert.equal(h.select().value, "source-selected");
+  h.file().files = [{ size: 4 }]; h.form().listeners.change(); assert.equal(h.cleanup.isDirty(), true);
+  h.discard().click(); assert.equal(h.select().value, "source-selected"); assert.equal(h.file().files.length, 0); assert.equal(h.cleanup.isDirty(), false);
+  h.file().files = [{ size: 4 }]; await h.form().listeners.submit({ preventDefault() {} });
+  assert.equal(h.requests.length, 1); assert.equal(h.requests[0].url, "/api/v1/scanners/trivy/import?sourceId=source-selected"); assert.equal(h.select().value, "source-selected");
+  const unscoped = scannerUiFixture(t, { appId: "app-one", environment: "production" });
+  unscoped.select().value = "source-selected"; unscoped.file().files = [{ size: 4 }]; unscoped.discard().click();
+  assert.equal(unscoped.select().value, "source-selected", "Discarding a file must not change even an unscoped explicit source choice.");
+});
+
+test("Trivy importer refuses missing, paused and cross-application requested sources and preserves setup recovery context", t => {
+  const setupId = "setup-11111111-1111-4111-8111-111111111111";
+  for (const sourceId of ["source-paused", "source-missing", "source-other"]) {
+    const h = scannerUiFixture(t, { appId: "app-one", environment: "production", sourceId, setupId });
+    assert.equal(h.select(), undefined); assert.equal(h.form(), undefined); assert.equal(h.requests.length, 0);
+    assert.match(h.container.textContent, /No different source has been selected/);
+    assert.equal(h.container.all("a")[0].href, "#/sources?stab=add&connectorType=trivy-report&appId=app-one&environment=production&sourceId=" + sourceId + "&setupId=" + setupId);
+  }
+});
 
 test("private Trivy upload authenticates operator and scoped sender, rejects failures, projects and replays across restart", async (t) => {
   const directory = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "bb-soc-private-scanner-"));
@@ -87,6 +141,9 @@ test("private Trivy upload authenticates operator and scoped sender, rejects fai
   assert.equal(page.state, "ready");
   assert.match(JSON.stringify(page), /sample-package/);
   assert.match(JSON.stringify(page), /Web application \/ production/);
+  const scopedPage = await expectStatus(request("/api/v1/pages?route=%2Fscans&tab=trivy&appId=" + encodeURIComponent(application.appId) + "&sourceId=" + encodeURIComponent(setup.sourceId), { method: "GET" }), 200);
+  assert.equal(scopedPage.state, "ready"); assert.match(scopedPage.summary, /Scoped to the selected source/);
+  await expectStatus(request("/api/v1/pages?route=%2Fscans&tab=trivy&sourceId=missing-source", { method: "GET" }), 400);
   const otherSetup = await command("source.setup", { appId: application.appId, environment: "production", connectorType: "trivy-report",
     sourceKind: "trivy.scan", displayName: "Other application artifact", config: { "cadence-seconds": 86400 }, credentialReferences: [] });
   const otherSource = () => app.runtime.controlState().sources.find((entry) => entry.sourceId === otherSetup.sourceId);

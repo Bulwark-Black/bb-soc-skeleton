@@ -18,15 +18,46 @@
       <div class="panel-body">
         <p class="eyebrow">PRIVATE APPLICATION</p>
         <h1 id="sign-in-title">Sign in to your SOC</h1>
-        <p class="muted" id="sign-in-description">Use an operator account provisioned by the owner of this installation.</p>
-        <form id="private-sign-in-form" class="private-account-form">
+        <p class="muted" id="sign-in-description">Checking whether this installation needs its first administrator account…</p>
+        <form id="private-sign-in-form" class="private-account-form" hidden>
+          <label id="name-label" class="form-field" hidden>Administrator name<input id="operator-name" name="name" type="text" maxlength="100" autocomplete="name"></label>
           <label id="email-label" class="form-field">Email<input id="operator-email" name="email" type="email" maxlength="254" autocomplete="username" required></label>
           <label class="form-field">Password<input id="operator-password" name="password" type="password" minlength="15" maxlength="128" autocomplete="current-password" required></label>
           <label id="new-password-label" class="form-field" hidden>New password<input id="operator-new-password" name="new-password" type="password" minlength="15" maxlength="128" autocomplete="new-password"></label>
-          <button class="resource-action" id="sign-in-submit" type="submit">Sign in</button>
+          <label id="confirm-password-label" class="form-field" hidden>Confirm password<input id="operator-confirm-password" name="confirm-password" type="password" minlength="15" maxlength="128" autocomplete="new-password"></label>
+          <button class="resource-action" id="sign-in-submit" type="submit" disabled>Sign in</button>
+        </form>
+        <section id="account-security" hidden>
+          <p id="two-factor-state" class="muted"></p>
+          <form id="two-factor-password-form" class="private-account-form">
+            <label class="form-field">Confirm your current password<input id="two-factor-password" type="password" minlength="15" maxlength="128" autocomplete="current-password" required></label>
+            <button id="two-factor-change" class="resource-action" type="submit">Set up authenticator</button>
+          </form>
+          <p class="muted">Changing two-factor authentication signs out every session. Keep backup codes somewhere private and separate from this installation. Password recovery does not remove two-factor protection.</p>
+        </section>
+        <section id="two-factor-enrollment" hidden>
+          <p class="muted">Add a time-based account in your authenticator app: issuer BB SOC, six digits, 30-second interval, SHA-1. Enter the setup key below manually, or import the setup URI if your authenticator supports it. These are secrets: do not paste them into an AI agent, shared document, or QR-code website.</p>
+          <label class="form-field">Authenticator setup key<input id="two-factor-key" type="text" readonly autocomplete="off" spellcheck="false"></label>
+          <label class="form-field">Authenticator setup URI<textarea id="two-factor-uri" rows="3" readonly autocomplete="off" spellcheck="false"></textarea></label>
+          <label class="form-field">One-time backup codes<textarea id="two-factor-backup-codes" rows="10" readonly autocomplete="off" spellcheck="false"></textarea></label>
+          <label><input id="two-factor-saved" type="checkbox"> I have saved these backup codes securely.</label>
+          <p class="muted">Two-factor protection is not active until you verify an authenticator code below. Leaving this page clears the displayed secrets; starting setup again replaces an unfinished setup.</p>
+        </section>
+        <form id="two-factor-form" class="private-account-form" hidden>
+          <label class="form-field"><span id="two-factor-code-label">Authenticator code</span><input id="two-factor-code" type="text" maxlength="11" autocomplete="one-time-code" spellcheck="false" required></label>
+          <button id="two-factor-verify" class="resource-action" type="submit">Verify code</button>
+          <button id="two-factor-use-backup" class="resource-action" type="button" hidden>Use a backup code</button>
+          <button id="two-factor-cancel" class="resource-action" type="button">Start again</button>
         </form>
         <p id="sign-in-status" class="muted" role="status" aria-live="polite"></p>
-        <p class="muted">No public registration. If you need an account or a password reset, contact your installation owner.</p>
+        <div id="first-run-local" hidden>
+          <p class="muted">Create the first account from the installation host using its loopback address, or run the local account command with this installation's existing state directory:</p>
+          <pre><code>npm run account -- create --state-dir /absolute/private/bb-soc-state --email you@example.invalid --name "SOC administrator"</code></pre>
+          <p class="muted">Replace the example path, email, and name with your own values. The command prompts for the password privately; do not put a password in a command or URL.</p>
+        </div>
+        <button id="first-run-retry" class="resource-action" type="button" hidden>Check setup again</button>
+        <p id="sign-in-help" class="muted">No shared default credentials. The first administrator is created once; additional accounts and password recovery are managed locally by the installation owner.</p>
+        <noscript><p>JavaScript is required to check first-run setup and sign in. The installation owner can also create an account with the local account command.</p></noscript>
         <a class="resource-action" href="/">Return to SOC</a>
       </div>
     </section>

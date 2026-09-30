@@ -313,10 +313,12 @@
     "sourceTestInput": {
       "type": "object", "additionalProperties": false,
       "required": ["sourceId", "connectorInstanceId", "expectedRevision"],
+      "not": { "required": ["sample", "recordSample"] },
       "properties": {
         "sourceId": { "$ref": "#/$defs/resourceId" },
         "connectorInstanceId": { "$ref": "#/$defs/resourceId" },
         "expectedRevision": { "$ref": "#/$defs/revision" },
+        "recordSample": { "$ref": "normalized-record.v1.schema.json" },
         "sample": {
           "type": "object", "additionalProperties": false, "required": ["message"],
           "properties": {

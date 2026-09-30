@@ -8,6 +8,8 @@ const path = require("node:path");
 const Database = require("better-sqlite3");
 const { ReferenceStateStore, clone, validateState, validateAuditEntry } = require("./reference-store");
 const { validateNormalizedRecord } = require("../tools/ingest-contract");
+const { normalizeObservationQuery } = require("./integration-coverage");
+const { selectScannerSources } = require("./scanner-pages");
 
 const DAY_MS = 86_400_000;
 const DEFAULT_RETENTION = Object.freeze({ maxRecords: 100_000, maxRecordBytes: 256 * 1024 * 1024,
@@ -151,6 +153,12 @@ class SqliteTelemetryStore {
         const migration = this.prepare("SELECT value FROM telemetry_meta WHERE key = 'legacy-fingerprint'").get();
         if (!migration || migration.value !== fingerprint) throw new Error("Frozen reference migration inputs changed; refusing to open divergent telemetry state.");
       }
+      // Additive read indexes support existing schema-1 deployments without
+      // rewriting records, changing their retention, or altering replay data.
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS telemetry_observation_time ON telemetry_records(observed_at DESC, id DESC) WHERE json IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS telemetry_observation_source ON telemetry_records(source_id, observed_at DESC, id DESC) WHERE json IS NOT NULL;
+      `);
       const control = this.controlSnapshot();
       const check = this.db.pragma("quick_check");
       if (check.length !== 1 || check[0].quick_check !== "ok") throw new Error("Telemetry database consistency check failed.");
@@ -347,9 +355,41 @@ class SqliteTelemetryStore {
     return { total: this.prepare("SELECT COUNT(*) AS count FROM telemetry_records WHERE " + where).get(...kinds).count,
       records: this.prepare("SELECT json FROM telemetry_records WHERE " + where + " ORDER BY observed_at DESC, id DESC LIMIT ?").all(...kinds, limit).map((row) => JSON.parse(row.json)) };
   }
-  latestScannerRecords() {
-    const sources = this.controlSnapshot().sources.filter((source) => source.connectorType === "trivy-report");
-    const latest = this.prepare("SELECT json FROM telemetry_records WHERE source_id = ? AND kind = 'scan.result' AND json IS NOT NULL ORDER BY observed_at DESC, id DESC LIMIT 1");
+  queryObservations(filters = {}) {
+    this.assertOpen();
+    const query = normalizeObservationQuery(filters);
+    const clauses = ["json IS NOT NULL"];
+    const params = [];
+    if (query.kinds) { clauses.push(`kind IN (${query.kinds.map(() => "?").join(",")})`); params.push(...query.kinds); }
+    if (query.sourceId) { clauses.push("source_id = ?"); params.push(query.sourceId); }
+    if (query.appId) {
+      // Application association belongs to the source registry, not untrusted
+      // payload fields. Use SQL membership to avoid an unbounded placeholder list.
+      clauses.push("source_id IN (SELECT json_extract(value, '$.sourceId') FROM json_each((SELECT json FROM telemetry_control WHERE id = 1), '$.sources') WHERE json_extract(value, '$.appId') = ?)");
+      params.push(query.appId);
+    }
+    if (query.observedAfter) { clauses.push("observed_at >= ?"); params.push(query.observedAfter); }
+    if (query.observedBefore) { clauses.push("observed_at < ?"); params.push(query.observedBefore); }
+    const where = clauses.join(" AND ");
+    const count = this.prepare("SELECT COUNT(*) AS count FROM telemetry_records WHERE " + where).get(...params).count;
+    const records = [];
+    let returnedBytes = 0;
+    let bytesLimited = false;
+    for (const row of this.prepare("SELECT json FROM telemetry_records WHERE " + where + " ORDER BY observed_at DESC, id DESC LIMIT ? OFFSET ?")
+      .iterate(...params, query.limit, query.offset)) {
+      const bytes = Buffer.byteLength(row.json);
+      if (returnedBytes + bytes > 2 * 1024 * 1024) { bytesLimited = true; break; }
+      returnedBytes += bytes;
+      records.push(JSON.parse(row.json));
+    }
+    return { records, count, matched: count, omitted: count - records.length, limit: query.limit, offset: query.offset,
+      returnedBytes, bytesLimited, hasMore: query.offset + records.length < count };
+  }
+  latestScannerRecords(query = {}) {
+    // Scope the source registry before selecting the latest 200 reporting
+    // sources. Filtering a global capped result could hide a selected source.
+    const sources = selectScannerSources(this.controlSnapshot(), query);
+    const latest = this.prepare("SELECT json FROM telemetry_records WHERE source_id = ? AND kind = 'scan.result' AND json IS NOT NULL AND json_extract(json, '$.payload.fields.scanner') = 'trivy' AND json_type(json, '$.payload.fields.reportRef') = 'text' AND json_type(json, '$.payload.fields.packageCount') = 'integer' AND json_type(json, '$.payload.fields.vulnerabilityCount') = 'integer' ORDER BY observed_at DESC, id DESC LIMIT 1");
     const summaries = sources.flatMap((source) => {
       const row = latest.get(source.sourceId); return row ? [JSON.parse(row.json)] : [];
     }).sort((left, right) => right.observedAt.localeCompare(left.observedAt)).slice(0, 200);

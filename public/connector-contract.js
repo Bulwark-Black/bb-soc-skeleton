@@ -712,6 +712,48 @@
       };
     }
 
+    function normalizeRecordSample(value, label) {
+      assertRecord(value, label);
+      assertAllowedKeys(value, ["schemaVersion", "documentType", "recordId", "sourceId", "estateId", "kind", "observedAt", "payload"], label);
+      if (value.schemaVersion !== "1" || value.documentType !== "normalized-record") throw new TypeError(`${label} must be a version-one normalized record.`);
+      const kind = enumValue(value.kind, RECORD_KINDS, `${label}.kind`);
+      const p = value.payload;
+      assertRecord(p, `${label}.payload`);
+      assertAllowedKeys(p, ["title", "state", "severity", "assetRef", "identityRef", "ruleRef", "findingRef", "indicatorType", "indicator", "message", "summary", "channel", "category", "count", "startedAt", "completedAt", "dueAt", "fields"], `${label}.payload`);
+      const payload = { title: requiredText(p.title, `${label}.payload.title`, 300), state: enumValue(p.state, ["open", "closed", "active", "inactive", "ok", "warn", "failed", "unknown"], `${label}.payload.state`) };
+      for (const key of ["assetRef", "identityRef", "ruleRef", "findingRef", "channel", "category"]) if (p[key] !== undefined) payload[key] = resourceId(p[key], `${label}.payload.${key}`);
+      for (const [key, limit] of [["message", 4000], ["summary", 4000], ["indicator", 2048]]) if (p[key] !== undefined) payload[key] = requiredText(p[key], `${label}.payload.${key}`, limit);
+      if (p.severity !== undefined) payload.severity = enumValue(p.severity, ["critical", "high", "medium", "low", "info", "unknown"], `${label}.payload.severity`);
+      if (p.indicatorType !== undefined) payload.indicatorType = enumValue(p.indicatorType, ["ip", "domain", "url", "hash", "email", "other"], `${label}.payload.indicatorType`);
+      if (p.count !== undefined) payload.count = unsignedInteger(p.count, `${label}.payload.count`);
+      for (const key of ["startedAt", "completedAt", "dueAt"]) if (p[key] !== undefined) payload[key] = timestamp(p[key], `${label}.payload.${key}`);
+      if (p.fields !== undefined) {
+        assertRecord(p.fields, `${label}.payload.fields`);
+        if (Reflect.ownKeys(p.fields).length > 64) throw new TypeError(`${label}.payload.fields is too large.`);
+        payload.fields = {};
+        for (const key of Reflect.ownKeys(p.fields)) {
+          if (typeof key !== "string" || !/^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/.test(key)
+              || BLOCKED_CONFIG_SUFFIXES.some((suffix) => key.replace(/[^a-z0-9]/gi, "").toLowerCase().endsWith(suffix))) throw new TypeError(`${label}.payload.fields contains an invalid or secret-bearing key.`);
+          const descriptor = Object.getOwnPropertyDescriptor(p.fields, key);
+          if (!descriptor || descriptor.get || descriptor.set) throw new TypeError(`${label}.payload.fields must use data properties.`);
+          const item = descriptor.value;
+          if (!(item === null || typeof item === "boolean" || (typeof item === "number" && Number.isFinite(item)) || (typeof item === "string" && item.length <= 1000))) throw new TypeError(`${label}.payload.fields must use bounded scalars.`);
+          payload.fields[key] = item;
+        }
+      }
+      const required = {
+        "alert.delivery": "findingRef", "asset.snapshot": "assetRef", "audit.event": "category", "authentication.event": "identityRef",
+        "backup.status": "assetRef", "case.record": "findingRef", "compliance.record": "category", "database.schema": "assetRef",
+        "endpoint.event": "assetRef", "evidence.receipt": "category", "file.integrity": "assetRef category", finding: "severity",
+        "governance.attestation": "category", "governance.risk": "category", "honeypot.event": "assetRef", "identity.access": "identityRef",
+        "intel.indicator": "indicatorType indicator", "intel.sync": "category", "log.event": "message", "network.event": "category",
+        "offboarding.record": "identityRef", "phishing.report": "findingRef", "remediation.record": "findingRef", "retention.snapshot": "category",
+        "rule.definition": "ruleRef", "scan.result": "assetRef", "software.package": "assetRef", "source.heartbeat": "category", "vulnerability.finding": "assetRef severity"
+      };
+      for (const key of required[kind].split(" ")) if (payload[key] === undefined) throw new TypeError(`${label}.payload.${key} is required.`);
+      return { schemaVersion: "1", documentType: "normalized-record", recordId: resourceId(value.recordId, `${label}.recordId`), sourceId: resourceId(value.sourceId, `${label}.sourceId`), estateId: resourceId(value.estateId, `${label}.estateId`), kind, observedAt: timestamp(value.observedAt, `${label}.observedAt`), payload };
+    }
+
     function validateCommandRequest(value, manifestValue) {
       const label = "connector command request";
       assertRecord(value, label);
@@ -770,7 +812,7 @@
         }
       } else {
         assertRecord(value.input, inputLabel);
-        const extraKeys = result.command === "source.test" ? ["sample"] : result.command === "source.update" ? ["displayName", "config", "credentialReferences"] : [];
+        const extraKeys = result.command === "source.test" ? ["sample", "recordSample"] : result.command === "source.update" ? ["displayName", "config", "credentialReferences"] : [];
         assertAllowedKeys(value.input, ["sourceId", "connectorInstanceId", "expectedRevision", ...extraKeys], inputLabel);
         result.input = {
           sourceId: resourceId(value.input.sourceId, `${inputLabel}.sourceId`),
@@ -779,12 +821,14 @@
         };
         if (result.input.sourceId === result.input.connectorInstanceId) throw new TypeError(`${inputLabel}.sourceId and connectorInstanceId must identify different resources.`);
         if (result.command === "source.test" && value.input.sample !== undefined) {
+          if (value.input.recordSample !== undefined) throw new TypeError(`${inputLabel} must use either sample or recordSample, not both.`);
           assertRecord(value.input.sample, `${inputLabel}.sample`);
           assertAllowedKeys(value.input.sample, ["message", "channel", "severity"], `${inputLabel}.sample`);
           result.input.sample = { message: requiredText(value.input.sample.message, `${inputLabel}.sample.message`, 2000) };
           if (value.input.sample.channel !== undefined) result.input.sample.channel = requiredText(value.input.sample.channel, `${inputLabel}.sample.channel`, 120);
           if (value.input.sample.severity !== undefined) result.input.sample.severity = enumValue(value.input.sample.severity, ["critical", "high", "medium", "low", "info", "unknown"], `${inputLabel}.sample.severity`);
         }
+        if (result.command === "source.test" && value.input.recordSample !== undefined) result.input.recordSample = normalizeRecordSample(value.input.recordSample, `${inputLabel}.recordSample`);
         if (result.command === "source.update") {
           if (value.input.displayName !== undefined) result.input.displayName = requiredText(value.input.displayName, `${inputLabel}.displayName`, 120);
           if (value.input.config !== undefined) result.input.config = normalizeConfig(value.input.config, `${inputLabel}.config`);

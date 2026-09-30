@@ -165,6 +165,11 @@ test("resources are a fixed allowlist of public docs and contracts", async () =>
   const technical = await readResource("soc://documentation/technical-manual");
   assert.equal(technical.mimeType, "text/markdown");
   assert.match(technical.text, /^# Bulwark Black SOC technical implementation manual/m);
+  for (const name of ["readme", "authentication"]) {
+    const guide = await readResource("soc://documentation/" + name);
+    assert.equal(guide.mimeType, "text/markdown");
+    assert.match(guide.text, /Better Auth/);
+  }
   const administration = await readResource("soc://contracts/administration-v1-schema");
   assert.doesNotThrow(() => JSON.parse(administration.text));
   await assert.rejects(() => readResource("soc://documentation/../../private"), /unknown resource/i);
@@ -172,6 +177,7 @@ test("resources are a fixed allowlist of public docs and contracts", async () =>
 
 test("tool inventory is narrow, deterministic, closed, and contains no generic execution or credential surface", () => {
   assert.deepEqual(TOOL_DEFINITIONS.map((entry) => entry.name), [
+    "setup_guides", "setup_check",
     "connector_snapshot",
     "connector_command",
     "administration_snapshot",
@@ -186,6 +192,35 @@ test("tool inventory is narrow, deterministic, closed, and contains no generic e
     assert.equal(entry.inputSchema.additionalProperties, false);
     assert.equal(entry.annotations.openWorldHint, false);
   });
+});
+
+test("setup prompt is discoverable public guidance with no arguments or control-plane calls", async () => {
+  const client = new Proxy({}, { get() { throw new Error("Prompt retrieval must not inspect or mutate private state."); } });
+  for (const modern of [true, false]) {
+    const server = createMcpServer({ client });
+    const params = value => modern ? modernParams(value) : value;
+    const hello = modern
+      ? await server.handle(rpc(1, "server/discover", modernParams()))
+      : await server.handle(rpc(1, "initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test", version: "1" } }));
+    assert.equal(hello.result.capabilities.prompts.listChanged, false);
+    const listed = await server.handle(rpc(2, "prompts/list", params({})));
+    assert.deepEqual(listed.result.prompts.map(value => value.name), ["setup_application"]);
+    assert.deepEqual(listed.result.prompts[0].arguments, []);
+    const prompt = await server.handle(rpc(3, "prompts/get", params({ name: "setup_application" })));
+    assert.equal(prompt.result.messages[0].role, "user");
+    assert.match(prompt.result.messages[0].content.text, /Tailnet-only HTTPS/);
+    assert.match(prompt.result.messages[0].content.text, /Stop for the human step/);
+    assert.match(prompt.result.messages[0].content.text, /scope.*whole deployment/s);
+    const resource = await readResource("soc://documentation/ai-setup");
+    assert.equal(prompt.result.messages[0].content.text.endsWith(resource.text), true);
+    for (const input of [{ name: "unknown" }, { name: "setup_application", arguments: { source: "arbitrary" } },
+      { name: "setup_application", arguments: null }, { name: "setup_application", arguments: [] },
+      { name: "setup_application", arguments: {}, unexpected: true }]) {
+      const rejected = await server.handle(rpc(4, "prompts/get", params(input)));
+      assert.equal(rejected.error.code, -32602);
+    }
+    assert.equal((await server.handle(rpc(5, "prompts/list", params({ cursor: "next" })))).error.code, -32602);
+  }
 });
 
 test("modern MCP discovery, resources, tools, calls, and protocol errors are well formed", async () => {

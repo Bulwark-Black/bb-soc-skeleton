@@ -151,7 +151,7 @@ test("expired and tampered sessions fail without cookie-cache fallback", async t
   const h = await harness(t);
   await h.create();
   const cookie = cookies(await h.login());
-  assert.equal(await h.auth.getSession(new Headers({ cookie: cookie.replace(/=./, "=x") })), null);
+  assert.equal(await h.auth.getSession(new Headers({ cookie: cookie.replace(/=./, value => value === "=x" ? "=y" : "=x") })), null);
   const database = new Database(path.join(h.directory, "auth.sqlite"));
   try { database.prepare("UPDATE session SET expiresAt = ?").run(new Date(Date.now() - 1000).toISOString()); }
   finally { database.close(); }
@@ -203,6 +203,140 @@ test("operator input validation and duplicate create cannot mutate existing cred
   await assert.rejects(h.auth.resetOperatorPassword({ email: "missing@example.invalid", password: NEXT_PASSWORD }), /does not exist/);
   assert.equal(h.auth.countOperators(), 1);
   assert.equal((await h.login()).status, 200);
+});
+
+test("first administrator setup is durable, credential-safe, and closes public provisioning exactly once", async t => {
+  const h = await harness(t);
+  assert.deepEqual(h.auth.firstRunStatus(), { setupRequired: true });
+  await h.restart();
+  assert.deepEqual(h.auth.firstRunStatus(), { setupRequired: true });
+  const administrator = await h.auth.createFirstOperator({ email: EMAIL.toUpperCase(), name: " First administrator ", password: PASSWORD });
+  assert.deepEqual(Object.keys(administrator).sort(), ["email", "id", "name"]);
+  assert.equal(administrator.email, EMAIL);
+  assert.equal(administrator.name, "First administrator");
+  assert.deepEqual(h.auth.firstRunStatus(), { setupRequired: false });
+  assert.equal((await h.login()).status, 200);
+  await h.restart();
+  assert.deepEqual(h.auth.firstRunStatus(), { setupRequired: false });
+  await assert.rejects(h.auth.createFirstOperator({ email: "next@example.invalid", name: "Another administrator", password: NEXT_PASSWORD }), error => error.status === 409);
+  assert.equal(h.auth.countOperators(), 1);
+  assert.equal((await h.request("sign-up/email", { body: { email: "next@example.invalid", name: "Another administrator", password: NEXT_PASSWORD } })).status, 404);
+  const database = new Database(path.join(h.directory, "auth.sqlite"));
+  try {
+    const state = database.prepare("SELECT * FROM privateBootstrapState").get();
+    assert.equal(state.completed, 1);
+    assert.ok(Number.isSafeInteger(state.completedAt) && state.completedAt > 0);
+    assert.notEqual(database.prepare("SELECT password FROM account").get().password, PASSWORD);
+    // Even deliberate account/audit removal does not reopen a completed setup.
+    database.pragma("foreign_keys = ON");
+    database.prepare('DELETE FROM "user"').run();
+    database.prepare("DELETE FROM privateAccountAudit").run();
+  } finally { database.close(); }
+  assert.equal(h.auth.countOperators(), 0);
+  assert.deepEqual(h.auth.firstRunStatus(), { setupRequired: false });
+  await h.restart();
+  assert.deepEqual(h.auth.firstRunStatus(), { setupRequired: false });
+  await assert.rejects(h.auth.createFirstOperator({ email: EMAIL, name: "New administrator", password: PASSWORD }), error => error.status === 409);
+});
+
+test("invalid first administrator input leaves setup available without partial state", async t => {
+  const h = await harness(t);
+  for (const invalid of [
+    { email: "invalid" }, { name: "\n" }, { name: "x".repeat(101) },
+    { password: "short" }, { password: "x".repeat(129) }, { password: PASSWORD + "\u0000" }
+  ]) {
+    await assert.rejects(h.auth.createFirstOperator({ email: EMAIL, name: "Administrator", password: PASSWORD, ...invalid }), TypeError);
+    assert.deepEqual(h.auth.firstRunStatus(), { setupRequired: true });
+    assert.equal(h.auth.countOperators(), 0);
+  }
+  const database = new Database(path.join(h.directory, "auth.sqlite"), { readonly: true });
+  try {
+    assert.equal(database.prepare("SELECT COUNT(*) AS n FROM account").get().n, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS n FROM privateAccountAudit").get().n, 0);
+  } finally { database.close(); }
+});
+
+test("concurrent first administrator creation across database connections has one winner", async t => {
+  const h = await harness(t);
+  const other = await createPrivateAuth({ stateDir: h.directory, baseURL: ORIGIN });
+  t.after(() => other.close());
+  const results = await Promise.allSettled(Array.from({ length: 4 }, (_, index) => (index % 2 ? other : h.auth).createFirstOperator({
+    email: `administrator-${index}@example.invalid`, name: "Administrator", password: PASSWORD
+  })));
+  assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter(result => result.status === "rejected" && result.reason.status === 409).length, 3);
+  assert.equal(h.auth.countOperators(), 1);
+  assert.deepEqual(other.firstRunStatus(), { setupRequired: false });
+  const database = new Database(path.join(h.directory, "auth.sqlite"), { readonly: true });
+  try {
+    assert.equal(database.prepare("SELECT COUNT(*) AS n FROM account").get().n, 1);
+    assert.equal(database.prepare("SELECT COUNT(*) AS n FROM privateAccountAudit WHERE action = 'operator.create'").get().n, 1);
+  } finally { database.close(); }
+});
+
+test("administrator creation rolls back credentials, audit, and completion together", async t => {
+  const h = await harness(t);
+  const database = new Database(path.join(h.directory, "auth.sqlite"));
+  try {
+    database.exec("CREATE TRIGGER refuse_setup_completion AFTER UPDATE ON privateBootstrapState BEGIN SELECT RAISE(ABORT, 'Test completion failure'); END");
+    await assert.rejects(h.auth.createFirstOperator({ email: EMAIL, name: "Administrator", password: PASSWORD }), /Test completion failure/);
+    assert.deepEqual(h.auth.firstRunStatus(), { setupRequired: true });
+    for (const table of ["user", "account", "privateAccountAudit"]) {
+      assert.equal(database.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get().n, 0);
+    }
+    assert.deepEqual(database.prepare("SELECT completed, completedAt FROM privateBootstrapState").get(), { completed: 0, completedAt: null });
+    database.exec("DROP TRIGGER refuse_setup_completion");
+  } finally { database.close(); }
+  await h.auth.createFirstOperator({ email: EMAIL, name: "Administrator", password: PASSWORD });
+  assert.deepEqual(h.auth.firstRunStatus(), { setupRequired: false });
+});
+
+test("local CLI provisioning permanently disables first-run setup but still allows more local operators", async t => {
+  const h = await harness(t);
+  await h.create();
+  assert.deepEqual(h.auth.firstRunStatus(), { setupRequired: false });
+  await assert.rejects(h.auth.createFirstOperator({ email: "next@example.invalid", name: "Administrator", password: PASSWORD }), error => error.status === 409);
+  await h.auth.createOperator({ email: "second@example.invalid", name: "Second local operator", password: PASSWORD });
+  assert.equal(h.auth.countOperators(), 2);
+  await h.restart();
+  assert.deepEqual(h.auth.firstRunStatus(), { setupRequired: false });
+});
+
+test("legacy authentication migration closes setup for existing users and historical creation audit", async t => {
+  for (const deleteUsers of [false, true]) {
+    const h = await harness(t);
+    await h.create();
+    h.auth.close();
+    const database = new Database(path.join(h.directory, "auth.sqlite"));
+    try {
+      database.exec("DROP TABLE privateBootstrapState");
+      if (deleteUsers) {
+        database.pragma("foreign_keys = ON");
+        database.prepare('DELETE FROM "user"').run();
+      }
+    } finally { database.close(); }
+    await h.restart();
+    assert.deepEqual(h.auth.firstRunStatus(), { setupRequired: false });
+    assert.equal(h.auth.countOperators(), deleteUsers ? 0 : 1);
+    await assert.rejects(h.auth.createFirstOperator({ email: "next@example.invalid", name: "Administrator", password: PASSWORD }), error => error.status === 409);
+  }
+});
+
+test("missing or corrupt existing setup sentinel fails closed instead of recreating it", async t => {
+  for (const corrupt of [
+    database => database.exec("DELETE FROM privateBootstrapState"),
+    database => database.exec("PRAGMA ignore_check_constraints = ON; UPDATE privateBootstrapState SET completed = 9"),
+    database => database.exec("PRAGMA ignore_check_constraints = ON; UPDATE privateBootstrapState SET completed = 1, completedAt = NULL")
+  ]) {
+    const directory = temporaryDirectory(t);
+    const auth = await createPrivateAuth({ stateDir: directory, baseURL: ORIGIN });
+    const database = new Database(path.join(directory, "auth.sqlite"));
+    try { corrupt(database); } finally { database.close(); }
+    assert.throws(() => auth.firstRunStatus(), /setup state is invalid/);
+    await assert.rejects(auth.createFirstOperator({ email: EMAIL, name: "Administrator", password: PASSWORD }), /setup state is invalid/);
+    auth.close();
+    await assert.rejects(createPrivateAuth({ stateDir: directory, baseURL: ORIGIN }), /setup state is invalid/);
+  }
 });
 
 test("auth files have restrictive modes and unsafe directories/files fail closed", async t => {
@@ -287,6 +421,7 @@ test("account CLI provisions and resets an operator using stdin without echoing 
   assert.ok(!reset.output.includes(NEXT_PASSWORD));
   const auth = await createPrivateAuth({ stateDir: directory, baseURL: ORIGIN });
   try {
+    assert.deepEqual(auth.firstRunStatus(), { setupRequired: false });
     const login = await auth.handler(new Request(ORIGIN + "/api/auth/sign-in/email", { method: "POST", headers: { origin: ORIGIN, "content-type": "application/json" }, body: JSON.stringify({ email: EMAIL, password: NEXT_PASSWORD }) }));
     assert.equal(login.status, 200);
   } finally { auth.close(); }

@@ -1,5 +1,15 @@
 # Connector, source, and ingest integration
 
+For the current runnable integration path, start with the
+[integration review and implementation map](INTEGRATION-REVIEW.md). Private
+mode supports narrow log push, universal canonical events, custom immutable
+canonical-push definitions registered through Sources → Integrations, and the
+separate Trivy report importer. An external adapter translates vendor payloads
+into the 29 canonical kinds; definitions cannot execute code or resolve vendor
+credentials. Sources → Received observations and the actual coverage matrix
+distinguish received facts from specialized workflows. The reference workbench
+still enables only its original log-push admission path.
+
 This is the adopter contract for making Onboarding and Sources operational and
 then filling the console from real, authorized sources. It distinguishes three
 planes that must stay separate:
@@ -448,14 +458,17 @@ log streams, or a second direct registry-write path through MCP.
 ## Scan connector implementation guide
 
 The Scans page is a structural catalog, not an installed scanner suite. The
-registry includes working `canonical-push`, the private application's
-`trivy-report` importer, and eleven data-only scan setup templates. The importer
+registry includes working `canonical-push`, private `canonical-events` and
+custom canonical declarations, the private application's `trivy-report`
+importer, and eleven data-only scan setup templates. The importer
 populates only Trivy from reports produced elsewhere; no scanner execution,
 Patch First, file-integrity, EOL, exposure, IOC, urlscan.io, dependency, ClamAV,
 quarantine, or remediation drivers are installed. An adopter must review
 the manifest **and** implement its server-side acquisition,
 normalizer, validation, health, persistence, and projector path before claiming
-that a tab is connected.
+that its native workflow is connected. Universal/custom canonical sources can
+already populate the matching read-only observation tables in these tabs;
+those imported facts do not provide a collector, computed verdict or action.
 
 Every scan connector follows the same control flow:
 

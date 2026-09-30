@@ -433,7 +433,7 @@ test("all scan views ship exact data-only connection templates with meaningful o
     ["quarantine-template", ["quarantined-now", "deleted-from-quarantine"], ["endpoint.event", "finding"], ["store-access", "encryption-access"]],
     ["remediation-template", ["vm-analyst-latest-review", "remediation-log"], ["remediation.record"], ["workflow-access", "evidence-store-access"]]
   ];
-  assert.equal(REFERENCE_CONNECTOR_MANIFESTS.length, 13);
+  assert.equal(REFERENCE_CONNECTOR_MANIFESTS.length, 14);
   assert.equal(REFERENCE_CONNECTOR_MANIFESTS.filter((manifest) => manifest.connectorType === "trivy-report").length, 1);
   assert.equal(REFERENCE_SCAN_CONNECTOR_MANIFESTS.length, expected.length);
   expected.forEach(([connectorType, surfaces, requiredKinds, credentialSlots], index) => {
@@ -703,7 +703,8 @@ test("reference control plane supports two same-host sources, one-time credentia
   const unprojected = harness.plane.readPage("/triage", {});
   assert.equal(unprojected.route, "/triage");
   assert.equal(unprojected.state, "empty");
-  assert.deepEqual(unprojected.panels, []);
+  assert.equal(unprojected.panels[0].id, "imported-observation-scope");
+  assert.deepEqual(unprojected.panels.find((panel) => panel.id === "imported-observations").rows, []);
 
   const stateText = fs.readFileSync(path.join(harness.directory, "state.json"), "utf8");
   const auditText = fs.readFileSync(path.join(harness.directory, "audit.jsonl"), "utf8");

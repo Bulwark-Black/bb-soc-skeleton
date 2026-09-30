@@ -31,6 +31,16 @@ private `trivy-report` importer processes reports but never runs a scanner.
 An Agent Management record is not a running agent, and a service credential
 authorizes only its granted API operations, not arbitrary agent execution.
 
+Universal/custom canonical sources now support all 29 record kinds. In the
+private app, Sources → Integrations manages immutable custom definitions and
+shows actual route coverage; Sources → Received observations provides bounded
+application/source/kind filtering and payload inspection. Relevant category
+pages display explicitly read-only imported facts. These fallback observation
+views replace unsupported native workflow placeholders for that read; they do
+not implement native actions, detection engines or vendor-specific analysis.
+The static shell and adopter-supplied specialized page contracts remain intact.
+See [the integration review](INTEGRATION-REVIEW.md) for exact boundaries.
+
 When an adopter injects version-1 page panels, a stable panel-ID match hydrates
 the corresponding catalog slot. Unmatched panels appear in a distinct
 **Additional authorized data** region. Titles, labels, and array positions are
@@ -119,7 +129,7 @@ Documents is included).
 | `#/databases` | **Databases:** exact schema-watch and schema-change tables followed by adding-database and methodology panels | Structural inventory and change projections with records and connection fields removed |
 | `#/backups` | **Backups:** backup-chain push state, independent bucket pull verification, off-box evidence receipts, adding-chain guidance, and the two-side rationale | Backup-control summaries and evidence references, never storage credentials or environment endpoints |
 | `#/retention` | **Retention:** structural policy/reality/review views; private Policy/Reality now show configured indexed-telemetry limits and real record/byte/receipt/identity/audit counters with explicit capacity and pruning behavior | Per-source measured horizons, filesystem/free-disk measurements, archived baselines and analyst review still need integrations; canonical record-byte totals are not total disk usage |
-| `#/sources` | **Sources:** `Sources — Dead-man Board` has seven-column Expected sources rows with application/environment context and `?` disclosures; **Add** selects a registered app/environment, optional collector, and installed connector/kind, renders manifest-owned configuration/reference slots, validates the configured path, and issues ingest credentials once; staged/active rows expose update, pause/resume, revoke/rotate, archive/remove; **Registry Changes** has the five-column ledger | Private mode supports canonical-push events and `trivy-report` import; eleven legacy templates fail closed. Custom integrations must authorize the same commands and project stable panel IDs; arbitrary kinds/searchability are not supported |
+| `#/sources` | **Sources:** Expected sources shows application/environment and measured delivery health; **Add a source** configures, tests and activates a registered source; **Integrations** installs immutable data-only definitions and explains real screen coverage; **Received observations** filters retained records by app/source/kind; **Registry Changes** retains lifecycle history | Private mode supports canonical log push, all 29 canonical kinds through universal/custom definitions, and validated Trivy reports. Eleven legacy templates have no driver. Vendor acquisition and raw-payload mapping remain external; arbitrary kinds, unbounded storage and a full query language are not supported |
 | `#/agents` | **Agent Management:** Agents, Add Agent, Prompts, Enrollment, Service Access, and History tabs; lifecycle/capability metadata, separately authorized prompt-body reads, one-time enrollment output, pause/resume, archive/restore/remove, and audit; Service Access issues expiring scoped credentials with read-only defaults, rotation/revocation and its own audit | Keep runner execution, prompt privacy, enrollment proof and secrets server-side. Service Access is separate from managed-agent registration, does not schedule agents, and does not grant a credential permission to issue credentials or expand agent authority |
 
 ### Govern
@@ -128,7 +138,7 @@ Documents is included).
 | --- | --- | --- |
 | `#/attestations` | **Attestations:** Active, Add Attestation, Archived, and History tabs with authoritative lifecycle rows and links to detail | Supply the governance snapshot and authorize the exact `attestation.*` create/update/transition/archive/restore/remove commands; production evidence/approval/retention policy remains server-owned |
 | `#/register` | **Risk Register:** Active, Add Risk, Archived, and History tabs with likelihood/impact, owner/review state, and links to detail | Supply the governance snapshot and authorize exact `risk.*` commands; richer scope, treatment, evidence, approvals, dependencies, and retention remain production extensions |
-| `#/access` | **Access:** Who includes current-identity, owners, visitor, identity-model, device, and auditor-access structures; the private starter projects the current session and real operator account inventory (first 200 names plus total). Refusals, Chain, and Offboarding retain structural tables, measures, run/detail views, and guide | Starter accounts are all full-access operators, not invented role groups. Other Access tabs remain unconnected; entitlement certification, device, refusal, and offboarding workflows need separate integrations |
+| `#/access` | **Access:** Who shows the current session and actual local operator accounts (first 200 names plus total). **Observations** displays imported identity/authentication/audit/offboarding facts; the other tabs preserve native navigation and show the same explicitly labeled read-only facts in generic private mode | Starter accounts are all full-access operators. Imported identity claims never grant console access; entitlement certification, device, refusal, and offboarding workflows need separate implementations |
 | `#/documents` | **Documents:** real private uploads, application/owner/status/review metadata, optional linked record references, immutable versions with SHA-256 hashes, downloads, history, archive/restore, and restart persistence | Private starter owns the authenticated document API and bounded SQLite store; adopters own retention/deletion policy, fine-grained access, scanning, and backup operations. This local page never uses SOC page envelopes |
 
 ### Shell utilities
@@ -378,7 +388,7 @@ compliant, or risk-free.
 | Collection, search, storage, and retention | Private indexed SQLite telemetry, bounded search and count/byte/age retention; legacy JSON reference workbench remains separate | Capacity planning, deployment operations, advanced search, distributed/high-availability storage |
 | Source onboarding commands | Browser contract, private application UI/API, bounded reference core | Production scaling, fine-grained authorization, managed secrets, retention |
 | Agent, prompt, enrollment, attestation, and risk lifecycle commands | Browser contract and private application administration | Runner execution, fine-grained authorization, dependencies, scalable durability, secrets |
-| Agent-readable MCP resources and five fixed control tools | Authenticated private service routes with owner-only token-file client, scopes, expiry, rotation/revocation and audit; legacy loopback mode retained; credential issuance, URLs, shell, telemetry, and secrets refused | Private deployment/TLS, permission selection, human approval workflow, availability and operations |
+| Agent-readable MCP resources and seven fixed control/setup tools | Authenticated private service routes with owner-only token-file client, optional setup:read diagnostics, scopes, expiry, rotation/revocation and audit; legacy loopback mode retained for original control tools; credential issuance, URLs, shell, telemetry, and secrets refused | Private deployment/TLS, permission selection, human approval workflow, availability and operations |
 | Document uploads, versions, metadata, history, archive/restore | Private authenticated library and bounded SQLite store | Scanning, retention, deletion policy, fine-grained access, backups |
 | Other commands, approvals, and catalog attachment controls | No | Yes |
 | Trivy vulnerability-report import | Supported JSON normalization, private UI/API, source credential admission, atomic ingest and Trivy-only projection | Running the scanner privately, producing supported fresh reports, coverage validation and remediation |

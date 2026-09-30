@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const ConnectorContract = require("../public/connector-contract");
 const { validateNormalizedRecord } = require("../tools/ingest-contract");
-const { REFERENCE_CONNECTOR_MANIFESTS, getReferenceManifest } = require("./reference-manifest");
+const { getIntegrationManifests } = require("./integration-catalog");
 
 const SCHEMA_VERSION = "1";
 const STATE_FILE = "state.json";
@@ -172,7 +172,7 @@ function validateHost(value, index, appIds) {
   return value;
 }
 
-function validateConnector(value, index, appIds) {
+function validateConnector(value, index, appIds, manifests) {
   const label = "state.connectorInstances[" + index + "]";
   assertPlainRecord(value, label);
   assertAllowedKeys(value, [
@@ -182,7 +182,7 @@ function validateConnector(value, index, appIds) {
   assertId(value.connectorInstanceId, "connectorInstanceId", label + ".connectorInstanceId");
   assertId(value.appId, "appId", label + ".appId");
   if (!appIds.has(value.appId)) throw new TypeError(label + ".appId does not reference an app.");
-  if (!getReferenceManifest(value.connectorType)) throw new TypeError(label + ".connectorType is unsupported.");
+  if (!manifests.has(value.connectorType)) throw new TypeError(label + ".connectorType is unsupported.");
   assertString(value.displayName, label + ".displayName", 120, /\S/u);
   if (!["configured", "tested", "active", "paused", "archived", "removed"].includes(value.state)) throw new TypeError(label + ".state is invalid.");
   validateConfig(value.config, label + ".config");
@@ -218,7 +218,7 @@ function validateHealth(value, label, source) {
   if (value.message !== undefined) assertString(value.message, label + ".message", 500, /\S/u);
 }
 
-function validateSource(value, index, appIds, hostIds, connectorIds) {
+function validateSource(value, index, appIds, hostIds, connectorIds, manifests) {
   const label = "state.sources[" + index + "]";
   assertPlainRecord(value, label);
   assertAllowedKeys(value, [
@@ -232,7 +232,7 @@ function validateSource(value, index, appIds, hostIds, connectorIds) {
   if (value.hostId !== undefined) assertId(value.hostId, "hostId", label + ".hostId");
   if (value.environment !== undefined) assertString(value.environment, label + ".environment", 80, /^[a-z][a-z0-9.-]*$/);
   if (!appIds.has(value.appId) || (value.hostId !== undefined && !hostIds.has(value.hostId)) || !connectorIds.has(value.connectorInstanceId)) throw new TypeError(label + " contains an invalid reference.");
-  const manifest = getReferenceManifest(value.connectorType);
+  const manifest = manifests.get(value.connectorType);
   if (!manifest || !manifest.supportedSourceKinds.includes(value.sourceKind)) throw new TypeError(label + " has an unsupported type.");
   if (manifest.scope === "host" && value.hostId === undefined) throw new TypeError(label + " requires its collector host.");
   assertString(value.displayName, label + ".displayName", 120, /\S/u);
@@ -272,7 +272,7 @@ function validateSourceCredential(value, index, sourceIds) {
   return value;
 }
 
-function validateStoredRecord(value, index, appIds, hostIds, connectorIds, sourceIds) {
+function validateStoredRecord(value, index, appIds, hostIds, connectorIds, sourceIds, sourcesById, manifests) {
   const label = "state.records[" + index + "]";
   assertPlainRecord(value, label);
   assertAllowedKeys(value, [
@@ -284,12 +284,17 @@ function validateStoredRecord(value, index, appIds, hostIds, connectorIds, sourc
     sourceId: value.sourceId, estateId: value.estateId, kind: value.kind,
     observedAt: value.observedAt, payload: value.payload
   });
-  if (canonical.kind !== "log.event") throw new TypeError(label + ".kind is unsupported.");
+  const source = sourcesById.get(value.sourceId);
+  const manifest = source && manifests.get(source.connectorType);
+  if (!manifest || !manifest.payload.recordKinds.includes(canonical.kind)) throw new TypeError(label + ".kind is unsupported by its source.");
   assertId(value.estateId, "appId", label + ".estateId");
   assertId(value.connectorInstanceId, "connectorInstanceId", label + ".connectorInstanceId");
   if (value.hostId !== undefined) assertId(value.hostId, "hostId", label + ".hostId");
   if (!appIds.has(value.estateId) || !connectorIds.has(value.connectorInstanceId)
       || (value.hostId !== undefined && !hostIds.has(value.hostId)) || !sourceIds.has(value.sourceId)) throw new TypeError(label + " contains an invalid reference.");
+  if (source.appId !== value.estateId || source.connectorInstanceId !== value.connectorInstanceId || source.hostId !== value.hostId) {
+    throw new TypeError(label + " does not match its source binding.");
+  }
   assertNullableTimestamp(value.receivedAt, label + ".receivedAt");
   return value;
 }
@@ -344,10 +349,12 @@ function validateState(value) {
   assertPlainRecord(value, "state");
   assertAllowedKeys(value, [
     "schemaVersion", "revision", "apps", "hosts", "connectorInstances", "sources", "changes",
-    "enrollments", "sourceCredentials", "records", "receipts", "commandResults"
+    "enrollments", "sourceCredentials", "records", "receipts", "commandResults", "integrationManifests"
   ], "state");
   if (value.schemaVersion !== SCHEMA_VERSION) throw new TypeError("state.schemaVersion is unsupported.");
   assertUnsigned(value.revision, "state.revision");
+  const integrationManifests = getIntegrationManifests(value);
+  const manifests = new Map(integrationManifests.map((manifest) => [manifest.connectorType, manifest]));
   const apps = assertArray(value.apps, "state.apps", 500).map(validateApp);
   assertUnique(apps, "appId", "state.apps");
   const appIds = new Set(apps.map((item) => item.appId));
@@ -359,13 +366,14 @@ function validateState(value) {
     if (JSON.stringify(actual) !== JSON.stringify([...app.hosts].sort())) throw new TypeError("state.apps host membership is inconsistent.");
   }
   const connectors = assertArray(value.connectorInstances, "state.connectorInstances", 2000)
-    .map((item, index) => validateConnector(item, index, appIds));
+    .map((item, index) => validateConnector(item, index, appIds, manifests));
   assertUnique(connectors, "connectorInstanceId", "state.connectorInstances");
   const connectorIds = new Set(connectors.map((item) => item.connectorInstanceId));
   const sources = assertArray(value.sources, "state.sources", 2000)
-    .map((item, index) => validateSource(item, index, appIds, hostIds, connectorIds));
+    .map((item, index) => validateSource(item, index, appIds, hostIds, connectorIds, manifests));
   assertUnique(sources, "sourceId", "state.sources");
   const sourceIds = new Set(sources.map((item) => item.sourceId));
+  const sourcesById = new Map(sources.map((item) => [item.sourceId, item]));
   for (const source of sources) {
     const connector = connectors.find((entry) => entry.connectorInstanceId === source.connectorInstanceId);
     const host = hosts.find((entry) => entry.hostId === source.hostId);
@@ -383,7 +391,7 @@ function validateState(value) {
     .map((item, index) => validateSourceCredential(item, index, sourceIds));
   assertUnique(sourceCredentials, "credentialId", "state.sourceCredentials");
   const records = assertArray(value.records, "state.records", MAX_RECORDS)
-    .map((item, index) => validateStoredRecord(item, index, appIds, hostIds, connectorIds, sourceIds));
+    .map((item, index) => validateStoredRecord(item, index, appIds, hostIds, connectorIds, sourceIds, sourcesById, manifests));
   const recordKeys = new Set();
   records.forEach((record) => {
     const key = record.sourceId + "\u0000" + record.recordId;
@@ -405,7 +413,7 @@ function validateState(value) {
   ConnectorContract.validateControlSnapshot({
     schemaVersion: "1",
     documentType: "connector-control-snapshot",
-    connectorTypes: REFERENCE_CONNECTOR_MANIFESTS,
+    connectorTypes: integrationManifests,
     apps,
     hosts,
     connectorInstances: connectors,

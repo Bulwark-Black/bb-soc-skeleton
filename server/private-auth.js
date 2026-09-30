@@ -14,7 +14,12 @@ const AUTH_PATHS = new Map([
   ["/api/auth/sign-in/email", "POST"],
   ["/api/auth/sign-out", "POST"],
   ["/api/auth/get-session", "GET"],
-  ["/api/auth/change-password", "POST"]
+  ["/api/auth/change-password", "POST"],
+  ["/api/auth/two-factor/status", "GET"],
+  ["/api/auth/two-factor/enable", "POST"],
+  ["/api/auth/two-factor/disable", "POST"],
+  ["/api/auth/two-factor/verify-totp", "POST"],
+  ["/api/auth/two-factor/verify-backup-code", "POST"]
 ]);
 
 function validatePrivateOrigin(value) {
@@ -69,9 +74,9 @@ function preparePrivateDirectory(value) {
   if (fs.realpathSync(directory) !== directory) throw new Error("Private state directory must use a canonical path without symbolic links.");
   const knownFiles = new Set(["auth-secret", "state.json", "audit.jsonl", "runtime.lock", "administration-state.json", "administration-audit.jsonl", "administration-runtime.lock"]);
   for (const name of fs.readdirSync(directory)) {
-    const databaseFile = /^(auth|documents|telemetry|service-access)\.sqlite(?:-wal|-shm|-journal)?$/.test(name);
+    const databaseFile = /^(auth|documents|telemetry|service-access|live-monitoring|setup-guides)\.sqlite(?:-wal|-shm|-journal)?$/.test(name);
     const interruptedWrite = /^\.(state|administration-state)\.json\.[1-9][0-9]*\.[a-f0-9-]{36}\.tmp$/.test(name);
-    if (!knownFiles.has(name) && !databaseFile && !interruptedWrite) throw new Error("Private state requires an empty directory or an existing BB SOC state directory; unrelated contents were not changed.");
+    if (!knownFiles.has(name) && name !== "live-monitoring.key" && !databaseFile && !interruptedWrite) throw new Error("Private state requires an empty directory or an existing BB SOC state directory; unrelated contents were not changed.");
   }
   fs.chmodSync(directory, 0o700);
   return directory;
@@ -176,8 +181,8 @@ async function createPrivateAuth({ stateDir, baseURL }) {
     finally { if (fd !== undefined) fs.closeSync(fd); }
     secureFile(databasePath);
   }
-  const [{ betterAuth }, { getMigrations }, { hashPassword }, { default: Database }] = await Promise.all([
-    import("better-auth"), import("better-auth/db/migration"), import("better-auth/crypto"), import("better-sqlite3")
+  const [{ betterAuth }, { getMigrations }, { hashPassword }, { default: Database }, { twoFactor }] = await Promise.all([
+    import("better-auth"), import("better-auth/db/migration"), import("better-auth/crypto"), import("better-sqlite3"), import("better-auth/plugins")
   ]);
   const database = new Database(databasePath);
   let closed = false;
@@ -199,6 +204,9 @@ async function createPrivateAuth({ stateDir, baseURL }) {
         revokeSessionsOnPasswordReset: true
       },
       session: { expiresIn: SESSION_SECONDS, disableSessionRefresh: true, cookieCache: { enabled: false } },
+      plugins: [twoFactor({ issuer: "BB SOC", skipVerificationOnEnable: false, twoFactorCookieMaxAge: 300,
+        totpOptions: { digits: 6, period: 30 }, backupCodeOptions: { amount: 10, length: 10, storeBackupCodes: "encrypted" },
+        accountLockout: { enabled: true, maxFailedAttempts: 10, durationSeconds: 900 } })],
       advanced: {
         useSecureCookies: origin.startsWith("https:"),
         cookiePrefix: "bb-soc",
@@ -207,7 +215,9 @@ async function createPrivateAuth({ stateDir, baseURL }) {
       },
       rateLimit: {
         enabled: true, window: 60, max: 100, storage: "database",
-        customRules: { "/sign-in/email": { window: 60, max: 10 }, "/change-password": { window: 60, max: 5 } }
+        customRules: { "/sign-in/email": { window: 60, max: 10 }, "/change-password": { window: 60, max: 5 },
+          "/two-factor/enable": { window: 60, max: 5 }, "/two-factor/disable": { window: 60, max: 5 },
+          "/two-factor/verify-totp": { window: 60, max: 5 }, "/two-factor/verify-backup-code": { window: 60, max: 5 } }
       },
       telemetry: { enabled: false },
       logger: { disabled: true }
@@ -215,6 +225,36 @@ async function createPrivateAuth({ stateDir, baseURL }) {
     const migrations = await getMigrations(options);
     await migrations.runMigrations();
     database.exec("CREATE TABLE IF NOT EXISTS privateAccountAudit (id TEXT PRIMARY KEY, action TEXT NOT NULL, userId TEXT NOT NULL, occurredAt INTEGER NOT NULL, localUid TEXT NOT NULL)");
+    const readBootstrapState = () => {
+      const rows = database.prepare("SELECT id, completed, completedAt FROM privateBootstrapState").all();
+      if (rows.length !== 1 || rows[0].id !== 1 || ![0, 1].includes(rows[0].completed) ||
+          (rows[0].completed === 0 ? rows[0].completedAt !== null : !Number.isSafeInteger(rows[0].completedAt) || rows[0].completedAt <= 0)) {
+        throw new Error("Private account setup state is invalid. Restore authentication state from a trusted backup; setup was not reopened.");
+      }
+      return rows[0];
+    };
+    const hasProvisionedOperator = () => Boolean(
+      database.prepare('SELECT 1 FROM "user" LIMIT 1').get() ||
+      database.prepare("SELECT 1 FROM privateAccountAudit WHERE action = 'operator.create' LIMIT 1").get()
+    );
+    const completeBootstrap = () => {
+      if (readBootstrapState().completed === 0) {
+        database.prepare("UPDATE privateBootstrapState SET completed = 1, completedAt = ? WHERE id = 1").run(Date.now());
+      }
+    };
+    database.transaction(() => {
+      const bootstrapTable = database.prepare("SELECT type FROM sqlite_master WHERE name = 'privateBootstrapState'").get();
+      if (!bootstrapTable) {
+        database.exec("CREATE TABLE privateBootstrapState (id INTEGER PRIMARY KEY CHECK (id = 1), completed INTEGER NOT NULL CHECK (completed IN (0, 1)), completedAt INTEGER, CHECK ((completed = 0 AND completedAt IS NULL) OR (completed = 1 AND completedAt > 0)))");
+        database.prepare("INSERT INTO privateBootstrapState (id, completed, completedAt) VALUES (1, 0, NULL)").run();
+      } else if (bootstrapTable.type !== "table") {
+        throw new Error("Private account setup state is invalid; setup was not reopened.");
+      }
+      // Migrate legacy installations, including accounts subsequently removed by an
+      // operator. A zero user count must never become a fresh-install signal again.
+      readBootstrapState();
+      if (hasProvisionedOperator()) completeBootstrap();
+    }).immediate();
     const auth = betterAuth(options);
     await auth.$context;
     for (const suffix of ["", "-wal", "-shm", "-journal"]) secureFile(databasePath + suffix);
@@ -227,15 +267,49 @@ async function createPrivateAuth({ stateDir, baseURL }) {
       if (!operator) throw new Error("Operator account does not exist.");
       return operator;
     };
+    const setupClosedError = () => Object.assign(new Error("Initial administrator setup is complete. Sign in with an existing account, or use the local account recovery command."), { status: 409 });
+    const firstRunStatus = () => database.transaction(() => {
+      const state = readBootstrapState();
+      if (state.completed === 0 && hasProvisionedOperator()) completeBootstrap();
+      return { setupRequired: readBootstrapState().completed === 0 };
+    }).immediate();
+    const createOperator = async ({ email, name, password }, firstOnly) => {
+      if (firstOnly && !firstRunStatus().setupRequired) throw setupClosedError();
+      const normalizedEmail = validateEmail(email);
+      const normalizedName = validateName(name);
+      const hashedPassword = await hashPassword(validatePassword(password));
+      return database.transaction(() => {
+        if (firstOnly && (readBootstrapState().completed !== 0 || hasProvisionedOperator())) throw setupClosedError();
+        if (database.prepare('SELECT id FROM "user" WHERE email = ?').get(normalizedEmail)) throw new Error("Operator email already exists.");
+        const id = crypto.randomUUID();
+        const timestamp = new Date().toISOString();
+        database.prepare('INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(id, normalizedName, normalizedEmail, 0, timestamp, timestamp);
+        database.prepare('INSERT INTO account (id, userId, accountId, providerId, password, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .run(crypto.randomUUID(), id, id, "credential", hashedPassword, timestamp, timestamp);
+        audit("operator.create", id);
+        completeBootstrap();
+        return { id, email: normalizedEmail, name: normalizedName };
+      }).immediate();
+    };
+    // Credential sign-in and factor changes must observe one another in order:
+    // an in-flight password-only sign-in cannot outlive factor activation.
+    let authRequests = Promise.resolve(), pendingAuthRequests = 0;
     return {
       auth,
       origin,
+      firstRunStatus,
+      createFirstOperator(input) { return createOperator(input, true); },
       async handler(request, { clientIP = "127.0.0.1" } = {}) {
+        if (pendingAuthRequests >= 32) return authError(429, "Authentication is busy. Retry shortly.");
+        const perform = async () => {
         const url = new URL(request.url);
         if (url.origin !== origin) return authError(403, "Authentication origin is not allowed.");
         const method = AUTH_PATHS.get(url.pathname);
         if (!method) return authError(404, "Authentication endpoint is not available.");
         if (request.method !== method) return authError(405, "Authentication method is not allowed.");
+        if (url.search) return authError(400, "Authentication query parameters are not allowed.");
+        if (request.headers.has("authorization")) return authError(401, "Authentication endpoints do not accept machine credentials.");
         if (request.headers.has("origin") && request.headers.get("origin") !== origin) return authError(403, "Authentication origin is not allowed.");
         if (method === "POST" && request.headers.get("origin") !== origin) return authError(403, "Same-origin authentication requests are required.");
         const headers = new Headers(request.headers);
@@ -243,6 +317,15 @@ async function createPrivateAuth({ stateDir, baseURL }) {
         headers.delete("x-forwarded-for");
         headers.delete("x-forwarded-host");
         headers.delete("x-forwarded-proto");
+        // This installation deliberately challenges every new password sign-in.
+        // Even cookies created by an earlier configuration cannot bypass 2FA.
+        if (headers.has("cookie")) headers.set("cookie", headers.get("cookie").split(";").filter(part => !/^(?:__Secure-)?bb-soc\.trust_device=/.test(part.trim())).join(";"));
+        const factorPath = url.pathname.startsWith("/api/auth/two-factor/");
+        const priorSession = factorPath || url.pathname === "/api/auth/change-password" ? await auth.api.getSession({ headers, query: { disableCookieCache: true } }) : null;
+        if (url.pathname === "/api/auth/two-factor/status") {
+          if (!priorSession) return authError(401, "Sign in to manage your account security.");
+          return Response.json({ schemaVersion: "1", enabled: priorSession.user.twoFactorEnabled === true, method: "totp", trustedDevicesAllowed: false }, { headers: { "cache-control": "no-store" } });
+        }
         let body;
         if (method === "POST") {
           try {
@@ -251,6 +334,16 @@ async function createPrivateAuth({ stateDir, baseURL }) {
               body = { email: validateEmail(body.email), password: validatePassword(body.password), rememberMe: true };
             } else if (url.pathname === "/api/auth/change-password") {
               body = { currentPassword: validatePassword(body.currentPassword), newPassword: validatePassword(body.newPassword), revokeOtherSessions: true };
+            } else if (factorPath) {
+              const passwordAction = ["/api/auth/two-factor/enable", "/api/auth/two-factor/disable"].includes(url.pathname);
+              const expected = passwordAction ? "password" : "code";
+              if (Object.keys(body).sort().join(",") !== expected) throw new TypeError("Supply only the required two-factor field; trusted-device bypass is not available.");
+              if (passwordAction) body = { password: validatePassword(body.password), ...(url.pathname.endsWith("/enable") ? { method: "totp", issuer: "BB SOC" } : {}) };
+              else {
+                const pattern = url.pathname.endsWith("/verify-totp") ? /^\d{6}$/ : /^[A-Za-z0-9]{5}-[A-Za-z0-9]{5}$/;
+                if (typeof body.code !== "string" || !pattern.test(body.code)) throw new TypeError("Supply a valid authenticator code or backup code.");
+                body = { code: body.code, trustDevice: false };
+              }
             } else body = {};
           } catch (error) {
             return authError(error instanceof RangeError ? 413 : 400, error instanceof SyntaxError ? "Authentication request must be valid JSON." : error.message);
@@ -266,29 +359,31 @@ async function createPrivateAuth({ stateDir, baseURL }) {
             delete result.token;
             if (result.session) delete result.session.token;
           }
+          if (priorSession && (url.pathname === "/api/auth/two-factor/disable" ||
+              (url.pathname === "/api/auth/two-factor/verify-totp" && !priorSession.user.twoFactorEnabled))) {
+            // Activating a factor must not leave password-only sessions alive.
+            // Reauthentication also makes factor changes explicit in every tab.
+            database.transaction(() => {
+              database.prepare("DELETE FROM session WHERE userId = ?").run(priorSession.user.id);
+              database.prepare("DELETE FROM verification WHERE value = ?").run(priorSession.user.id);
+              audit(url.pathname.endsWith("/disable") ? "operator.two-factor-disable" : "operator.two-factor-enable", priorSession.user.id);
+            }).immediate();
+            return Response.json({ status: true, reauthenticate: true }, { status: response.status, headers: response.headers });
+          }
+          if (priorSession && url.pathname === "/api/auth/change-password") database.prepare("DELETE FROM verification WHERE value = ?").run(priorSession.user.id);
           return Response.json(result, { status: response.status, headers: response.headers });
         }
         return response;
+        };
+        pendingAuthRequests += 1;
+        const response = authRequests.then(perform);
+        authRequests = response.catch(() => {});
+        try { return await response; } finally { pendingAuthRequests -= 1; }
       },
       getSession(headers) { return auth.api.getSession({ headers: new Headers(headers), query: { disableCookieCache: true } }); },
       countOperators() { return database.prepare('SELECT COUNT(*) AS count FROM "user"').get().count; },
       listOperatorNames() { return database.prepare('SELECT name FROM "user" ORDER BY createdAt, id LIMIT 200').all().map((row) => row.name); },
-      async createOperator({ email, name, password }) {
-        const normalizedEmail = validateEmail(email);
-        const normalizedName = validateName(name);
-        const hashedPassword = await hashPassword(validatePassword(password));
-        return database.transaction(() => {
-          if (database.prepare('SELECT id FROM "user" WHERE email = ?').get(normalizedEmail)) throw new Error("Operator email already exists.");
-          const id = crypto.randomUUID();
-          const timestamp = new Date().toISOString();
-          database.prepare('INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
-            .run(id, normalizedName, normalizedEmail, 0, timestamp, timestamp);
-          database.prepare('INSERT INTO account (id, userId, accountId, providerId, password, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)')
-            .run(crypto.randomUUID(), id, id, "credential", hashedPassword, timestamp, timestamp);
-          audit("operator.create", id);
-          return { id, email: normalizedEmail, name: normalizedName };
-        }).immediate();
-      },
+      createOperator(input) { return createOperator(input, false); },
       async resetOperatorPassword({ email, password }) {
         const normalizedEmail = validateEmail(email);
         const hashedPassword = await hashPassword(validatePassword(password));
@@ -297,6 +392,7 @@ async function createPrivateAuth({ stateDir, baseURL }) {
           const result = database.prepare("UPDATE account SET password = ?, updatedAt = ? WHERE userId = ? AND providerId = 'credential'").run(hashedPassword, new Date().toISOString(), operator.id);
           if (result.changes !== 1) throw new Error("Operator credential account is unavailable.");
           const revokedSessions = database.prepare("DELETE FROM session WHERE userId = ?").run(operator.id).changes;
+          database.prepare("DELETE FROM verification WHERE value = ?").run(operator.id);
           audit("operator.password-reset", operator.id);
           return { id: operator.id, revokedSessions };
         }).immediate();
@@ -305,6 +401,7 @@ async function createPrivateAuth({ stateDir, baseURL }) {
         return database.transaction(() => {
           const operator = findOperator(email);
           const revokedSessions = database.prepare("DELETE FROM session WHERE userId = ?").run(operator.id).changes;
+          database.prepare("DELETE FROM verification WHERE value = ?").run(operator.id);
           audit("operator.sessions-revoke", operator.id);
           return { id: operator.id, revokedSessions };
         }).immediate();

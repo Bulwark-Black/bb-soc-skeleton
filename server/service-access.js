@@ -17,7 +17,7 @@ const ADMINISTRATION_COMMANDS = Object.freeze([
   "attestation.create", "attestation.update", "attestation.transition", "attestation.archive", "attestation.restore", "attestation.remove",
   "risk.create", "risk.update", "risk.transition", "risk.archive", "risk.restore", "risk.remove"
 ]);
-const SCOPES = Object.freeze([...DEFAULT_SCOPES, "prompts:read", ...CONNECTOR_COMMANDS.map(command => "connector:" + command), ...ADMINISTRATION_COMMANDS.map(command => "administration:" + command)]);
+const SCOPES = Object.freeze([...DEFAULT_SCOPES, "prompts:read", "setup:read", ...CONNECTOR_COMMANDS.map(command => "connector:" + command), ...ADMINISTRATION_COMMANDS.map(command => "administration:" + command)]);
 const SERVICE_ID = /^service-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const TOKEN = /^bbsvc_(service-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})_([A-Za-z0-9_-]{43})$/;
 const MAX_SERVICES = 1000;
@@ -209,14 +209,18 @@ async function handleServiceManagement({ request, response, url, store, actor })
   if (match && request.method === "POST") { sendJson(response, 200, store.change(match[1], match[2], (await readJsonBody(request, 16384)).value, actor)); return; }
   fail("not-found", "Service management endpoint was not found.", 404);
 }
-async function handleServiceRequest({ request, response, url, store, runtime, administrationRuntime, runAsService }) {
+async function handleServiceRequest({ request, response, url, store, runtime, administrationRuntime, setupGuides, runAsService }) {
   if (distinctHeader(request, "cookie") !== undefined) fail("service-unauthorized", "Service endpoints do not accept browser cookies.", 401);
   const header = distinctHeader(request, "authorization");
   if (typeof header !== "string" || !header.startsWith("Bearer ") || header.length > 256) fail("service-unauthorized", "A service bearer credential is required.", 401);
   const credential = header.slice(7);
   store.authenticate(credential);
   let scope, action, execute;
-  if (request.method === "GET" && url.pathname === "/api/v1/service/control/snapshot") {
+  if (request.method === "GET" && ["/api/v1/service/setup", "/api/v1/service/setup/check"].includes(url.pathname)) {
+    const checking = url.pathname.endsWith("/check"), input = query(url, checking ? ["appId", "environment", "path", "sourceId"] : []);
+    scope = "setup:read"; action = checking ? "setup.check" : "setup.guides";
+    execute = () => { if (!setupGuides) fail("unavailable", "Guided setup is unavailable.", 503); return checking ? setupGuides.check(input) : setupGuides.list(); };
+  } else if (request.method === "GET" && url.pathname === "/api/v1/service/control/snapshot") {
     const input = query(url, ["reason", "knownRevision"]);
     const value = ConnectorContract.validateControlRequest({ schemaVersion: "1", reason: "refresh", ...input });
     scope = "connector:read"; action = "connector.snapshot"; execute = () => runtime.getSnapshot(value);
