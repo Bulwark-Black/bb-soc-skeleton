@@ -21,6 +21,7 @@ const { MAPPING_BASE, handleSourceMapping } = require("./source-mapping");
 const { ASSISTANCE_BASE, handleSetupAssistance } = require("./setup-assistance");
 const { SqliteTelemetryStore } = require("./sqlite-telemetry-store");
 const { createDetectionEngine } = require("./detection-engine");
+const { createFindingNotifications } = require("./finding-notifications");
 const { createOperationsService, handleOperations, OPERATIONS_BASE, NATIVE_MACHINE_PATHS } = require("./operations-service");
 const { INTEGRATION_COVERAGE } = require("./integration-coverage");
 const { RECORD_KINDS } = require("../tools/ingest-contract");
@@ -275,7 +276,7 @@ async function startPrivateApplication(options = {}) {
   const project = path.resolve(__dirname, "..");
   const requested = path.resolve(options.stateDirectory);
   if (requested === project || requested.startsWith(project + path.sep)) throw new TypeError("Private state must be outside the repository.");
-  let authentication, documents, runtime, administrationRuntime, serviceAccess, monitoring, setupGuides, operations;
+  let authentication, documents, runtime, administrationRuntime, serviceAccess, monitoring, setupGuides, operations, findingNotifications, findingTimer;
   let activeUploads = 0;
   let origin = options.baseURL || "http://127.0.0.1:" + port;
   const server = http.createServer();
@@ -298,6 +299,9 @@ async function startPrivateApplication(options = {}) {
       enabledConnectorTypes: ["canonical-push", "canonical-events", "trivy-report", "native-monitor"]
     });
     runtime.detectionEngine = createDetectionEngine({ store: runtime.store, stateDir: realState, ...options.detection });
+    findingNotifications = createFindingNotifications({ store: runtime.store, stateDir: realState, consoleOrigin: origin, ...options.findingNotifications });
+    runtime.findingNotifications = findingNotifications;
+    findingTimer = setInterval(() => { void findingNotifications.tick().catch(() => {}); }, 5000); findingTimer.unref();
     administrationRuntime = new ReferenceAdministrationRuntime({ stateDirectory: realState });
     monitoring = createLiveMonitoring({ stateDir: realState, runtime, ...options.monitoring });
     setupGuides = createSetupGuides({ stateDir: realState, runtime, monitoring });
@@ -366,6 +370,27 @@ async function startPrivateApplication(options = {}) {
         const session = await authentication.getSession(requestHeaders(request));
         if (url.pathname === "/api/v1/session" && request.method === "GET") { sendJson(response, 200, sessionView(session)); return; }
         if (!session || !session.user) throw fail(401, "Sign in to access this private application.");
+        if (url.pathname === "/api/v1/finding-notifications" || url.pathname.startsWith("/api/v1/finding-notifications/")) {
+          const { appId } = queryOptions(url, ["appId"]);
+          if (!appId) throw fail(400, "Select an application for finding notifications.");
+          if (request.method === "GET" && url.pathname === "/api/v1/finding-notifications") {
+            sendJson(response, 200, findingNotifications.status(appId)); return;
+          }
+          const action = url.pathname.slice("/api/v1/finding-notifications/".length);
+          const fields = {
+            pause: ["paused", "expectedRevision"],
+            reconcile: ["attemptId", "expectedRevision", "action", "acceptedAt", "providerId", "duplicateRiskAccepted"],
+            verify: [],
+            "test-send": ["recipient"]
+          };
+          if (request.method !== "POST" || !Object.hasOwn(fields, action)) throw fail(405, "Unsupported finding notification endpoint or method.");
+          if (distinctHeader(request, "content-encoding") !== undefined) throw fail(415, "Compressed decisions are not accepted.");
+          const { value } = await readJsonBody(request, 8192);
+          const allowed = [...fields[action], "reason", "idempotencyKey"];
+          if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(key => !allowed.includes(key))) throw fail(400, "Supply only documented notification decision fields.");
+          const method = action === "test-send" ? "testSend" : action;
+          sendJson(response, 200, await findingNotifications[method](appId, { ...value, actor: operatorId(session.user.id) })); return;
+        }
         if (url.pathname === "/api/v1/detection/rules" && request.method === "GET") {
           const query = queryOptions(url, ["appId"]);
           const appId = query.appId;
@@ -469,19 +494,20 @@ async function startPrivateApplication(options = {}) {
       } finally { if (uploadLease) activeUploads -= 1; }
     });
     let closed = false;
-    return { server, url: origin, authentication, documents, runtime, administrationRuntime, serviceAccess, monitoring, setupGuides, operations,
+    return { server, url: origin, authentication, documents, runtime, administrationRuntime, serviceAccess, monitoring, setupGuides, operations, findingNotifications,
       async close() {
         if (closed) return;
-        closed = true;
+        closed = true; clearInterval(findingTimer);
         await new Promise((resolve) => server.close(resolve));
         await monitoring.close();
         await operations.close();
+        await findingNotifications.close();
         setupGuides.close();
         runtime.dispose(); administrationRuntime.dispose(); documents.close(); serviceAccess.close(); await authentication.close();
       }
     };
   } catch (error) {
-    server.close(); await operations?.close(); await monitoring?.close(); setupGuides?.close(); runtime?.dispose(); administrationRuntime?.dispose(); documents?.close(); serviceAccess?.close(); await authentication?.close();
+    clearInterval(findingTimer); server.close(); await findingNotifications?.close(); await operations?.close(); await monitoring?.close(); setupGuides?.close(); runtime?.dispose(); administrationRuntime?.dispose(); documents?.close(); serviceAccess?.close(); await authentication?.close();
     throw error;
   }
 }

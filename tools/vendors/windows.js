@@ -44,12 +44,20 @@ function normalize(input) {
       fields.providerGuid = event.providerGuid.toLowerCase();
     }
     let count = 0;
+    const originalNameFields = {};
+    let escapedNames = false;
     for (const data of [event.eventData, event.userData]) {
       if (data === undefined) continue;
       object(data);
       for (const key of Object.keys(data).sort()) {
-        if (++count > 48 || !/^[A-Za-z][A-Za-z0-9_.:-]{0,59}$/.test(key) || Object.hasOwn(fields, "win." + key)) throw new TypeError("Ambiguous or excessive named Windows event fields.");
-        fields["win." + key] = data[key];
+        // Defender emits names such as "Threat Name". Encode spaces without
+        // changing existing names; reserve the escape to keep it reversible.
+        const encodedKey = key.replace(/ /g, "_x20_");
+        if (++count > 48 || !/^[A-Za-z][A-Za-z0-9_.: -]{0,59}$/.test(key) || key.includes("_x20_")
+            || encodedKey.length > 60 || Object.hasOwn(fields, "win." + encodedKey)) throw new TypeError("Ambiguous or excessive named Windows event fields.");
+        fields["win." + encodedKey] = data[key];
+        originalNameFields["win." + key.replace(/ /g, "_")] = data[key];
+        escapedNames ||= key.includes(" ");
       }
     }
     let state = "unknown", category = "event", supported = false;
@@ -75,8 +83,12 @@ function normalize(input) {
     // Enforce exactly the same scalar, secret-field and size rules as ingress,
     // reserving two field slots for the vendor framework's adapter metadata.
     if (Object.keys(fields).length > 62) throw new TypeError("Windows event exceeds canonical field capacity.");
-    validateNormalizedRecord({ schemaVersion: "1", documentType: "normalized-record", recordId: upstreamId,
-      sourceId: "validation-source", estateId: "validation-application", kind: "log.event", observedAt, payload });
+    const validationRecord = { schemaVersion: "1", documentType: "normalized-record", recordId: upstreamId,
+      sourceId: "validation-source", estateId: "validation-application", kind: "log.event", observedAt, payload };
+    // Check the original spelling through canonical secret-name validation too:
+    // the reversible escape must not disguise names such as "Private Key".
+    if (escapedNames) validateNormalizedRecord({ ...validationRecord, payload: { ...payload, fields: originalNameFields } });
+    validateNormalizedRecord(validationRecord);
     return { upstreamId, observedAt, kind: "log.event", payload };
   });
 }

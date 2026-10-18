@@ -141,8 +141,12 @@ not accepted directly by the JavaScript adapter. Unnamed EventData uses `param1`
 Canonical fields are `provider: "windows-eventlog"`, `providerName`, optional
 `providerGuid`, `eventId`, `eventVersion`, `channel`, `collectionChannel`,
 `computer`, `eventRecordId`, `eventTime`, `logEpoch`, `eventCategory`,
-`decodeStatus`, and `win.<original named field>`. The vendor framework adds
-`adapterId` and `adapterVersion`. At most 48 event-data fields are accepted;
+`decodeStatus`, and `win.<original named field>`. Spaces in original field names
+are reversibly escaped as `_x20_`: Defender's `Threat Name` becomes
+`win.Threat_x20_Name`. Literal `_x20_` in an original field name is reserved and
+rejected, and both original and escaped names pass the secret-name checks.
+The escaped name must fit the existing 60-character event-field name bound.
+The vendor framework adds `adapterId` and `adapterVersion`. At most 48 event-data fields are accepted;
 canonical total is at most 64 scalar fields, each string at most 1000 characters.
 Oversized values, nested data, secret-bearing field names and batches over the
 1 MiB ingress limit are rejected atomically, not silently truncated. Reduce
@@ -183,8 +187,13 @@ For WEF, configure source-initiated subscriptions and original-source permission
 with Windows administration tools, then select `ForwardedEvents` and list the
 allowed original computers. Track WEC subscription heartbeat/runtime errors
 separately. Optional supported channels are
-`Microsoft-Windows-Sysmon/Operational` and
-`Microsoft-Windows-PowerShell/Operational`; they must already exist and be enabled.
+`Microsoft-Windows-Sysmon/Operational`,
+`Microsoft-Windows-PowerShell/Operational`, and
+`Microsoft-Windows-Windows Defender/Operational`; they must already exist and be
+enabled, and the collector account must have read access. Defender events retain
+the original provider, channel, event ID/version, time, and named fields as
+searchable `log.event` records with `decodeStatus: "unclassified"`. This channel
+addition does not add detection rules or infer a remediation outcome.
 No third-party detection pack is copied into this adapter.
 
 Official references:
@@ -198,3 +207,5 @@ Official references:
 - [Credential validation 4776](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4776)
 - [Versioned ticket event 4769](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4769)
 - [Process creation 4688](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4688)
+
+- [Microsoft Defender Antivirus event IDs and Operational channel](https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus)

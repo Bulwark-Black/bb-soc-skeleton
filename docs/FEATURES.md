@@ -413,11 +413,19 @@ boundary between this reusable port and deployment-specific monitoring.
 ## Platform monitoring expansion
 
 The private application includes source-authenticated platform delivery, a
-Windows Event Log/WEF collector, four additional log import profiles and
-25 opt-in original detection rules. Native incident email uses an external
-Resend credential with durable delivery state and operator reconciliation.
-Read [platform ingestion](PLATFORM-INGEST.md), [platform coverage](PLATFORM-COVERAGE.md),
-[Windows events](WINDOWS-EVENTS.md), [detection rules](DETECTION-RULES.md) and
-[native notifications](NATIVE-NOTIFICATIONS.md) for the exact supported contracts,
-private configuration, tests and deployment-specific prerequisites.
-No checked-in credentials, inventory, enabled rules or recipients are supplied.
+Windows/WEF collector, 18 supplied-log adapters, executable cloud/Checkmk/Wazuh
+workers, private OTLP JSON/syslog TLS receivers and 25 opt-in original rules.
+Reviewed JSON packs add tested predicates, shadow/source rollout, expiring
+suppressions and version rollback. Native incidents and derived findings can
+send through Resend or authenticated TLS SMTP using the mail service behind
+Roundcube. Durable delivery includes pause, bounded retries and reconciliation.
+Deployment generation produces Windows Task Scheduler, systemd, Compose, Helm
+and Ansible bundles without applying them.
+
+Read [platform ingestion](PLATFORM-INGEST.md), [coverage](PLATFORM-COVERAGE.md),
+[collectors](PLATFORM-COLLECTORS.md), [protocol receivers](PROTOCOL-GATEWAYS.md),
+[deployment automation](DEPLOYMENT-AUTOMATION.md),
+[reviewed rule packs](REVIEWED-RULE-PACKS.md) and
+[notifications](NATIVE-NOTIFICATIONS.md). Configure and commission each
+integration in its actual environment; supplied adapters are not universal
+provider coverage.

@@ -14,7 +14,7 @@ adoption review, not a formal security assessment, deployment certification, or
 benchmark result. CI, repository workflows, branch protections and release
 automation are outside its scope.
 
-**Vendor-pack update:** fifteen checked-in vendor export/API-page normalizers,
+**Vendor-pack update:** eighteen checked-in vendor export/API-page normalizers,
 Sources → Vendor imports, and an external durable SQLite outbox now ship.
 Read the [vendor setup and delivery guide](VENDOR-INTEGRATIONS.md) for exact
 supported formats, permissions, queue behavior and limitations.

@@ -67,6 +67,14 @@ test("detections are disabled by default and policy validation fails closed", t 
   for (const rules of [["unknown-rule"], [CLEARED, CLEARED], [{ id: CLEARED, threshold: 2 }], [{ id: BURST, threshold: 1 }], [{ id: BURST, windowSeconds: 59 }]]) {
     assert.throws(() => configuration(config(rules)));
   }
+  for (const field of ["stage", "sourceIds", "suppressions"]) {
+    for (const value of [null, false, 0, ""]) {
+      assert.throws(() => configuration(config([{ id: CLEARED, [field]: value }])), undefined,
+        `Explicit ${field}=${JSON.stringify(value)} must not activate a broader policy`);
+    }
+  }
+  const defaults = configuration(config([CLEARED])).get(f.appId).get(CLEARED);
+  assert.equal(defaults.stage, "active"); assert.deepEqual(defaults.sourceIds, []); assert.deepEqual(defaults.suppressions, []);
   assert.throws(() => createDetectionEngine({ store: f.runtime.store, config: { schemaVersion: 1, applications: [policy("unregistered-app", [CLEARED])] } }), /Register each application/);
   assert.throws(() => f.runtime.detectionEngine.derive([cleared(f)]), /share the telemetry admission transaction/);
 });
@@ -164,4 +172,37 @@ test("historical logs remain searchable while expired threshold evidence is excl
   f.ingest(f.identity, f.batch(f.identity, [historical(), historical()]));
   assert.equal(f.count("detection_observations"), 0); assert.equal(f.findings().length, 0); assert.equal(f.runtime.store.logSummary().count, 3);
   f.ingest(f.identity, f.batch(f.identity, [f.event(f.identity), f.event(f.identity)])); assert.equal(f.findings().length, 1);
+});
+
+test("shadow rollout and source canaries keep real findings restricted while retaining decisions", t => {
+ const f=fixture(t),other=f.source(f.appId);
+ f.enable([policy(f.appId,[{id:CLEARED,stage:"shadow",sourceIds:[f.identity.sourceId]}])]);
+ f.ingest(other,f.batch(other,[cleared(f,other)]));assert.equal(f.count("detection_matches"),0);
+ f.ingest(f.identity,f.batch(f.identity,[cleared(f)]));assert.equal(f.findings().length,0);
+ assert.equal(f.runtime.store.db.prepare("SELECT disposition FROM detection_decisions").get().disposition,"shadow");
+ f.enable([policy(f.appId,[{id:CLEARED,stage:"active",sourceIds:[f.identity.sourceId]}])]);
+ f.ingest(f.identity,f.batch(f.identity,[cleared(f)]));assert.equal(f.findings().length,1);
+ assert.throws(()=>f.enable([policy(f.appId,[{id:CLEARED,sourceIds:["unregistered-source"]}])]),/belong/);
+});
+test("scoped suppression expires and transactional rollback leaves no phantom decisions", t=>{
+ const f=fixture(t),choice={id:CLEARED,suppressions:[{sourceId:f.identity.sourceId,fields:{eventId:1102},expiresAt:new Date(START+60000).toISOString(),reason:"Synthetic maintenance"}]};
+ f.enable([policy(f.appId,[choice])]);f.ingest(f.identity,f.batch(f.identity,[cleared(f)]));assert.equal(f.findings().length,0);
+ assert.equal(f.runtime.store.db.prepare("SELECT disposition FROM detection_decisions").get().disposition,"suppressed");
+ f.advance(60001);const batch=f.batch(f.identity,[cleared(f)]);
+ f.runtime.store.db.exec("CREATE TEMP TRIGGER fail_rollout BEFORE INSERT ON telemetry_audit BEGIN SELECT RAISE(ABORT, 'synthetic rollback'); END");
+ assert.throws(()=>f.ingest(f.identity,batch),/synthetic rollback/);assert.equal(f.count("detection_decisions"),1);
+ f.runtime.store.db.exec("DROP TRIGGER fail_rollout");f.ingest(f.identity,batch);
+ assert.equal(f.findings().length,1);assert.equal(f.count("detection_decisions"),2);
+ assert.throws(()=>f.enable([policy(f.appId,[{id:CLEARED,suppressions:[{reason:"No scope",expiresAt:new Date(START+120000).toISOString()}]}])]),/scope/);
+});
+test("reviewed pack produces attributed findings and pack changes partition rule identity",t=>{
+ const f=fixture(t),example=cleared(f);
+ const pack={schemaVersion:1,id:"example-pack",version:1,author:"Synthetic author",license:"DRL-1.1",notice:"Synthetic reviewed license notice",source:"https://example.invalid/rules",licenseReviewed:true,
+ rules:[{id:"example-pack.clear",version:1,title:"Synthetic pack match",severity:"high",kind:"log.event",prerequisite:"Windows event channel",
+ conditions:[{field:"fields.eventId",operator:"equals",value:1102}],fixtures:{positive:[example],negative:[f.event(f.identity)]}}]};
+ const config={schemaVersion:1,applications:[policy(f.appId,["example-pack.clear"])]};
+ f.runtime.detectionEngine=createDetectionEngine({store:f.runtime.store,stateDir:f.directory,config,packs:{schemaVersion:1,packs:[pack]},now:()=>START});
+ f.ingest(f.identity,f.batch(f.identity,[example]));const finding=f.findings()[0];
+ assert.equal(finding.payload.fields.ruleAuthor,"Synthetic author");assert.equal(finding.payload.fields.ruleLicense,"DRL-1.1");
+ assert.match(finding.payload.summary,/Synthetic author/);assert.equal(finding.payload.fields.rulePack,"example-pack");
 });

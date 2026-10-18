@@ -74,6 +74,14 @@ function matches(rule, record) {
     if (key === "versions") { if (!value.includes(fields.eventVersion)) return false; }
     else if (fields[key] !== value) return false;
   }
+  if (rule.conditions) for (const condition of rule.conditions) {
+    const actual = condition.field.startsWith("fields.") ? fields[condition.field.slice(7)] : record.payload[condition.field];
+    const expected = condition.value;
+    if (condition.operator === "equals" && actual !== expected) return false;
+    if (condition.operator === "in" && !expected.includes(actual)) return false;
+    if (["contains", "startsWith", "endsWith"].includes(condition.operator)
+        && (typeof actual !== "string" || !(condition.operator === "contains" ? actual.includes(expected) : actual[condition.operator](expected)))) return false;
+  }
   return !rule.messageContains || (record.payload.message || "").includes(rule.messageContains);
 }
 module.exports = { RULES, BY_ID, matches };

@@ -22,7 +22,7 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
 MAX_BATCH = 1024 * 1024
 MAX_STATE = 2 * MAX_BATCH
-CHANNELS = {"Security", "System", "Application", "ForwardedEvents", "Microsoft-Windows-Sysmon/Operational", "Microsoft-Windows-PowerShell/Operational"}
+CHANNELS = {"Security", "System", "Application", "ForwardedEvents", "Microsoft-Windows-Sysmon/Operational", "Microsoft-Windows-PowerShell/Operational", "Microsoft-Windows-Windows Defender/Operational"}
 NS = "{http://schemas.microsoft.com/win/2004/08/events/event}"
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 # This fixed script uses EventLogReader, not command output or event message parsing.

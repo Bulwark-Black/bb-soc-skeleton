@@ -26,7 +26,11 @@
     "validate:ingest": "node tools/validate-ingest.js",
     "validate:provider": "node tools/validate-provider.js",
     "check": "npm run check:docs && npm test && npm run audit:public",
-    "verify": "npm run check"
+    "verify": "npm run check",
+    "receive:platform": "node tools/receive-platform.js",
+    "collect:platform": "node tools/platform-collectors/cli.js",
+    "deploy:generate": "node tools/generate-deployment.js",
+    "detection:pack": "node tools/detection-pack.js"
   },
   "engines": {
     "node": ">=22.13"
@@ -34,7 +38,12 @@
   "license": "MIT",
   "private": true,
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1152.0",
     "better-auth": "1.7.6",
-    "better-sqlite3": "13.0.3"
+    "better-sqlite3": "13.0.3",
+    "nodemailer": "10.1.7"
+  },
+  "devDependencies": {
+    "yaml": "2.9.1"
   }
 }

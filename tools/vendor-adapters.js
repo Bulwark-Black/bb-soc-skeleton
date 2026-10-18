@@ -11,7 +11,7 @@ const MAX_VENDOR_RECORDS = 1000;
 const VERSION = "1";
 const hash = value => crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
 function adapters() {
-  return [...require("./vendors/cloud").adapters, ...require("./vendors/identity").adapters, ...require("./vendors/devops").adapters, ...require("./vendors/windows").adapters, ...require("./vendors/platforms").adapters];
+  return [...require("./vendors/cloud").adapters, ...require("./vendors/identity").adapters, ...require("./vendors/devops").adapters, ...require("./vendors/windows").adapters, ...require("./vendors/platforms").adapters, ...require("./vendors/bridges").adapters];
 }
 function adapter(id) {
   const value = adapters().find(item => item.id === id);

@@ -1066,6 +1066,7 @@ class ReferenceControlPlane {
       detail: "durably accepted bounded normalized record batch"
     }, (next) => {
       const derivedRecords = this.detectionEngine ? this.detectionEngine.derive(newRecords) : [];
+      if (this.findingNotifications) this.findingNotifications.admit(derivedRecords);
       this.store.derivedRecordIds = new Set(derivedRecords.map(record => record.recordId));
       [...newRecords, ...derivedRecords].forEach((record) => next.records.push({
         ...clone(record), connectorInstanceId: source.connectorInstanceId,

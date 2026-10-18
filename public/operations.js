@@ -143,7 +143,7 @@
       if (disposed) throw new Error("View closed."); const controller = new AbortController(); controllers.add(controller); const timer = root.setTimeout(() => controller.abort(), 30000);
       const search = new URLSearchParams({ ...Object.fromEntries(Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== "").map(([key, value]) => [key, String(value)])), appId: q.appId });
       try {
-        const response = await root.fetch(endpoint === "__applications" ? "/api/v1/control/snapshot?reason=refresh" : API + "/" + endpoint + "?" + search, { method: body === undefined ? "GET" : "POST", credentials: "same-origin", cache: "no-store", redirect: "error", signal: controller.signal,
+        const response = await root.fetch(endpoint === "__applications" ? "/api/v1/control/snapshot?reason=refresh" : (endpoint === "finding-notifications" || endpoint.startsWith("finding-notifications/") ? "/api/v1/" : API + "/") + endpoint + "?" + search, { method: body === undefined ? "GET" : "POST", credentials: "same-origin", cache: "no-store", redirect: "error", signal: controller.signal,
           headers: { Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
         if (!response.ok) { try { await response.body?.cancel(); } catch {} const error = new Error(({ 401: "Sign in again to view Operations.", 403: "This operation is not permitted for the current session and application.", 404: "This operations evidence or capability is not available.", 409: "The record or history position changed. Refresh the current view before making a new decision.", 422: "Review the supplied fields and configured monitoring policy.", 429: "Operations is temporarily rate limited. Retry later.", 503: "Operations is unavailable. Inspect the private monitoring configuration." })[response.status] || "Operations request failed. Existing evidence has not been treated as empty."); error.status = response.status; throw error; }
         if (!/^application\/json\b/i.test(response.headers.get("content-type") || "")) throw new Error("Operations returned an unsupported response.");
@@ -156,7 +156,7 @@
     }
     const read = async (endpoint, params) => {
       try {
-        const data = await request(endpoint, params), properties = { resources: ["resources"], checks: ["checks"], series: ["series"], query: ["series"], websites: ["websites"], "website-history": ["coverage", "series"], employees: ["employees", "work"], events: ["events"], notifications: ["deliveries"], dependencies: ["dependencies"] };
+        const data = await request(endpoint, params), properties = { resources: ["resources"], checks: ["checks"], series: ["series"], query: ["series"], websites: ["websites"], "website-history": ["coverage", "series"], employees: ["employees", "work"], events: ["events"], notifications: ["deliveries"], "finding-notifications": ["attempts"], dependencies: ["dependencies"] };
         if (properties[endpoint]?.some(key => !Array.isArray(data[key])) || endpoint === "incidents" && (params?.incidentId ? !data.incident || typeof data.incident !== "object" : !Array.isArray(data.incidents) || params?.view === "history" && !data.page) || endpoint === "jobs" && (params?.history ? !Array.isArray(data.runs) || !data.page || data.jobId !== params.history : !Array.isArray(data.jobs)) || endpoint === "employee-inbox" && (typeof data.available !== "boolean" || data.available && (!Array.isArray(data.items) || !Array.isArray(data.recipients)))) throw new Error("Operations returned incomplete evidence. No empty state has been assumed.");
         return data;
       } catch (error) { return { unavailable: true, status: error.status, message: error.message }; }
@@ -327,7 +327,8 @@
       if (!data.transport) return notice("Notification delivery status is unavailable; inspect the retained delivery evidence.");
       const transport = data.transport, node = panel("Notification transport",
         facts([["Provider", transport.provider], ["Sending", transport.enabled ? "Enabled" : transport.paused ? "Paused" : "Disabled in external configuration"],
-          ["Request limit", text(transport.hourlySendCap) + " per hour"], ["Exact retry window", text(transport.automaticRetryWindowHours) + " hours"]]),
+          ["Request limit", text(transport.hourlySendCap) + " per hour"], ["Automatic retry limit", text(transport.automaticRetryWindowHours) + " hours"]]),
+        p(transport.provider === "smtp" ? "SMTP relay acceptance does not prove inbox delivery. SMTP has no idempotency guarantee; uncertain DATA acceptance requires reconciliation." : "Resend retries preserve the original provider idempotency key."),
         p("Provider acceptance does not prove inbox delivery. A pause stops future requests, including retries; an already submitted request can still complete."),
         transport.error ? notice(transport.error, true) : null);
       if (transport.configured && Number.isSafeInteger(transport.revision) && !selectedIncident) node.append(mutation(
@@ -344,26 +345,68 @@
       if (selectedIncident) for (const item of attempts.filter(item => item.active && item.state === "needs-reconciliation").slice(0, 20)) {
         const fixed = { attemptId: item.id, expectedRevision: item.revision };
         node.append(panel("Reconcile " + item.destination, p("Attempt " + item.id + ". Inspect the provider record before making a decision. Stored messages and destinations cannot be edited here."),
-          mutation("Retry the exact request", "notifications/reconcile", { ...fixed, action: "retry-exact" },
+          item.exactRetryAllowed === false ? notice("Exact SMTP retry is blocked because DATA acceptance is uncertain. Verify the relay record or explicitly accept duplicate risk for a fresh request.", true) : mutation("Retry the exact request", "notifications/reconcile", { ...fixed, action: "retry-exact" },
             [["reason", "Evidence and retry reason", "textarea", "", [], 1000]], "Retry exact request",
-            "Uses the same message and provider key. The server rejects replay after the retry deadline or credential change."),
+            "Uses the same frozen message. SMTP retry requires proof of nonacceptance; Resend retains its provider key. The server rejects changed credentials or an expired retry limit."),
           mutation("Record verified provider acceptance", "notifications/reconcile", { ...fixed, action: "confirm-accepted" },
             [["providerId", "Verified provider email ID", "text", "", [], 200], ["acceptedAt", "Provider acceptance timestamp (RFC 3339)", "text", "", [], 50],
               ["reason", "Where acceptance was verified", "textarea", "", [], 1000]], "Record provider acceptance",
             "Use a provider acceptance record, not a guess or evidence that an API request started."),
           mutation("Create a fresh request", "notifications/reconcile", { ...fixed, action: "requeue-fresh", duplicateRiskAccepted: true },
             [["reason", "Evidence and reason accepting possible duplicate mail", "textarea", "", [], 1000]], "Requeue and accept duplicate-mail risk",
-            "A fresh provider key may send duplicate mail if an earlier request was accepted. The exact message and all earlier attempts remain retained.")));
+            "A fresh request may send duplicate mail if an earlier request was accepted. SMTP Message-ID is retained for evidence and does not guarantee deduplication. The message and earlier attempts remain retained.")));
       }
       if (list(data.decisions).length) node.append(details(data.decisions, "Recent operator decisions"));
       return node;
     }
+    function findingNotificationControls(data) {
+      if (data.unavailable) return unavailable(data, "Finding notification transport");
+      const node = panel("Finding email",
+        facts([["Provider", data.provider || "Not configured"], ["Sending", data.enabled ? "Enabled" : data.paused ? "Paused" : "Disabled in external configuration"]]),
+        p("These notices reference canonical findings and their source. They use a separate queue and pause control from native incident mail. Relay acceptance does not prove inbox delivery."),
+        data.error ? notice(data.error, true) : null, details(data.filters || {}, "Reviewed severity, rule and source filters"));
+      if (data.configured && Number.isSafeInteger(data.revision)) node.append(mutation(
+        data.paused ? "Resume finding email" : "Pause finding email", "finding-notifications/pause",
+        { paused: !data.paused, expectedRevision: data.revision },
+        [["reason", "Decision reason", "textarea", "", [], 1000]], data.paused ? "Resume finding email" : "Pause finding email",
+        "Pausing stops new delivery requests. An in-flight request can still complete; all pending messages remain retained."));
+      if (data.verificationAvailable) node.append(mutation("Verify SMTP connection", "finding-notifications/verify", {},
+        [["reason", "Commissioning reason", "textarea", "", [], 1000]], "Verify connection without sending mail",
+        "Checks connection, verified TLS and authentication only. It sends no DATA and does not prove sender authorization or inbox delivery."));
+      if (data.verification) node.append(panel("Latest SMTP connection check", data.verification.pending ? notice("Connection check outcome is pending; retry the same decision to inspect an interrupted check.") :
+        notice(data.verification.verified ? "Connection, TLS and authentication verified. No mail was sent." : "SMTP connection verification failed. Inspect the configured server and credential file.", !data.verification.verified),
+        when(data.verification.at || data.verification.startedAt), details(data.verification)));
+      if (data.testSendAvailable) node.append(mutation("Send a requested test email", "finding-notifications/test-send", {},
+        [["recipient", "Explicit reviewed recipient", "email", "", [], 320], ["reason", "Why this real email is requested", "textarea", "", [], 1000]], "Queue real test email",
+        "This sends real mail to the exact recipient you enter. The server requires membership in the reviewed destination list. A paused queue retains it until resumed."));
+      node.append(table(["Destination", "Kind", "Finding", "State", "Requests", "Updated", "Evidence"], list(data.attempts).map(item => [
+        item.destination, item.kind, item.recordId || "Commissioning check", badge(item.state), item.requestCount, when(item.updatedAt), details(item)
+      ]), "No finding email attempts are retained for this application."));
+      if (data.truncated) node.append(notice("Showing the latest 100 retained attempts. Earlier attempts remain in private storage."));
+      for (const item of list(data.attempts).filter(item => item.active && item.state === "needs-reconciliation").slice(0, 20)) {
+        const fixed = { attemptId: item.id, expectedRevision: item.revision };
+        node.append(panel("Reconcile finding email to " + item.destination, p("Attempt " + item.id + ". Inspect the relay or provider record before deciding."),
+          item.exactRetryAllowed === false ? notice("SMTP DATA acceptance is uncertain. Automatic and exact retries are blocked; verify acceptance or explicitly accept duplicate-mail risk.", true) :
+            mutation("Retry exact finding email", "finding-notifications/reconcile", { ...fixed, action: "retry-exact" },
+              [["reason", "Evidence that permits this retry", "textarea", "", [], 1000]], "Retry exact finding email",
+              "Retains the frozen message and server identity. The server rejects unsafe SMTP replay, changed credentials and expired retry windows."),
+          mutation("Record verified finding email acceptance", "finding-notifications/reconcile", { ...fixed, action: "confirm-accepted" },
+            [["providerId", "Verified relay or provider acceptance ID", "text", "", [], 200], ["acceptedAt", "Acceptance timestamp (RFC 3339)", "text", "", [], 50],
+              ["reason", "Where acceptance was verified", "textarea", "", [], 1000]], "Record verified acceptance",
+            "Use an acceptance record. Connection success and a submitted DATA command alone do not prove acceptance."),
+          mutation("Requeue finding email with duplicate risk", "finding-notifications/reconcile", { ...fixed, action: "requeue-fresh", duplicateRiskAccepted: true },
+            [["reason", "Evidence and reason accepting duplicate mail", "textarea", "", [], 1000]], "Requeue and accept duplicate-mail risk",
+            "This can send a duplicate if the earlier request was accepted. SMTP Message-ID is retained as evidence and cannot guarantee deduplication. Earlier attempts remain retained.")));
+      }
+      if (list(data.decisions).length) node.append(details(data.decisions, "Finding email operator decisions"));
+      return node;
+    }
     async function incidents() {
-      const [historyData, resources, checks, notificationStatus] = await Promise.all([read("incidents", { view: "history", state: ["all", "open", "resolved"].includes(q.state) ? q.state : "open", host: q.host, checkId: q.check, limit: 50, cursor: q.incidentCursor }), read("resources"), read("checks"), read("notifications")]);
+      const [historyData, resources, checks, notificationStatus, findingStatus] = await Promise.all([read("incidents", { view: "history", state: ["all", "open", "resolved"].includes(q.state) ? q.state : "open", host: q.host, checkId: q.check, limit: 50, cursor: q.incidentCursor }), read("resources"), read("checks"), read("notifications"), read("finding-notifications")]);
       if (cursor(historyData.page?.currentCursor)) q.incidentCursor = historyData.page.currentCursor;
       board.append(filterForm([["Host", "host", hostChoices(list(resources.resources))], ["Check", "check", [["", "All checks"], ...list(checks.checks).filter(item => !q.host || item.host === q.host).map(item => [item.id, item.label || item.id])]], ["State", "state", [["open", "Open"], ["resolved", "Resolved"], ["all", "All retained"]]]], { ...q, state: q.state || "open" }));
       board.append(panel("Retained incidents", historyData.unavailable ? unavailable(historyData, "Incident history") : incidentTable(historyData.incidents), history(historyData, "incidentCursor", "Incident history", { incident: undefined, episodeCursor: undefined })));
-      board.append(notificationControls(notificationStatus));
+      board.append(notificationControls(notificationStatus), findingNotificationControls(findingStatus));
       if (!q.incident) return;
       const exact = await read("incidents", { incidentId: q.incident, host: q.host }); if (exact.unavailable || !exact.incident) { board.append(unavailable(exact, "Selected incident")); return; }
       if (q.host && exact.incident.host !== q.host || q.check && exact.incident.checkId !== q.check) { board.append(notice("That incident does not match the selected host and check filters. Its detail and actions have not been displayed.", true)); return; }

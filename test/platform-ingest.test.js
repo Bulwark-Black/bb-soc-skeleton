@@ -7,8 +7,11 @@ const { validateDocument } = require("../tools/validate-provider");
 
 test("platform HTTP gateway binds credentials, atomically derives findings, indexes evidence and replays after restart", async t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "bb-platform-http-"));
-  let app = await startPrivateApplication({ stateDirectory: directory, port: 0 }), serial = 0, cookie = "";
-  t.after(async () => { if (app) await app.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const credentialFile=directory+"-mail-token", calls=[];
+  fs.writeFileSync(credentialFile,crypto.randomBytes(24).toString("base64url"),{mode:0o600});
+  const launch=()=>startPrivateApplication({stateDirectory:directory,port:0,findingNotifications:{transports:{resend:async request=>{calls.push(request);return {status:200,id:"synthetic-mail-accepted"};}}}});
+  let app = await launch(), serial = 0, cookie = "";
+  t.after(async () => { if (app) await app.close(); fs.rmSync(directory, { recursive: true, force: true }); fs.rmSync(credentialFile,{force:true}); });
   const password = crypto.randomBytes(30).toString("base64url"), email = "platform-owner@example.invalid";
   await app.authentication.createOperator({ email, password, name: "Synthetic platform owner" });
   const request = (route, body, headers = {}, machine = false) => fetch(app.url + route, {
@@ -51,11 +54,26 @@ test("platform HTTP gateway binds credentials, atomically derives findings, inde
   await app.close(); app = null;
   fs.writeFileSync(path.join(directory, "detection-config.json"), JSON.stringify({ schemaVersion: 1,
     applications: [{ appId: registered.appId, rules: [{ id: "windows.audit-log-cleared" }] }] }), { mode: 0o600 });
-  app = await startPrivateApplication({ stateDirectory: directory, port: 0 });
+  fs.writeFileSync(path.join(directory,"finding-notifications.json"),JSON.stringify({schemaVersion:1,applications:[{appId:registered.appId,
+    notifications:{provider:"resend",enabled:true,reviewed:true,from:"monitor@example.invalid",destinations:["operator@example.invalid"],credentialFile},severities:["high","critical"]}]}),{mode:0o600});
+  app = await launch();
   const received = await expect(machine());
   assert.equal(received.receipt.accepted, 1, "sender receipt counts only original inputs");
   assert.equal(app.runtime.store.stats().records, 2, "one log and one finding commit together");
   const replay = await expect(machine()); assert.equal(replay.receipt.replay, true);
+  const notificationUrl="/api/v1/finding-notifications?appId="+registered.appId;
+  await expect(request(notificationUrl,undefined,{},true),401);
+  await expect(request(notificationUrl,undefined,{Authorization:"Bearer "+token}),401);
+  const mailStatus=await expect(request(notificationUrl));assert.equal(mailStatus.attempts.length,1);
+  const pauseBody={paused:true,expectedRevision:mailStatus.revision,reason:"Synthetic hold",idempotencyKey:"hold"};
+  await expect(request("/api/v1/finding-notifications/pause?appId="+registered.appId,{...pauseBody,actor:"forged"}),400);
+  await expect(request("/api/v1/finding-notifications/pause?appId="+registered.appId,pauseBody));
+  await app.findingNotifications.tick();assert.equal(calls.length,0);
+  await expect(request("/api/v1/finding-notifications/pause?appId="+registered.appId,{...pauseBody,paused:false,expectedRevision:mailStatus.revision+1,idempotencyKey:"resume"}));
+  await app.findingNotifications.tick();assert.equal(calls.length,1);
+  assert.equal((await expect(request(notificationUrl))).attempts[0].state,"accepted");
+  await expect(request("/api/v1/finding-notifications/test-send?appId="+registered.appId,{recipient:"unconfigured@example.invalid",reason:"Synthetic check",idempotencyKey:"test"}),400);
+
   const observations = await expect(request("/api/v1/integrations/observations?sourceId=" + source.sourceId));
   assert.equal(observations.records.length, 2);
   const finding = observations.records.find(r => r.kind === "finding");
@@ -79,9 +97,10 @@ test("platform HTTP gateway binds credentials, atomically derives findings, inde
   const failed = await machine(next); assert.ok(failed.status >= 400); await failed.arrayBuffer();
   assert.equal(app.runtime.store.stats().records, 2);
   assert.equal(db.prepare("SELECT count(*) n FROM detection_matches").get().n, 1, "failed admission rolls back detection ledger");
+  assert.equal(db.prepare("SELECT count(*) n FROM finding_mail_notices").get().n,1,"failed admission rolls back notification queue");
   db.exec("DROP TRIGGER synthetic_reject_finding");
   await expect(machine(next)); assert.equal(app.runtime.store.stats().records, 4);
-  await app.close(); app = null; app = await startPrivateApplication({ stateDirectory: directory, port: 0 });
+  await app.close(); app = null; app = await launch();
   assert.equal((await expect(machine())).receipt.replay, true);
   assert.equal(app.runtime.store.stats().records, 4);
   await command("source.pause", revision(source.sourceId));

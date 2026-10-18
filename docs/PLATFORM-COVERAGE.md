@@ -22,8 +22,8 @@ batch identities, preview, import, and durable outbox delivery.
 | --- | --- | --- |
 | `syslog-rfc5424` | A JSON string containing one RFC 5424 version-1 message; `{ "message": "..." }`; array or NDJSON of message wrappers | Explicit known-offset timestamp, PRI facility/severity, available header fields, nonempty MSG and structured data. NILVALUE hostname/app/process/message IDs remain absent. No RFC 3164, inferred year, missing timestamp, unknown `-00:00` offset, byte-level non-UTF-8 payload, network framing or listener. |
 | `cef` | A JSON string containing CEF 0/1; `{ "message": "...", "timestamp": "..." }`; arrays/NDJSON; optional RFC 5424 envelope | Escaped header, extension key/value fields, vendor/product/class, original severity, action/outcome when supplied. Time must be explicit in `end`, `start`, `rt`, wrapper timestamp, or RFC 5424 header. No legacy syslog time inference or vendor-specific semantic guarantees. |
-| `otlp-logs` | JSON `ExportLogsServiceRequest` with `resourceLogs`, `scopeLogs`, `logRecords`; arrays/NDJSON of complete requests | Resource/scope/log attributes, scope/schema metadata, body, event name, severity, trace/span IDs, dropped-attribute counts, original nanoseconds. This is a bounded **JSON export importer**, not a conforming `/v1/logs` HTTP or gRPC receiver. Binary protobuf, metrics, traces, legacy `instrumentationLibraryLogs`, missing/empty bodies, and unsupported fields reject. |
-| `microsoft365-audit` | Management Activity **content records** as JSON array, single object, or NDJSON | Selected common fields: ID, tenant reference, creation time, workload, record type, operation, result, user type, client address, logon error and hashed actor reference when present. Content-listing blobs/URLs and CSV `AuditData` wrappers are not audit records. Unselected workload-specific payloads are not retained. No subscriptions or background API polling. |
+| `otlp-logs` | JSON `ExportLogsServiceRequest` with `resourceLogs`, `scopeLogs`, `logRecords`; arrays/NDJSON of complete requests | Resource/scope/log attributes, scope/schema metadata, body, event name, severity, trace/span IDs, dropped-attribute counts, original nanoseconds. The mapper is shared by the bounded HTTP JSON receiver; gRPC is unsupported. Binary protobuf, metrics, traces, legacy `instrumentationLibraryLogs`, missing/empty bodies, and unsupported fields reject. |
+| `microsoft365-audit` | Management Activity **content records** as JSON array, single object, or NDJSON | Selected common fields: ID, tenant reference, creation time, workload, record type, operation, result, user type, client address, logon error and hashed actor reference when present. Content-listing blobs/URLs and CSV `AuditData` wrappers are not audit records. Unselected workload-specific payloads are not retained. The separate worker polls existing subscriptions. |
 
 The vendor CLI accepts JSON, not unquoted raw syslog/CEF text. Wrap each raw
 message in a JSON object before using NDJSON. Preview a reviewed export with:
@@ -42,7 +42,7 @@ binds the credential to the selected installed adapter and application. It
 bounds input at 8 MiB, canonical output at 1 MiB and 1,000 events, and admits the
 batch atomically. This is the **BB gateway protocol**: existing OTLP exporters
 and syslog senders cannot point at it without a bridge that constructs this
-envelope. No native OTLP or syslog protocol receiver is installed by the mapper.
+envelope. The separate protocol gateway supplies native HTTP JSON and syslog TLS listeners; see [receivers](PROTOCOL-GATEWAYS.md).
 
 Use the matching vendor source manifest for admission. Follow the source test,
 activation, token-file, enqueue and drain workflow in the vendor guide. A
@@ -135,118 +135,79 @@ Grammar references: [RFC 5424](https://www.rfc-editor.org/rfc/rfc5424.html),
 [CEF extension dictionary](https://www.microfocus.com/documentation/arcsight/arcsight-smartconnectors-8.3/cef-implementation-standard/Content/CEF/Chapter%202%20ArcSight%20Extension.htm),
 [OTLP JSON](https://opentelemetry.io/docs/specs/otlp/).
 
-## Collection coverage beyond an import mapper
+## Executable collection and deployment coverage
 
-The following are integration designs and commissioning requirements, not
-installed collectors or guaranteed vendor coverage.
+The repository now includes the following collection paths. Configuration,
+source activation, credentials, audit policies and live commissioning still
+belong to each adopter.
 
-| Platform | Recommended collection path | What still needs implementation or adopter configuration |
+| Platform | Shipped path | Boundaries |
 | --- | --- | --- |
-| Windows and Active Directory | Fluent Bit WinEvtLog or an existing Windows Event Forwarding/Collector deployment; normalize exported events through an explicit mapping or the OTLP profile | Channel/bookmark persistence, audit policy, Sysmon/PowerShell/Defender selections, domain-controller profile, permissions, installer and recovery tests. WEF does not enable missing audit policy or disabled channels. [WEF](https://learn.microsoft.com/en-us/windows/security/operating-system-security/device-management/use-windows-event-forwarding-to-assist-in-intrusion-detection), [WinEvtLog](https://docs.fluentbit.io/manual/data-pipeline/inputs/windows-event-log-winevtlog) |
-| Linux and application servers | Existing bounded file collector for reviewed plain, Docker JSON or journald-export files; mature continuous collector for native journals/files | Per-service parser packs, multiline/rotation/backfill tests and least-privilege file access. Generic text availability is not proof that audit/security fields exist. [OTel file receiver](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/receiver/filelogreceiver/README.md) |
-| Microsoft 365 and Entra | Management Activity content worker plus independent Graph sign-in/audit workers | Subscriptions, pagination, permissions, tenant prerequisites, throttling, overlap windows, content-ID deduplication and durable cursors. M365 blobs can arrive out of order. [Activity API](https://learn.microsoft.com/en-us/office/office-365-management-api/office-365-management-activity-api-reference), [Graph sign-ins](https://learn.microsoft.com/en-us/graph/api/signin-list?view=graph-rest-1.0) |
-| AWS | Existing CloudTrail export mapper; future S3/SQS worker and independent CloudWatch/Flow Log adapters | IAM role/workload identity, object/event deduplication, queue acknowledgment after durable admission and pagination/backfill. CloudTrail can duplicate records. GuardDuty findings require a separate upstream-detection mapping. [CloudTrail](https://docs.aws.amazon.com/awscloudtrail/latest/userguide/get-and-view-cloudtrail-log-files.html), [GuardDuty](https://docs.aws.amazon.com/guardduty/latest/ug/guardduty_findings_eventbridge.html) |
-| Firewalls and network | Private syslog/CEF gateway feeding these message profiles; versioned vendor body parsers | Actual listener/framing/TLS service, sender binding, device templates, timezone/firmware tests. Generic CEF parsing is not a FortiGate/PAN-OS/Cisco rules pack. SNMP polling metrics remain separate; UDP silence cannot prove health. [Syslog/CEF forwarding](https://learn.microsoft.com/en-us/azure/sentinel/connect-cef-ama) |
-| Containers and Kubernetes | Node log agent as DaemonSet; separate gateway and singleton cluster collectors | Persistent queue volumes, CRI metadata, rotation, host logs, control-plane/audit sources, RBAC and duplicate avoidance. Container stdout is not Kubernetes audit telemetry. [Kubernetes logging](https://kubernetes.io/docs/concepts/cluster-administration/logging/), [OTel Helm](https://opentelemetry.io/docs/platforms/kubernetes/helm/collector/) |
-| Databases | Version-specific PostgreSQL JSON/CSV/error log mapping; separate read-only metrics collector | Explicit audit/query logging choices, sensitive-value handling, MySQL/MSSQL parser fixtures and credentials. Error logs are not automatically audit logs. [PostgreSQL logging](https://www.postgresql.org/docs/current/runtime-config-logging.html) |
-| Existing Wazuh or Elastic | Future adapter importing upstream alerts with rule ID/version, severity, evidence, and source link | Exact versioned alert export/API schema, cursor/retention semantics and provenance. Raw event archives require a separate path. Importing their alerts does not run their rule engines locally. [Wazuh collection](https://documentation.wazuh.com/current/user-manual/capabilities/log-data-collection/index.html), [Elastic rule repository](https://github.com/elastic/detection-rules) |
+| Windows Server and Active Directory | Native EventLogReader worker, durable bookmarks and spool, WEF ForwardedEvents, generated restricted Task Scheduler bundle | Commission Windows channel permissions and auditing; selected Security/System/Application/Sysmon/PowerShell/Defender channels. Linux tests cannot establish a live domain-controller acceptance result. |
+| Linux and application servers | Bounded file worker for plain, Docker JSON and journald-export files; systemd/Ansible/container bundles | Explicit file selection; rotation and replay safeguards. Native journal streaming, arbitrary multiline parsing and every service-specific audit schema are not implied. |
+| Microsoft 365 | Management Activity content polling and durable content-ID ledger | Existing subscriptions and bearer credential lifecycle must be configured; polling does not silently create tenant subscriptions. |
+| Entra | Graph sign-in and directory-audit workers | Permissions, tenant licensing/retention and token renewal are external. |
+| Okta | System Log ascending poll cursor and next-link handling | Reviewed organization endpoint and credential; quiet pages preserve the polling cursor. |
+| AWS | CloudTrail S3 object polling, bounded gzip, key/ETag ledger and repeated listing cycles | IAM/default credential chain, approved regional bucket/prefix. No SQS acknowledgment worker, CloudWatch metrics, Flow Log or GuardDuty inference. |
+| Checkmk | REST host/service status worker | Keeps upstream status/time provenance; does not claim raw logs, Livestatus metrics or Event Console stream coverage. |
+| Wazuh | Bounded alerts JSONL file bridge | Keeps upstream detection identity and severity; does not copy/run the Wazuh engine or raw archives. |
+| Network devices | Authenticated syslog TLS RFC5424/CEF receiver with durable outbox | Explicit timestamp, UTF-8 and framing profile; firmware-specific body semantics still require reviewed mappings/rules. |
+| OpenTelemetry | Authenticated /v1/logs HTTP(S) JSON receiver with gzip | Bounded JSON profile only, no protobuf/gRPC/metrics/traces; upstream transformation may be required. |
+| Containers/Kubernetes | Digest-pinned Compose and Helm generation, source-bound collector DaemonSet and separate gateway Deployment | Explicit named node/storage/private Secret; no cluster API token or automatic control-plane audit collection. |
+| Other supported exports | Existing GCP, Cloudflare, Auth0, GitHub/GitLab, Sentry, Datadog and other catalog mappings | Export/import support does not imply a scheduled provider worker. Database-specific audit parsers and Elastic alert import remain separate work. |
 
+Read [cloud workers and bridges](PLATFORM-COLLECTORS.md),
+[protocol receivers](PROTOCOL-GATEWAYS.md),
+[deployment automation](DEPLOYMENT-AUTOMATION.md),
+[Windows collection](WINDOWS-EVENTS.md) and
+[reviewed rule packs](REVIEWED-RULE-PACKS.md).
+
+The vendor catalog has 18 supplied-input adapters. Collection workers call those
+same reviewed normalization contracts rather than bypassing canonical validation.
 A transport receipt, collection completion, metric coverage and detection
-eligibility are four separate facts. A functioning queue does not prove all
-channels were read. A healthy CPU metric does not prove security audit coverage.
-A parser accepting JSON does not prove a rule's required fields were collected.
+eligibility remain separate facts. A queue does not prove every channel was
+read; CPU metrics do not prove security audit coverage.
 
-## Checkmk bridge contract
+## Checkmk integration
 
-If "Checkmark" refers to another product, do not apply this design to it.
-For Checkmk, a future adapter should select an installed-version interface and
-report exactly which datasets it reads. REST covers the supported site
-operations; Livestatus retrieves host/service status; Event Console has its own
-status interface using a Unix socket and a Livestatus subset. A local read-only
-bridge can transform those into explicitly classified observations. Inventory,
-service checks, numerical metrics and EC events should retain separate identity,
-time, state and provenance. Do not infer that every dataset is exported by one
-REST route or invoke an upstream acknowledgment/mutation merely by importing.
-[Checkmk interface overview](https://docs.checkmk.com/latest/en/apis_intro.html)
-
-Event Console filters/correlates relevant messages and is not a full raw log
-archive. Forward full logs through a separate approved collection path when
-that is the goal. There is no built-in Checkmk executable bridge in this pack.
+“Checkmark” has been interpreted as Checkmk. The executable bridge reads the
+documented REST host/service status datasets. It does not acknowledge events or
+mutate monitoring state. It preserves upstream state as evidence; it does not
+turn a status export into raw log completeness. Checkmk Event Console remains a
+separate filtering/correlation system with its own interface.
+[Checkmk interfaces](https://docs.checkmk.com/latest/en/apis_intro.html),
 [Event Console](https://docs.checkmk.com/latest/en/ec.html)
 
-## Rule portability and distribution
+## Rule distribution and licensing
 
-A rule pack needs a versioned manifest: upstream rule/version/author/license,
-required logsource/fields and audit settings, normalization version, target
-execution backend, supported operators/correlations, fixtures, performance
-bounds, and rollback instructions. Publish per-source eligibility such as
-"tested", "missing telemetry", "requires external backend" and "unsupported".
-Do not equate YAML import or query conversion with running a detection engine.
-Sigma pipelines map fields/logsources, and backends have different capabilities.
-[Sigma pipelines](https://sigmahq.io/docs/digging-deeper/pipelines.html),
-[Sigma backends](https://sigmahq.io/docs/digging-deeper/backends)
+The engine ships 25 original MIT rules plus an explicit reviewed JSON-pack
+installer. Packs require namespace/version, author, license, notices,
+prerequisites, supported operators and positive/negative fixtures. Shadow mode,
+source-scoped active rollout, expiring suppressions, compare-and-swap policy
+updates and one-version rollback are implemented. There is no automatic download
+or generic Sigma/Elastic execution.
 
-This mapper pack copies no third-party detection rules or vendor code. Keep
-license/provenance review at the exact upstream release and component boundary:
+Upstream rules retain their own licenses. SigmaHQ rules use DRL-1.1; preserve
+attribution and notices in rule and alert views. Elastic detection rules use
+ELv2 and are not accepted by this bounded pack installer. Wazuh remains an
+external alert producer, and Checkmk remains an interface integration.
+No third-party rules or commercial extensions are copied into this repository.
+[Sigma license](https://github.com/SigmaHQ/Detection-Rule-License/blob/main/LICENSE.Detection.Rules.md),
+[Elastic rules](https://github.com/elastic/detection-rules),
+[Wazuh components](https://documentation.wazuh.com/current/installation-guide/index.html),
+[Checkmk contribution policy](https://github.com/Checkmk/checkmk/blob/master/CONTRIBUTING.md)
 
-- SigmaHQ rules use DRL-1.1, including author attribution in displayed matches.
-  Preserve notices, authors and source links in rule and alert views.
-  [DRL-1.1](https://github.com/SigmaHQ/Detection-Rule-License/blob/main/LICENSE.Detection.Rules.md)
-- Elastic's detection-rules repository uses ELv2. Its rules are not an MIT or
-  Apache rule library; runtime/source licensing is a separate question.
-  [Elastic rules](https://github.com/elastic/detection-rules),
-  [ELv2 terms](https://www.elastic.co/licensing/elastic-license/)
-- Current Wazuh installation guidance identifies GPLv2 and Apache-2.0
-  components. Its manager license also covers rules/decoders unless stated
-  otherwise. Keep initial integration external; do not relabel copied rules.
-  [Wazuh licensing](https://documentation.wazuh.com/current/installation-guide/index.html)
-- Checkmk open-source portions and commercial components have different
-  licensing boundaries. Use documented interfaces rather than copying
-  commercial extensions. [Checkmk policy](https://github.com/Checkmk/checkmk/blob/master/CONTRIBUTING.md)
-- OpenTelemetry Collector and Fluent Bit use Apache-2.0; preserve applicable
-  notices when redistributing their components.
-  [OTel license](https://github.com/open-telemetry/opentelemetry-collector/blob/main/LICENSE),
-  [Fluent Bit license](https://github.com/fluent/fluent-bit/blob/master/LICENSE)
+## Commissioning and acceptance
 
-## Deployment automation phases
+Generated bundles are reviewable artifacts; generation never applies them.
+Pin the reviewed image, install the exact collector dependencies, prepare private
+persistent storage, activate the correct source, then prove collection, durable
+delivery, parsing and rule eligibility separately. SMTP uses the mail service
+behind Roundcube and requires its own TLS/authentication check and explicit
+recipient test. Relay acceptance does not prove inbox delivery.
 
-These are concrete next implementation stages, not shipped installers.
-
-1. **Integration-pack and commissioning contract.** Publish selected platform,
-   collector version, explicit inputs/channels, parser version, rule prerequisites,
-   private destination, persistent-state location, capacity limits and recovery
-   behavior. Preview representative reviewed input, then verify real collection,
-   delivery, parse success and rule eligibility separately. Pin checksums/images;
-   credentials remain external, never embedded in generated repository files.
-2. **Windows and Linux bundles.** Windows continuous collection uses a service
-   with recovery policy and restricted ProgramData state; Fluent Bit has native
-   Windows service support and OTel offers MSI service installation. Use Task
-   Scheduler only for bounded workers with overlap protection. Linux uses a
-   dedicated service account and systemd service/timer with persistent state and
-   reviewed log access. Produce uninstall/rollback and token-revocation steps.
-   [Fluent Bit Windows](https://docs.fluentbit.io/manual/installation/windows),
-   [OTel Windows](https://opentelemetry.io/docs/collector/install/binary/windows/)
-3. **Containers, Helm and fleet management.** Pin container image digests; mount
-   logs read-only; persist only queue/cursor state; use a DaemonSet per node and
-   separate gateway/cluster collectors. Supply explicit Helm values and Ansible
-   roles for adopter-provided SSH/WinRM inventory. Avoid overlapping subscriptions
-   and repeated singleton collection. [Ansible Windows service](https://docs.ansible.com/projects/ansible/latest/collections/ansible/windows/win_service_module.html),
-   [Scheduled task](https://docs.ansible.com/projects/ansible/latest/collections/community/windows/win_scheduled_task_module.html)
-4. **Cloud workers and existing-tool bridges.** Implement provider-specific
-   pagination, durable object/content ledgers, overlap/backfill, rate limits,
-   clock/lag reporting and permission probes. Never advance a checkpoint before
-   durable admission or treat a partial/error page as complete collection.
-5. **Tested detection rollout.** Start with explicit portable original rules or
-   a curated, licensed subset in a supported backend. Require positive/negative
-   replay tests, source prerequisites, bounded correlation state, suppression
-   expiry, attribution, canary rollout and rollback. Unsupported operators fail
-   visibly; importing a pack does not automatically activate it everywhere.
-
-Collector maturity and buffering behavior need their own acceptance tests.
-OpenTelemetry currently labels its file receiver beta and Windows Event Log
-receiver alpha. Fluent Bit filesystem output capacity can discard oldest chunks
-when full; enabling disk buffering alone is not a losslessness guarantee. Test
-restart, rotation, duplicate replay, full disk, unavailable destination,
-backpressure, oversized records, clock skew, malformed input and quiet reads.
-[Windows receiver maturity](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/receiver/windowseventlogreceiver/README.md),
-[Fluent Bit buffering](https://docs.fluentbit.io/manual/data-pipeline/buffering.md)
+Tests cover simulated provider pages, real loopback HTTP/TLS, crash/restart,
+rotation, duplicate replay, backpressure, malformed input, quiet reads, time
+bounds and transactional rollback. Credentials and real tenant/device access
+are not present in the repository. Perform live Windows, provider, container,
+Helm and Ansible acceptance in the adopter's environment before broad rollout.

@@ -7,7 +7,7 @@ const { createNotifications, notificationConfiguration, credential, RETRY_WINDOW
 function fixture(t, options = {}) {
   const directory = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "native-notification-test-"));
   const tokenFile = path.join(directory, "provider-token");
-  fs.writeFileSync(tokenFile, crypto.randomBytes(24).toString("base64url"), { mode: 0o600 });
+  fs.writeFileSync(tokenFile, options.config?.provider === "smtp" ? JSON.stringify({ user: "synthetic@example.invalid", password: crypto.randomBytes(24).toString("base64url") }) : crypto.randomBytes(24).toString("base64url"), { mode: 0o600 });
   const config = { enabled: true, reviewed: true, from: "monitor@example.invalid", destinations: ["one@example.invalid", "two@example.invalid"], credentialFile: tokenFile, ...options.config };
   const registry = createHostRegistry({ hosts: [{ id: "host-a", appId: "app-example", sourceId: "source-a", label: "Synthetic host" },
     { id: "host-b", appId: "app-example", sourceId: "source-b", label: "Other host" }] });
@@ -17,7 +17,7 @@ function fixture(t, options = {}) {
   const open = () => {
     worker = null;
     store = new MonitorStore({ data: path.join(directory, "state"), registry, now: () => at, minFreeBytes: 0, notificationsEnabled: () => worker?.enabled() === true });
-    worker = createNotifications(store, { appId: "app-example", configuration: config, consoleOrigin: "https://console.example.invalid", send: async request => { calls.push(request); return provider(request); } });
+    worker = createNotifications(store, { appId: "app-example", configuration: config, consoleOrigin: "https://console.example.invalid", send: async request => { calls.push(request); return provider(request); }, smtpSend: async request => { calls.push(request); return options.smtpSend(request); } });
   };
   open();
   const f = { config, directory, tokenFile, calls, get store() { return store; }, get worker() { return worker; }, get now() { return at; },
@@ -218,4 +218,54 @@ test("a removed unattempted recipient cannot hold other recipients' recovery ind
   assert.equal(deliveries.filter(d => d.role === "opening" && d.state === "cancelled").length, 1);
   assert.equal(deliveries.filter(d => d.role === "recovery").length, 1);
   assert.equal(deliveries.find(d => d.role === "recovery").destination, acceptedDestination);
+});
+
+const SMTP_CONFIG = { provider: "smtp", smtp: { host: "mail.example.invalid", port: 587, security: "starttls" }, destinations: ["one@example.invalid"] };
+test("SMTP known pre-DATA failure retries frozen MIME; relay acceptance and credentials remain separate", async t => {
+  let sequence = 0;
+  const f = fixture(t, { config: SMTP_CONFIG, smtpSend: async request => {
+    if (++sequence === 1) return { accepted: false, retryable: true, safeToRetry: true, ambiguous: false, errorCode: "smtp-before-data-failed" };
+    request.beforeData();
+    assert.equal(f.store.db.prepare("SELECT smtp_data_at FROM notification_provider_attempts").get().smtp_data_at, f.now);
+    return { accepted: true, smtpStatus: 250, receiptId: "smtp-receipt-" + "a".repeat(64), responseDigest: "b".repeat(64) };
+  } });
+  f.observe("critical"); await f.worker.tick();
+  assert.equal(f.worker.status().attempts[0].state, "retryable");
+  assert.equal(f.worker.status().deliveries[0].attemptedAt, null);
+  f.advance(); await f.restart(); await f.worker.tick();
+  assert.equal(f.calls.length, 2); assert.equal(f.calls[0].raw, f.calls[1].raw); assert.equal(f.calls[0].messageId, f.calls[1].messageId);
+  const result = f.worker.status(); assert.equal(result.attempts[0].state, "accepted"); assert.equal(result.attempts[0].smtpStatus, 250);
+  assert.equal(result.transport.idempotencyGuaranteed, false);
+  assert.equal(JSON.stringify(result).includes(f.calls[1].credentials.pass), false);
+});
+test("SMTP uncertain DATA is never automatically replayed and fresh requeue retains prior evidence", async t => {
+  const f = fixture(t, { config: SMTP_CONFIG, smtpSend: async request => {
+    request.beforeData();
+    return { accepted: false, retryable: false, safeToRetry: false, ambiguous: true, errorCode: "smtp-data-outcome-unknown" };
+  } });
+  f.observe("critical"); await f.worker.tick();
+  let attempt = f.worker.status().attempts[0]; assert.equal(attempt.state, "needs-reconciliation");
+  assert.equal(attempt.exactRetryAllowed, false);
+  await f.restart(); f.advance(); await f.worker.tick(); assert.equal(f.calls.length, 1);
+  assert.throws(() => f.worker.reconcile(f.decision(attempt, "retry-exact")), e => e.status === 409);
+  f.worker.reconcile(f.decision(attempt, "requeue-fresh", { duplicateRiskAccepted: true }));
+  await f.worker.tick(); assert.equal(f.calls.length, 2);
+  assert.equal(f.calls[0].raw, f.calls[1].raw); assert.equal(f.calls[0].messageId, f.calls[1].messageId);
+  assert.equal(f.worker.status().attempts.length, 2);
+});
+test("SMTP expired lease after DATA parks across workers instead of replaying", async t => {
+  let enter, release;
+  const entered = new Promise(resolve => { enter = resolve; });
+  const f = fixture(t, { config: SMTP_CONFIG, smtpSend: async request => {
+    request.beforeData(); enter(); return new Promise(resolve => { release = () => resolve({ accepted: false, ambiguous: true }); });
+  } });
+  f.observe("critical"); const running = f.worker.tick(); await entered; f.advance(61000);
+  let otherWorker;
+  const other = new MonitorStore({ data: path.join(f.directory, "state"), registry: f.store.registry, now: () => f.now, minFreeBytes: 0, notificationsEnabled: () => otherWorker?.enabled() === true });
+  otherWorker = createNotifications(other, { appId: "app-example", configuration: f.config, consoleOrigin: "https://console.example.invalid",
+    smtpSend: async () => assert.fail("uncertain SMTP replayed") });
+  await otherWorker.tick(); release(); await running;
+  assert.equal(f.worker.status().attempts[0].state, "needs-reconciliation");
+  assert.equal(f.calls.length, 1);
+  await otherWorker.close(); other.close();
 });

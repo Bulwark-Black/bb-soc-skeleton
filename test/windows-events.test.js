@@ -37,6 +37,29 @@ test("Windows classification requires supported provider/channel/version and nev
   assert.equal(cleared.payload.state, "unknown");
 });
 
+test("Defender Operational logs preserve provider evidence and reversibly encode spaced field names", () => {
+  const channel = "Microsoft-Windows-Windows Defender/Operational";
+  const original = fixture({ channel, collectionChannel: channel, providerName: "Microsoft-Windows-Windows Defender", eventId: 1116,
+    eventData: { "Product Name": "Microsoft Defender Antivirus", "Threat Name": "Synthetic.Sample", "Detection ID": "synthetic-detection", Path: "file:_synthetic" } });
+  for (const collectionChannel of [channel, "ForwardedEvents"]) {
+    const mapped = map({ ...original, collectionChannel });
+    assert.equal(mapped.kind, "log.event"); assert.equal(mapped.payload.state, "unknown");
+    assert.equal(mapped.payload.fields.providerName, original.providerName);
+    assert.equal(mapped.payload.fields.channel, channel); assert.equal(mapped.payload.fields.collectionChannel, collectionChannel);
+    assert.equal(mapped.payload.fields.eventId, 1116); assert.equal(mapped.payload.fields.eventVersion, 0);
+    assert.equal(mapped.payload.fields.decodeStatus, "unclassified");
+    assert.equal(mapped.payload.fields["win.Threat_x20_Name"], "Synthetic.Sample");
+    assert.equal(mapped.payload.fields["win.Product_x20_Name"], "Microsoft Defender Antivirus");
+    assert.equal(mapped.payload.fields["win.Detection_x20_ID"], "synthetic-detection");
+    assert.equal(mapped.payload.fields["win.Path"], "file:_synthetic");
+  }
+  for (const eventData of [{ "Private Key": "synthetic" }, { "API Key": "synthetic" }, { "Session ID": "synthetic" },
+    { Threat_x20_Name: "ambiguous" }, { ["Name" + " ".repeat(20)]: "excessive escape length" }]) {
+    assert.throws(() => map({ ...original, eventData }));
+  }
+  assert.equal(map({ ...original, eventId: 4625 }).payload.state, "unknown");
+});
+
 test("Windows fields are bounded, reject ambiguity and secret names, and unsupported input is never guessed", () => {
   for (const patch of [{ eventRecordId: 123 }, { eventRecordId: "18446744073709551616" }, { eventRecordId: "0001" },
     { eventId: -1 }, { eventVersion: 256 }, { timeCreated: "2026-02-30T00:00:00Z" }, { timeCreated: "2026-10-18T00:00:00" },

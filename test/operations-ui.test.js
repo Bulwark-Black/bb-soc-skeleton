@@ -118,7 +118,7 @@ test("DOM boards and human mutations integrate with the actual application-scope
   const appQuery = new URLSearchParams({ appId: "app-one" });
   await service.operator("POST", "jobs", appQuery, { idempotencyKey: "register-job", id: "job-one", host: "host-one", label: "Synthetic expected job", nextDueAt: new Date(AT).toISOString(), intervalSeconds: 60, graceSeconds: 5, maxRuntimeSeconds: 120, progressTimeoutSeconds: 30, observationTimeoutSeconds: 60 }, "operator:synthetic");
   const incident = entry.store.incidents(null, { openOnly: true }).incidents.find(item => item.checkId === "check-one"); assert.ok(incident);
-  const fetch = async (url, init) => { try { const u = new URL(url, "http://localhost"), suffix = u.pathname.slice("/api/v1/operations/".length); return response(await service.operator(init.method, suffix, u.searchParams, init.body ? JSON.parse(init.body) : null, "operator:synthetic")); } catch (error) { return response({ error: error.message }, error.status || 500); } };
+  const fetch = async (url, init) => { try { const u = new URL(url, "http://localhost"); if (u.pathname === "/api/v1/finding-notifications") return response({ ok: true, appId: "app-one", configured: false, enabled: false, attempts: [], decisions: [] }); const suffix = u.pathname.slice("/api/v1/operations/".length); return response(await service.operator(init.method, suffix, u.searchParams, init.body ? JSON.parse(init.body) : null, "operator:synthetic")); } catch (error) { return response({ error: error.message }, error.status || 500); } };
   for (const route of ["/infrastructure", "/services", "/websites", "/metrics", "/incidents", "/jobs", "/employees", "/analyst-reports"]) {
     const h = harness(t, { route, fetch, query: { host: "host-one", check: "check-one", job: "job-one", incident: incident.id, employee: "employee-one", endpoint: "endpoint-one" } }); await h.cleanup.ready;
     assert.deepEqual(h.errors, [], route); assert.doesNotMatch(h.container.textContent, /response could not|request failed|position cannot be used|could not be completed/, route);
@@ -187,4 +187,37 @@ test("notification controls show uncertainty and retain exact decision identity 
   assert.equal(requests.length, 2); assert.deepEqual(requests[0].body, requests[1].body);
   assert.equal(requests[0].body.attemptId, attemptId); assert.equal(requests[0].body.expectedRevision, 4);
   assert.equal(requests[0].body.action, "retry-exact"); assert.equal(requests[0].body.actor, undefined);
+});
+
+test("finding mail controls scope commissioning, persist verification, and block ambiguous SMTP exact retry", async t => {
+  const attemptId = "finding-mail-" + "c".repeat(32);
+  let posted = 0;
+  const status = { ok: true, appId: "app-one", configured: true, enabled: true, provider: "smtp", revision: 2,
+    verificationAvailable: true, testSendAvailable: true, verification: { pending: false, verified: true, at: AT },
+    attempts: [{ id: attemptId, destination: "team@example.invalid", kind: "finding", recordId: "finding-one", state: "needs-reconciliation",
+      active: true, exactRetryAllowed: false, requestCount: 1, revision: 4, updatedAt: AT }], decisions: [] };
+  const h = harness(t, { route: "/incidents", fetch: (url, init, fallback) => {
+    if (new URL(url, "http://localhost").pathname === "/api/v1/finding-notifications") return response(status);
+    if (url.includes("/api/v1/finding-notifications/") && init.method === "POST") {
+      posted++; if (posted === 1) throw new TypeError("Synthetic lost reply"); return response({ ok: true });
+    }
+    return fallback(url, init);
+  } });
+  await h.cleanup.ready;
+  assert.match(h.container.textContent, /Connection, TLS and authentication verified. No mail was sent/);
+  assert.match(h.container.textContent, /SMTP DATA acceptance is uncertain/);
+  assert.equal(h.form("Retry exact finding email"), undefined);
+  assert.ok(h.form("Requeue finding email with duplicate risk"));
+  const verify = h.form("Verify SMTP connection"); input(verify, "reason", "Review connection without a message");
+  submit(verify); await settle(); submit(verify); await settle();
+  let sent = h.requests.filter(row => row.init.method === "POST");
+  assert.equal(sent.length, 2); assert.deepEqual(sent[0].body, sent[1].body);
+  assert.match(sent[0].url, /^\/api\/v1\/finding-notifications\/verify\?appId=app-one$/);
+  assert.equal(sent[0].body.recipient, undefined); assert.equal(sent[0].body.actor, undefined);
+  const mail = h.form("Send a requested test email"); input(mail, "reason", "Explicitly requested synthetic commissioning");
+  submit(mail); await settle(); assert.equal(h.requests.filter(row => row.init.method === "POST").length, 2);
+  input(mail, "recipient", "team@example.invalid"); submit(mail); await settle();
+  sent = h.requests.filter(row => row.init.method === "POST");
+  assert.equal(sent.length, 3); assert.equal(sent[2].body.recipient, "team@example.invalid");
+  assert.match(sent[2].url, /^\/api\/v1\/finding-notifications\/test-send\?appId=app-one$/);
 });

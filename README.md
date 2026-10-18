@@ -57,7 +57,8 @@ incident/job history, gap-aware charts, service health, employee instructions
 and separate execution/output evidence. Configure your own inventory and source
 bindings using the [native Operations guide](docs/NATIVE-OPERATIONS.md).
 No private hosts, credentials, employee prompts or operational records are seeded.
-Native incident email delivery is available through Resend with durable retries,
+Native incident and finding email delivery supports Resend or authenticated TLS SMTP
+through the mail service behind Roundcube, with durable retries,
 per-application pause and explicit reconciliation; see [notifications](docs/NATIVE-NOTIFICATIONS.md).
 
 Windows Server/AD collection, RFC5424 syslog, CEF, OpenTelemetry JSON and
@@ -66,7 +67,11 @@ Microsoft 365 mappings extend the platform catalog. Read the
 [Windows collector guide](docs/WINDOWS-EVENTS.md),
 [authenticated gateway](docs/PLATFORM-INGEST.md), and
 [25 opt-in detection rules](docs/DETECTION-RULES.md).
-These are explicit supported formats and bounded rules, not universal coverage.
+Executable cloud workers, Checkmk/Wazuh bridges, protocol receivers and deployment
+bundles are included. See [collectors](docs/PLATFORM-COLLECTORS.md),
+[deployment generation](docs/DEPLOYMENT-AUTOMATION.md) and
+[reviewed rule rollout](docs/REVIEWED-RULE-PACKS.md). Each integration has an explicit
+supported profile and requires commissioning in the adopter environment.
 
 ## What is included
 

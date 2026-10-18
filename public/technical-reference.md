@@ -7,7 +7,7 @@ what the adopting stack must provide, how applications, hosts, connector
 instances, and sources are registered, how telemetry becomes canonical records,
 and how those records populate every screen. Section 55 describes the current
 universal/custom canonical integration path, sender, received-observation views
-and exact boundaries. Section 56 covers fifteen vendor import mappings and the
+and exact boundaries. Section 56 covers eighteen vendor import mappings and the
 durable sender queue; section 57 covers the built-in Sentry collector, encrypted
 credential onboarding, collection health and optional Slack delivery.
 Sections 58 through 63 explain the guided setup center, custom sample mapping,
@@ -133,7 +133,7 @@ boundaries. It includes:
 - a loopback-only reference control plane;
 - hashed one-time host and source credentials in reference mode;
 - bounded canonical log, universal canonical-event and Trivy report admission,
-  with human-installed immutable custom definitions and fifteen vendor mappings;
+  with human-installed immutable custom definitions and eighteen vendor mappings;
 - one supervised Sentry Cloud collector with guided secret onboarding,
   durable checkpoints, verified quiet-poll health, local alerts and optional Slack;
 - resumable application/source setup and read-only local evidence checks,
@@ -5242,7 +5242,7 @@ work. Assignments retain leases and intent/start/finish/verification evidence;
 uncertain actions must be reconciled before reassignment. The console does not
 execute commands, install schedules or grant an employee authority.
 
-Native notifications support opt-in durable Resend delivery, as described in
+Native notifications support opt-in durable Resend or authenticated TLS SMTP delivery, as described in
 section 67. Production recipients, private routines, custom detection policy
 and deployment watchdogs are not copied. Older
 adapter-owned workflow controls retain their existing documented boundary.
@@ -5250,24 +5250,24 @@ adapter-owned workflow controls retain their existing documented boundary.
 ## 67. Notifications and expanded platform ingestion
 
 Native incident email can be enabled per application through reviewed private
-configuration and an external Resend credential. The worker persists recipient,
+configuration and an external Resend or SMTP credential. The worker persists recipient,
 payload, provider key and request evidence before sending. Pausing stops sends;
-ambiguous responses keep their exact retry identity within the provider window.
+ambiguous Resend responses keep their exact retry identity within the provider window. SMTP attempts that may have reached DATA require reconciliation before resending.
 Operations exposes pause and audited reconciliation controls. Read
 **docs/NATIVE-NOTIFICATIONS.md** before enabling a recipient. Canonical security
 findings and native incidents have separate lifecycles.
 
-The vendor catalog now includes 15 mappings. **docs/WINDOWS-EVENTS.md** describes
+The vendor catalog now includes 18 mappings. **docs/WINDOWS-EVENTS.md** describes
 the Windows EventLogReader/WEF collector, origin identity, durable bookmarks,
 pending delivery and channel-gap recovery. **docs/PLATFORM-COVERAGE.md** gives
 the supported RFC5424, CEF, OTLP JSON and Microsoft 365 content-record formats,
-plus a deployment plan informed by Checkmk, Wazuh, Fluent Bit and OpenTelemetry.
+plus executable collectors, bridges and deployment bundles informed by Checkmk, Wazuh, Fluent Bit and OpenTelemetry.
 Those external products are not installed or directly connected by this update.
 
 **docs/PLATFORM-INGEST.md** documents the source-authenticated
 POST /api/v1/ingest/platform gateway. It accepts the BB envelope, validates the
 bound adapter, normalizes supplied records and commits a canonical receipt.
-It is not a syslog socket, native OTLP receiver or background cloud poller.
+Separate collector processes provide private syslog TLS, OTLP HTTP JSON and selected cloud polling; see section 68.
 
 The private Rules page includes 25 original MIT review rules. Enable a reviewed
 application policy through owner-only detection-config.json and restart.
@@ -5277,5 +5277,25 @@ Imported rules are not automatically executed. A configured source or rule
 is not proof of complete collection. Windows live-host commissioning and
 deployment-specific scheduler, audit policy, secrets and network setup remain
 the adopter's responsibility.
+
+## 68. Extended collection, rule rollout and SMTP delivery
+
+The private application includes source-authenticated platform delivery, a
+Windows/WEF collector, 18 supplied-log adapters, executable cloud/Checkmk/Wazuh
+workers, private OTLP JSON/syslog TLS receivers and 25 opt-in original rules.
+Reviewed JSON packs add tested predicates, shadow/source rollout, expiring
+suppressions and version rollback. Native incidents and derived findings can
+send through Resend or authenticated TLS SMTP using the mail service behind
+Roundcube. Durable delivery includes pause, bounded retries and reconciliation.
+Deployment generation produces Windows Task Scheduler, systemd, Compose, Helm
+and Ansible bundles without applying them.
+
+Read [platform ingestion](../docs/PLATFORM-INGEST.md), [coverage](../docs/PLATFORM-COVERAGE.md),
+[collectors](../docs/PLATFORM-COLLECTORS.md), [protocol receivers](../docs/PROTOCOL-GATEWAYS.md),
+[deployment automation](../docs/DEPLOYMENT-AUTOMATION.md),
+[reviewed rule packs](../docs/REVIEWED-RULE-PACKS.md) and
+[notifications](../docs/NATIVE-NOTIFICATIONS.md). Configure and commission each
+integration in its actual environment; supplied adapters are not universal
+provider coverage.
 
 End of version-1 technical implementation manual.

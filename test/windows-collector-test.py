@@ -12,6 +12,9 @@ SPEC = importlib.util.spec_from_file_location("windows_collector", Path(__file__
 c = importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(c)
 XML = '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event"><System><Provider Name="Microsoft-Windows-Security-Auditing"/><EventID>4625</EventID><Version>0</Version><TimeCreated SystemTime="2026-10-18T12:00:00.1234567Z"/><EventRecordID>18446744073709551615</EventRecordID><Channel>Security</Channel><Computer>server.example.invalid</Computer></System><EventData><Data Name="TargetUserName">synthetic-user</Data><Data Name="Status">0xc000006a</Data></EventData></Event>'
 
+DEFENDER_CHANNEL = "Microsoft-Windows-Windows Defender/Operational"
+DEFENDER_XML = '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event"><System><Provider Name="Microsoft-Windows-Windows Defender"/><EventID>1116</EventID><Version>0</Version><TimeCreated SystemTime="2026-10-18T12:00:00.1234567Z"/><EventRecordID>18446744073709551615</EventRecordID><Channel>Microsoft-Windows-Windows Defender/Operational</Channel><Computer>server.example.invalid</Computer></System><EventData><Data Name="Product Name">Microsoft Defender Antivirus</Data><Data Name="Threat Name">Synthetic.Sample</Data><Data Name="Detection ID">synthetic-detection</Data><Data Name="Path">file:_synthetic</Data></EventData></Event>'
+
 class CollectorTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="windows-collector-test-")
@@ -38,6 +41,37 @@ class CollectorTests(unittest.TestCase):
         for xml in ['<!DOCTYPE Event [<!ENTITY x "bad">]>' + XML, XML.replace('Name="Status"', 'Name="TargetUserName"'), XML.replace('server.example.invalid', 'foreign.example.invalid')]:
             with self.assertRaises(ValueError): c.xml_event(xml, "Security", "epoch", self.cfg["computers"])
         with self.assertRaises(ValueError): c.xml_event(XML, "Application", "epoch", self.cfg["computers"])
+    def test_defender_channel_native_wrapper_preserves_provider_and_confirms_cursor_only_after_receipt(self):
+        cfg = dict(self.cfg, channels=[DEFENDER_CHANNEL])
+        cfgfile = self.directory / "config.json"; c.atomic_json(cfgfile, cfg)
+        cfg = c.config_file(cfgfile)
+        native = dict(self.result, events=[DEFENDER_XML], bookmark="synthetic-defender-bookmark")
+        def reader(request):
+            self.assertEqual(request["mode"], "read")
+            self.assertEqual(request["channel"], DEFENDER_CHANNEL)
+            self.assertEqual(request["limit"], cfg["maxEvents"])
+            return native
+        result = c.collect(self.directory, cfg, reader=reader)
+        self.assertEqual(result["channel"], DEFENDER_CHANNEL)
+        self.assertFalse((self.directory / "state.json").exists())
+        pending = json.loads((self.directory / "pending.json").read_bytes())
+        record = pending["batch"]["records"][0]
+        self.assertEqual(record["kind"], "log.event")
+        self.assertEqual(record["payload"]["state"], "unknown")
+        fields = record["payload"]["fields"]
+        self.assertEqual(fields["providerName"], "Microsoft-Windows-Windows Defender")
+        self.assertEqual(fields["channel"], DEFENDER_CHANNEL)
+        self.assertEqual(fields["collectionChannel"], DEFENDER_CHANNEL)
+        self.assertEqual(fields["eventId"], 1116)
+        self.assertEqual(fields["eventRecordId"], "18446744073709551615")
+        self.assertEqual(fields["win.Threat_x20_Name"], "Synthetic.Sample")
+        self.assertEqual(fields["win.Product_x20_Name"], "Microsoft Defender Antivirus")
+        self.assertEqual(fields["decodeStatus"], "unclassified")
+        c.send(self.directory, cfg, transport=self.receipt)
+        state = c.load_state(self.directory, cfg)
+        self.assertEqual(state["channels"][DEFENDER_CHANNEL]["bookmark"], native["bookmark"])
+        self.assertEqual(state["channels"][DEFENDER_CHANNEL]["anchorHash"], hashlib.sha256(DEFENDER_XML.encode()).hexdigest())
+
     def test_spool_precedes_cursor_and_delivery_failure_retains_identical_batch(self):
         self.collect(); pending = (self.directory / "pending.json").read_bytes()
         self.assertFalse((self.directory / "state.json").exists())

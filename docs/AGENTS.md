@@ -11,7 +11,7 @@ application with SQLite sessions and versioned documents, strict browser
 contracts, a separate disposable loopback workbench, and bounded reference
 modules for connectors and administration. Private telemetry uses indexed SQLite
 admission. The integration core exposes universal/custom canonical sources,
-fifteen vendor export/API-page mappings with a private import UI and external
+eighteen vendor export/API-page mappings with a private import UI and external
 durable outbox, a private Trivy importer, and eleven data-only scan templates; those templates are schemas,
 not scanner drivers. `npm start` runs the private application;
 `npm run start:static` installs no provider and performs no operational writes.
@@ -300,7 +300,7 @@ Resources are read-only checked-in public files. Documentation URIs are
 `soc://documentation/technical-manual`, `soc://documentation/agent-guide`,
 `soc://documentation/connectors`, `soc://documentation/architecture`,
 `soc://documentation/configuration`, `soc://documentation/features`, and
-`soc://documentation/integration-review`. Read the fifteen vendor contracts,
+`soc://documentation/integration-review`. Read the eighteen vendor contracts,
 acquisition prerequisites, private import workflow and durable-delivery recovery
 guide at `soc://documentation/vendor-integrations` before configuring a vendor
 source. These resources do not grant vendor credentials, polling or ingestion
@@ -505,11 +505,19 @@ result and the corresponding authorized read projection.
 ## Platform monitoring expansion
 
 The private application includes source-authenticated platform delivery, a
-Windows Event Log/WEF collector, four additional log import profiles and
-25 opt-in original detection rules. Native incident email uses an external
-Resend credential with durable delivery state and operator reconciliation.
-Read [platform ingestion](PLATFORM-INGEST.md), [platform coverage](PLATFORM-COVERAGE.md),
-[Windows events](WINDOWS-EVENTS.md), [detection rules](DETECTION-RULES.md) and
-[native notifications](NATIVE-NOTIFICATIONS.md) for the exact supported contracts,
-private configuration, tests and deployment-specific prerequisites.
-No checked-in credentials, inventory, enabled rules or recipients are supplied.
+Windows/WEF collector, 18 supplied-log adapters, executable cloud/Checkmk/Wazuh
+workers, private OTLP JSON/syslog TLS receivers and 25 opt-in original rules.
+Reviewed JSON packs add tested predicates, shadow/source rollout, expiring
+suppressions and version rollback. Native incidents and derived findings can
+send through Resend or authenticated TLS SMTP using the mail service behind
+Roundcube. Durable delivery includes pause, bounded retries and reconciliation.
+Deployment generation produces Windows Task Scheduler, systemd, Compose, Helm
+and Ansible bundles without applying them.
+
+Read [platform ingestion](PLATFORM-INGEST.md), [coverage](PLATFORM-COVERAGE.md),
+[collectors](PLATFORM-COLLECTORS.md), [protocol receivers](PROTOCOL-GATEWAYS.md),
+[deployment automation](DEPLOYMENT-AUTOMATION.md),
+[reviewed rule packs](REVIEWED-RULE-PACKS.md) and
+[notifications](NATIVE-NOTIFICATIONS.md). Configure and commission each
+integration in its actual environment; supplied adapters are not universal
+provider coverage.

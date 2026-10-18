@@ -67,7 +67,7 @@ function validateRegistry(input = { VERSION: 1, HOSTS: [], SERIES: [], CHECKS: [
     if (checks.has(check.id) || !hosts.has(check.host)) fail("Unknown check host or duplicate identity.");
     text(check.label, 200, "check label");
     if (!["metric", "service", "database", "uptime", "collection"].includes(check.type) || check.intervalSeconds !== 60) fail("Invalid check type or interval.");
-    if (check.notificationEnabled !== undefined && check.notificationEnabled !== false) fail("Native notifications are shadow-only.");
+    if (check.notificationEnabled !== undefined && check.notificationEnabled !== false) fail("Enable notifications through reviewed application transport configuration, not per-check flags.");
     const metric = series.get(check.id);
     if (check.type === "metric" && (!metric || !metric.policy || metric.host !== check.host)) fail("Metric check must match a registered metric policy.");
     if (check.type !== "metric" && metric) fail("A series identity can only be shared with its metric check.");

@@ -80,3 +80,11 @@ their required fields and data sources would misrepresent coverage.
 Read [Windows events](WINDOWS-EVENTS.md) and [platform coverage](PLATFORM-COVERAGE.md)
 for source prerequisites and deployment phases. Enable a small reviewed set,
 verify expected matches and authorized-change false positives, then expand.
+
+## Reviewed packs and staged rollout
+
+See [reviewed rule packs](REVIEWED-RULE-PACKS.md) for the executable pack installer,
+license and fixture checks, shadow/active source scope, expiring suppressions,
+version rollback and catalog attribution. Active derived findings may enter the
+separate durable email queue when [notifications](NATIVE-NOTIFICATIONS.md) are
+configured; shadow and suppressed decisions do not produce notices.

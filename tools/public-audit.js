@@ -11,6 +11,37 @@ const root = path.resolve(__dirname, "..");
 // happens to live in the repository. New publication surfaces must be reviewed
 // and added here deliberately.
 const requiredTextFiles = new Set([
+  "deploy/Dockerfile",
+  "deploy/integration-pack.schema.json",
+  "docs/DEPLOYMENT-AUTOMATION.md",
+  "docs/PROTOCOL-GATEWAYS.md",
+  "docs/REVIEWED-RULE-PACKS.md",
+  "docs/PLATFORM-COLLECTORS.md",
+  "server/detection-packs.js",
+  "server/finding-notifications.js",
+  "server/native-monitor/smtp-transport.js",
+  "test/deployment-generation.test.js",
+  "test/detection-packs.test.js",
+  "test/finding-notifications.test.js",
+  "test/native-smtp.test.js",
+  "test/platform-collectors.test.js",
+  "test/platform-gateway.test.js",
+  "tools/deployment/manifest.js",
+  "tools/deployment/render.js",
+  "tools/deployment/stage-private.js",
+  "tools/deployment/worker.js",
+  "tools/detection-pack.js",
+  "tools/generate-deployment.js",
+  "tools/platform-collectors/aws.js",
+  "tools/platform-collectors/cli.js",
+  "tools/platform-collectors/common.js",
+  "tools/platform-collectors/engine.js",
+  "tools/platform-collectors/http.js",
+  "tools/platform-collectors/providers.js",
+  "tools/platform-gateway.js",
+  "tools/receive-platform.js",
+  "tools/vendors/bridges.js",
+
   "docs/DETECTION-RULES.md",
   "docs/NATIVE-NOTIFICATIONS.md",
   "docs/PLATFORM-COVERAGE.md",
@@ -311,6 +342,43 @@ const privateApplicationClients = new Set(["public/private-sign-in.js", "public/
 
 // Exact public reference pages, not general vendor hosts or deployment URLs.
 const publicReferenceUrls = new Set([
+  "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+  "https://learn.microsoft.com/en-us/windows/win32/taskschd/security-contexts-for-running-tasks",
+  "https://learn.microsoft.com/en-us/windows/win32/api/taskschd/ne-taskschd-task_logon_type",
+
+  "https://checkmk.com/werk/17512",
+  "https://github.com/Checkmk/checkmk/blob/master/cmk/gui/openapi/api_endpoints/host/list_hosts.py",
+  "https://github.com/Checkmk/checkmk/blob/master/cmk/gui/openapi/endpoints/service/__init__.py",
+  "https://YOUR_TENANT.okta.com",
+  "https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/setting-credentials-node.html",
+  "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html",
+  "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html",
+  "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-log-file-examples.html",
+
+  "https://learn.microsoft.com/en-us/windows/win32/taskschd/task-scheduler-schema",
+  "https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html",
+  "https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/",
+  "https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
+  "https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_checkmode.html",
+  "https://github.com/roundcube/roundcubemail/wiki/Configuration",
+  "https://nodemailer.com/extras/smtp-connection",
+  "https://www.rfc-editor.org/rfc/rfc5425",
+  "http://schemas.microsoft.com/windows/2004/02/mit/task",
+  "https://docs.checkmk.com/latest/en/rest_api.html",
+  "https://documentation.wazuh.com/current/user-manual/manager/alert-management.html",
+  "https://learn.microsoft.com/en-us/graph/api/directoryaudit-list?view=graph-rest-1.0",
+  "https://s3.${options.region}.amazonaws.com",
+  "https://graph.microsoft.com/.default",
+  "https://login.microsoftonline.com/${config.options.tenantId}/oauth2/v2.0/token",
+  "https://manage.office.com/.default",
+  "https://graph.microsoft.com",
+  "https://manage.office.com",
+  "https://fixture.okta.com",
+  "https://fixture.okta.com/api/v1/logs?sortOrder=ASCENDING&after=opaque-fixture&limit=100",
+  "https://graph.microsoft.com/v1.0/auditLogs/signIns?$skiptoken=fixture",
+  "https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/token",
+  "https://manage.office.com/api/v1.0/${TENANT}/activity/feed/audit/${id}",
+
   "https://developer.okta.com/docs/reference/api/system-log/",
   "https://docs.ansible.com/projects/ansible/latest/collections/ansible/windows/win_service_module.html",
   "https://docs.ansible.com/projects/ansible/latest/collections/community/windows/win_scheduled_task_module.html",
@@ -453,7 +521,7 @@ function isAllowedUrl(value) {
        "http://manifests.microsoft.com/win/2004/08/windows/eventlog"].includes(normalized)) return true;
   try {
     const candidate = new URL(normalized);
-    if (candidate.protocol === "http:"
+    if (["http:", "https:"].includes(candidate.protocol)
         && ["127.0.0.1", "localhost", "[::1]"].includes(candidate.hostname)
         && (!candidate.port || (Number(candidate.port) >= 1 && Number(candidate.port) <= 65535))) {
       return true;
@@ -569,7 +637,9 @@ function audit() {
         const fixedCollectorBinary = rel === "tools/native-monitor/collector.py"
           && fragment === ["system", "ctl"].join("")
           && text.slice(index - 10, index + fragment.length + 1) === '"/usr/bin/' + fragment + '"';
-        if (!fixedCollectorBinary) report(findings, "operations.private-fragment", entry.file, text, index);
+        const reviewedServiceTemplate = ["tools/deployment/render.js", "test/deployment-generation.test.js"].includes(rel)
+          && fragment === ["system", "ctl"].join("");
+        if (!fixedCollectorBinary && !reviewedServiceTemplate) report(findings, "operations.private-fragment", entry.file, text, index);
         index = text.indexOf(fragment, index + fragment.length);
       }
     }
