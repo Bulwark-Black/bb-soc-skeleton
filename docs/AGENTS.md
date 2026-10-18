@@ -11,7 +11,7 @@ application with SQLite sessions and versioned documents, strict browser
 contracts, a separate disposable loopback workbench, and bounded reference
 modules for connectors and administration. Private telemetry uses indexed SQLite
 admission. The integration core exposes universal/custom canonical sources,
-ten vendor export/API-page mappings with a private import UI and external
+fifteen vendor export/API-page mappings with a private import UI and external
 durable outbox, a private Trivy importer, and eleven data-only scan templates; those templates are schemas,
 not scanner drivers. `npm start` runs the private application;
 `npm run start:static` installs no provider and performs no operational writes.
@@ -300,11 +300,14 @@ Resources are read-only checked-in public files. Documentation URIs are
 `soc://documentation/technical-manual`, `soc://documentation/agent-guide`,
 `soc://documentation/connectors`, `soc://documentation/architecture`,
 `soc://documentation/configuration`, `soc://documentation/features`, and
-`soc://documentation/integration-review`. Read the ten vendor contracts,
+`soc://documentation/integration-review`. Read the fifteen vendor contracts,
 acquisition prerequisites, private import workflow and durable-delivery recovery
 guide at `soc://documentation/vendor-integrations` before configuring a vendor
 source. These resources do not grant vendor credentials, polling or ingestion
 tools to the agent.
+Read `soc://documentation/server-logs` for checkpointed server-log collection,
+reader-proof health and durable canonical outbox operations. This documentation
+does not grant filesystem, collection or telemetry tools through MCP.
 The required installation/authentication reading is also available without
 filesystem tools: `soc://documentation/readme` and
 `soc://documentation/authentication` expose only the checked-in public guides,
@@ -498,3 +501,15 @@ Never claim that a source is collecting because setup/test succeeded, that an
 agent is safe because it connected, or that a scan/governance screen is managed
 because its structural UI is visible. State must come from an authenticated
 result and the corresponding authorized read projection.
+
+## Platform monitoring expansion
+
+The private application includes source-authenticated platform delivery, a
+Windows Event Log/WEF collector, four additional log import profiles and
+25 opt-in original detection rules. Native incident email uses an external
+Resend credential with durable delivery state and operator reconciliation.
+Read [platform ingestion](PLATFORM-INGEST.md), [platform coverage](PLATFORM-COVERAGE.md),
+[Windows events](WINDOWS-EVENTS.md), [detection rules](DETECTION-RULES.md) and
+[native notifications](NATIVE-NOTIFICATIONS.md) for the exact supported contracts,
+private configuration, tests and deployment-specific prerequisites.
+No checked-in credentials, inventory, enabled rules or recipients are supplied.

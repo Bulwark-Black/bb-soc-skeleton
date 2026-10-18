@@ -72,7 +72,7 @@ function preparePrivateDirectory(value) {
   const stat = statWithoutLinks(directory, "Private state directory");
   assertOwned(stat, "Private state directory");
   if (fs.realpathSync(directory) !== directory) throw new Error("Private state directory must use a canonical path without symbolic links.");
-  const knownFiles = new Set(["auth-secret", "state.json", "audit.jsonl", "runtime.lock", "administration-state.json", "administration-audit.jsonl", "administration-runtime.lock"]);
+  const knownFiles = new Set(["auth-secret", "state.json", "audit.jsonl", "runtime.lock", "administration-state.json", "administration-audit.jsonl", "administration-runtime.lock", "operations-config.json", "operations", "detection-config.json"]);
   for (const name of fs.readdirSync(directory)) {
     const databaseFile = /^(auth|documents|telemetry|service-access|live-monitoring|setup-guides)\.sqlite(?:-wal|-shm|-journal)?$/.test(name);
     const interruptedWrite = /^\.(state|administration-state)\.json\.[1-9][0-9]*\.[a-f0-9-]{36}\.tmp$/.test(name);

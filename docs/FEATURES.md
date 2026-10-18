@@ -1,13 +1,12 @@
 # Feature and route catalog
 
-The interface skeleton registers all 38 active SOC paths: 29 primary routes and
-nine linked detail/utility routes. It also exposes the private document library
-at `#/documents` and shell-owned technical documentation at `#/docs`. The
-invariant is **38 SOC routes plus two application-owned local pages**, 40
-registered paths in total. SOC-route registration provides stable routing, product
-labels, navigation relationships, titles, focus behavior, empty/error states,
-and an adapter request boundary. It does not include records, counts, events,
-identities, timestamps, findings, policies, evidence, or other page data.
+The shell registers 48 paths: 38 original adapter-addressable SOC routes, eight
+private Operations/report pages, Documents and Technical Docs. Operations adds
+Infrastructure, Services, Websites, Metrics, Incidents, Critical jobs, AI Employees
+and Analyst reports. These pages use the dedicated private monitoring API rather
+than canonical page envelopes. See [NATIVE-OPERATIONS.md](NATIVE-OPERATIONS.md)
+for the deployed-runtime port, configuration and current boundaries. No records,
+inventory, prompts or credentials are seeded.
 
 An adopter supplies authorized content through the versioned adapter. Route
 paths are stable integration keys; labels and summaries are presentation text.
@@ -34,7 +33,7 @@ authorizes only its granted API operations, not arbitrary agent execution.
 Universal/custom canonical sources now support all 29 record kinds. In the
 private app, Sources → Integrations manages immutable custom definitions and
 shows actual route coverage; Sources → Received observations provides bounded
-application/source/kind filtering and payload inspection. Relevant category
+application/source/kind/time filtering, reported severity and payload inspection. Relevant category
 pages display explicitly read-only imported facts. These fallback observation
 views replace unsupported native workflow placeholders for that read; they do
 not implement native actions, detection engines or vendor-specific analysis.
@@ -56,7 +55,7 @@ while keeping route content and tabs:
 
 | Feature | Checked-in behavior | Adopter responsibility |
 | --- | --- | --- |
-| Brand/sidebar | Exact full mark, dark circuit field, deterministic pulses, six grouped areas, current-route state | Preserve assets/tokens and route semantics when product parity is required |
+| Brand/sidebar | Exact full mark, dark circuit field, deterministic pulses, seven grouped areas, current-route state | Preserve assets/tokens and route semantics when product parity is required |
 | Estate selector | Empty “No estate selected” structure with an Onboarding route link | Supply an authorized estate/scope model only through an explicitly designed host integration |
 | Compact navigation | Responsive route selector preserves the grouped SOC entry surfaces without exposing detail routes as duplicates | Keep all 38 SOC routes usable at narrow widths and retain the shell Docs entry |
 | Authentication chip | Shows the closed auth projection; the private starter supplies Better Auth sign-in and sessions | Review deployment policy; custom hosts implement `SOC_CONSOLE_AUTH`; never place raw identity claims or tokens in the shell |
@@ -76,8 +75,8 @@ capabilities or authorize data.
 
 ## Primary routes
 
-Twenty-seven SOC primary routes appear in the six grouped navigation areas,
-alongside the new local Documents page in Govern.
+Thirty-five SOC primary routes appear in seven navigation groups,
+alongside the local Documents page in Govern.
 Onboarding and Settings are also primary, top-level surfaces, but are opened
 through shell controls instead of appearing as sidebar destinations. Together
 they make the 29 SOC primary routes (30 primary navigation destinations when
@@ -252,10 +251,10 @@ route is not authorization to read the referenced resource.
 ### Navigation and routing
 
 - The adapter-addressable SOC route set contains exactly 38 paths.
-- The shell catalog contains those 38 SOC routes plus local `/docs` and
-  `/documents` pages; neither calls the page adapter. `#/docs` never reaches a
+- The shell catalog contains those 38 SOC routes plus eight dedicated Operations/report pages,
+  local `/docs` and `/documents`; these ten pages do not call the page adapter. `#/docs` never reaches a
   connector-control or administration provider either.
-- Twenty-seven SOC primary paths plus Documents populate the six grouped areas.
+- Thirty-five SOC primary paths plus Documents populate the seven grouped areas.
 - `#/onboard` and `#/settings` remain primary surfaces reached through shell
   controls rather than sidebar destinations.
 - Detail/utility paths remain directly addressable and can receive page models.
@@ -399,3 +398,26 @@ For the shipped private paths and their exact limits, see technical manual
 [section 52](../public/technical-reference.md#52-storage-limits-reliability-acceptance-and-remaining-parity-work),
 [section 53](../public/technical-reference.md#53-private-service-identities-and-authenticated-mcp-setup),
 and [section 54](../public/technical-reference.md#54-trivy-report-import-from-a-users-own-scanner).
+
+## Portable server-log monitoring
+
+Sources → Server logs provides local setup guidance for `server-log-push`.
+The external `collect:logs` CLI reads plain-text, Docker JSON and journald JSON
+files with a persisted cursor and queues exact canonical bodies before cursor
+advancement. `events` exposes the same outbox for arbitrary canonical batches.
+Sources and Health distinguish reader completion, delivery receipt, and log
+activity; failed or delayed reads cannot be made fresh merely by delivery.
+See [SERVER-LOGS.md](SERVER-LOGS.md) for limits, scheduling, recovery, and the
+boundary between this reusable port and deployment-specific monitoring.
+
+## Platform monitoring expansion
+
+The private application includes source-authenticated platform delivery, a
+Windows Event Log/WEF collector, four additional log import profiles and
+25 opt-in original detection rules. Native incident email uses an external
+Resend credential with durable delivery state and operator reconciliation.
+Read [platform ingestion](PLATFORM-INGEST.md), [platform coverage](PLATFORM-COVERAGE.md),
+[Windows events](WINDOWS-EVENTS.md), [detection rules](DETECTION-RULES.md) and
+[native notifications](NATIVE-NOTIFICATIONS.md) for the exact supported contracts,
+private configuration, tests and deployment-specific prerequisites.
+No checked-in credentials, inventory, enabled rules or recipients are supplied.

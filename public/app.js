@@ -397,7 +397,8 @@
           ? (providerLabels[state.providerState] || "Data adapter connected")
           : "No data adapter";
       }
-      if (hooks.timezoneToggle) hooks.timezoneToggle.textContent = state.timezone;
+      if (hooks.timezoneToggle) hooks.timezoneToggle.textContent = pageByPath.get(state.route)?.variant === "operations"
+        ? (state.query.get("tz") || state.timezone) : state.timezone;
       if (hooks.autoRefreshState) {
         hooks.autoRefreshState.dataset.active = String(Boolean(provider && state.mounted));
         hooks.autoRefreshState.lastChild.textContent = provider && state.mounted ? "Auto 5m" : "Auto off";
@@ -443,6 +444,7 @@
       const sourceTitles = {
         setup: "Sources — Guided Setup",
         mapping: "Sources — Map a Custom Source",
+        logs: "Sources — Server Logs",
         operations: "Sources — Private Deployment",
         expected: "Sources — Dead-man Board",
         add: "Sources — Add",
@@ -475,7 +477,7 @@
 
     function pageHeader(page) {
       const fragment = documentRef.createDocumentFragment();
-      const adapterLabel = page.path === "/sources" && ["setup", "mapping", "operations", "integrations", "live", "vendors", "observations"].includes(state.query.get("stab"))
+      const adapterLabel = page.path === "/sources" && ["setup", "logs", "mapping", "operations", "integrations", "live", "vendors", "observations"].includes(state.query.get("stab"))
         ? global.SOC_PRIVATE_APPLICATION ? "private integration services" : "integration services unavailable"
         : page.localOnly
         ? page.variant === "document-library" ? "private document library" : "built-in technical reference"
@@ -3850,7 +3852,7 @@
       if (technicalDocs.schemaVersion !== VERSION || technicalDocs.documentType !== "technical-manual") return null;
       if (typeof technicalDocs.title !== "string" || technicalDocs.title.length < 1 || technicalDocs.title.length > 200) return null;
       if (technicalDocs.source !== "technical-reference.md") return null;
-      if (typeof technicalDocs.markdown !== "string" || technicalDocs.markdown.length < 20000 || technicalDocs.markdown.length > 300000) return null;
+      if (typeof technicalDocs.markdown !== "string" || technicalDocs.markdown.length < 20000 || technicalDocs.markdown.length > 512000) return null;
       if (!Array.isArray(technicalDocs.sections) || technicalDocs.sections.length < 20 || technicalDocs.sections.length > 100) return null;
       const ids = new Set();
       let priorLine = 0;
@@ -4184,7 +4186,7 @@
         || (page.variant === "tuning" && tuningMode !== "registry")
         || (page.variant === "rules" && state.query.get("ruleView"));
       if (page.hidden || queryDetail) wrapper.append(breadcrumbs(page));
-      wrapper.append(pageHeader(page));
+      if (page.variant !== "operations") wrapper.append(pageHeader(page));
 
       const setupId = state.query.get("setupId");
       if (page.path !== "/sources" || state.query.get("stab") !== "setup") {
@@ -4200,7 +4202,7 @@
         return;
       }
 
-      if (global.SOC_PRIVATE_APPLICATION && global.SocSetupAssistance && !page.hidden) {
+      if (global.SOC_PRIVATE_APPLICATION && global.SocSetupAssistance && !page.hidden && page.variant !== "operations") {
         const screenNeedsHelp = !page.localOnly
           && (state.providerError || ["empty", "error"].includes(state.envelope && state.envelope.state));
         const emptyUnfilteredView = !state.providerError && state.providerState === "empty"
@@ -4216,6 +4218,18 @@
         wrapper.append(renderTechnicalDocumentation());
         root.replaceChildren(wrapper);
         applyPageFilter();
+        return;
+      }
+
+      if (page.variant === "operations" && global.SocOperations) {
+        const container = node("section", { className: "operations-workspace" });
+        wrapper.append(container);
+        root.replaceChildren(wrapper);
+        privateViewCleanup = global.SocOperations.render({ container, route: page.path,
+          appId: state.query.get("appId") || "", query: state.query,
+          displayTimezone: state.timezone === "UTC" ? "UTC" : Intl.DateTimeFormat().resolvedOptions().timeZone,
+          applications: state.controlSnapshot?.apps || [], onError: showToast }) || null;
+        privateViewRoute = routeKey;
         return;
       }
 
@@ -4235,13 +4249,13 @@
         return;
       }
 
-      if (page.path === "/sources" && ["setup", "mapping", "operations", "integrations", "live", "vendors", "observations"].includes(tabState.values.stab)) {
+      if (page.path === "/sources" && ["setup", "logs", "mapping", "operations", "integrations", "live", "vendors", "observations"].includes(tabState.values.stab)) {
         wrapper.append(routeTabs(page, tabState));
         const container = node("section", { className: "administration-workspace", attrs: { id: "active-page-panels", role: "tabpanel", "aria-labelledby": "page-title" } });
         wrapper.append(container);
         root.replaceChildren(wrapper);
-        const integrationView = tabState.values.stab === "setup" ? global.SocSetupGuides : tabState.values.stab === "mapping" ? global.SocSourceMapping : tabState.values.stab === "operations" ? global.SocSetupAssistance : tabState.values.stab === "live" ? global.SocLiveMonitoring : tabState.values.stab === "vendors" ? global.SocVendorImport : global.SocIntegrationCenter;
-        if (integrationView && (global.SOC_PRIVATE_APPLICATION || ["setup", "mapping", "operations", "live"].includes(tabState.values.stab))) {
+        const integrationView = tabState.values.stab === "logs" ? global.SocServerLogs : tabState.values.stab === "setup" ? global.SocSetupGuides : tabState.values.stab === "mapping" ? global.SocSourceMapping : tabState.values.stab === "operations" ? global.SocSetupAssistance : tabState.values.stab === "live" ? global.SocLiveMonitoring : tabState.values.stab === "vendors" ? global.SocVendorImport : global.SocIntegrationCenter;
+        if (integrationView && (global.SOC_PRIVATE_APPLICATION || ["setup", "logs", "mapping", "operations", "live"].includes(tabState.values.stab))) {
           privateViewCleanup = integrationView.render({ container, mode: tabState.values.stab, query: state.query, sourceId: state.query.get("sourceId") || "", onError: showToast,
             onSelection(id) {
               if (!state.mounted || state.route !== "/sources" || state.query.get("stab") !== "setup" || !global.history?.replaceState) return;
@@ -4624,7 +4638,7 @@
         finishRouteRender(reason, routeChanged, previousTabLabel);
         return;
       }
-      if (page.localOnly || (page.path === "/sources" && ["setup", "mapping", "operations", "integrations", "live", "vendors", "observations"].includes(state.query.get("stab")))) {
+      if (page.localOnly || (page.path === "/sources" && ["setup", "logs", "mapping", "operations", "integrations", "live", "vendors", "observations"].includes(state.query.get("stab")))) {
         state.providerState = provider ? "idle" : "absent";
         state.controlState = commands ? "idle" : "absent";
         state.controlError = false;
@@ -5300,8 +5314,15 @@
         showToast("Save or discard your pending work before changing the time display.");
         return;
       }
-      state.timezone = state.timezone === "UTC" ? "Local" : "UTC";
-      renderPage();
+      if (pageByPath.get(state.route)?.variant === "operations") {
+        const current = state.query.get("tz") || state.timezone;
+        state.timezone = current === "UTC" ? "Local" : "UTC";
+        const tz = state.timezone === "UTC" ? "UTC" : Intl.DateTimeFormat().resolvedOptions().timeZone;
+        navigate(state.route, { ...queryObject(state.query), tz });
+      } else {
+        state.timezone = state.timezone === "UTC" ? "Local" : "UTC";
+        renderPage();
+      }
       showToast(`Times are displayed in ${state.timezone}.`);
     }
     function onCommandResultClick(event) { if (event.target.closest("a")) closeCommand(); }

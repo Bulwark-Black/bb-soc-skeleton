@@ -552,8 +552,10 @@ test("every public runtime script and provider example has no capability or unsa
     "public/document-library.js",
     "public/integration-center.js",
     "public/live-monitoring.js",
+    "public/operations.js",
     "public/private-sign-in.js",
     "public/scanner-import.js",
+    "public/server-logs.js",
     "public/service-access.js",
     "public/setup-assistance.js",
     "public/setup-guides.js",
@@ -577,7 +579,7 @@ test("every public runtime script and provider example has no capability or unsa
   ];
   for (const name of runtimeFiles) {
     const source = read(name);
-    const privateClient = ["public/document-library.js", "public/private-sign-in.js", "public/scanner-import.js", "public/service-access.js", "public/integration-center.js", "public/vendor-import.js", "public/live-monitoring.js", "public/setup-guides.js", "public/setup-assistance.js", "public/source-mapping.js"].includes(name);
+    const privateClient = ["public/document-library.js", "public/private-sign-in.js", "public/scanner-import.js", "public/service-access.js", "public/integration-center.js", "public/vendor-import.js", "public/live-monitoring.js", "public/operations.js", "public/setup-guides.js", "public/setup-assistance.js", "public/source-mapping.js"].includes(name);
     for (const pattern of forbiddenCapabilities) {
       if (privateClient && pattern.source === "\\bfetch\\s*\\(") continue;
       assert.doesNotMatch(source, pattern, `${name}: ${pattern}`);
@@ -696,7 +698,7 @@ test("the local server handles GET and HEAD with security headers", async (t) =>
   assert.equal(mutation.headers.allow, "GET, HEAD");
 });
 
-test("the structural catalog contains 38 SOC routes plus Documents and local documentation", () => {
+test("the structural catalog preserves 38 adapter routes and adds eight Operations pages plus Documents and local documentation", () => {
   const context = browserContext(["public/ui-catalog.js"]);
   const catalog = context.SocConsoleUiCatalog;
   assert.equal(catalog.schemaVersion, "1");
@@ -705,15 +707,15 @@ test("the structural catalog contains 38 SOC routes plus Documents and local doc
   const pages = JSON.parse(JSON.stringify(catalog.pages));
   const groups = JSON.parse(JSON.stringify(catalog.groups));
   const byPath = new Map(pages.map((page) => [page.path, page]));
-  assert.equal(pages.length, 40);
-  assert.equal(byPath.size, 40, "catalog routes are unique");
+  assert.equal(pages.length, 48);
+  assert.equal(byPath.size, 48, "catalog routes are unique");
 
   const groupedRoutes = groups.flatMap(([, entries]) => entries.map(([route]) => route));
-  assert.equal(groupedRoutes.length, 28);
-  assert.equal(new Set(groupedRoutes).size, 28);
+  assert.equal(groupedRoutes.length, 36);
+  assert.equal(new Set(groupedRoutes).size, 36);
   const utilities = ["/onboard", "/settings", "/docs"];
   const entryRoutes = new Set([...groupedRoutes, ...utilities]);
-  assert.equal(entryRoutes.size, 31);
+  assert.equal(entryRoutes.size, 39);
   groupedRoutes.forEach((route) => {
     assert.ok(byPath.has(route), route);
     assert.notEqual(byPath.get(route).hidden, true, `${route} is a grouped entry route`);
@@ -884,7 +886,7 @@ test("the structural catalog contains 38 SOC routes plus Documents and local doc
   });
   assert.deepEqual(tabs("/systems", "stab").map(([id]) => id), ["estate", "affected"]);
   assert.deepEqual(tabs("/retention", "vtab").map(([id]) => id), ["policy", "reality", "review"]);
-  assert.deepEqual(tabs("/sources", "stab").map(([id]) => id), ["setup", "mapping", "operations", "expected", "add", "integrations", "live", "vendors", "observations", "changes"]);
+  assert.deepEqual(tabs("/sources", "stab").map(([id]) => id), ["setup", "logs", "mapping", "operations", "expected", "add", "integrations", "live", "vendors", "observations", "changes"]);
   assert.deepEqual(tabs("/agents", "atab").map(([id]) => id), ["agents", "add", "prompts", "enrollment", "access", "audit"]);
   assert.deepEqual(tabs("/attestations", "gtab").map(([id]) => id), ["active", "create", "archived", "history"]);
   assert.deepEqual(tabs("/register", "riskTab").map(([id]) => id), ["active", "create", "archived", "history"]);
@@ -992,7 +994,7 @@ test("technical documentation remains selectable without becoming a primary SOC 
   await harness.app.mount();
 
   const primaryRoutes = JSON.parse(JSON.stringify(harness.context.SocConsole.primaryRoutes));
-  assert.equal(primaryRoutes.length, 30);
+  assert.equal(primaryRoutes.length, 38);
   assert.equal(primaryRoutes.includes("/docs"), false);
   assert.equal(findNodes(routeSelect,
     (candidate) => candidate.tagName === "OPTION" && candidate.getAttribute("value") === "/docs").length, 1);
@@ -3762,7 +3764,8 @@ test("guided setup is an honest static local tab and does not read generic provi
 
 test("mapping and private operations are static local tabs and never read generic providers", async () => {
   for (const [tab, filename, expected] of [["mapping", "public/source-mapping.js", /static skeleton makes no requests/],
-    ["operations", "public/setup-assistance.js", /Static guidance only/]]) {
+    ["operations", "public/setup-assistance.js", /Static guidance only/],
+    ["logs", "public/server-logs.js", /Bring your server logs/]]) {
     let controlReads = 0;
     const harness = createUiHarness("#/sources?stab=" + tab, { commands: {
       schemaVersion: "1", id: "local-guidance-only",
@@ -3777,6 +3780,12 @@ test("mapping and private operations are static local tabs and never read generi
     assert.match(harness.mountRoot.textContent, expected);
     assert.equal(harness.readRequests.length, 0); assert.equal(controlReads, 0);
     assert.equal(harness.app.getState().query.stab, tab);
+    if (tab === "logs") {
+      const links = harness.mountRoot.querySelectorAll("a").map(element => element.href || element.getAttribute("href"));
+      assert.ok(links.includes("#/onboard"), "server-log setup links to the registered onboarding route");
+      assert.ok(links.includes("#/sources?stab=add&connectorType=server-log-push"));
+      assert.ok(links.includes("#/docs?section=65-server-logs-and-collector-health"));
+    }
     harness.app.unmount();
   }
 });

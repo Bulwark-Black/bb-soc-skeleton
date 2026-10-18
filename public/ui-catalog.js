@@ -83,14 +83,24 @@
   ];
 
   const groups = [
-    ["Monitor", [
+    ["Security overview", [
       ["/", "Overview"],
       ["/health", "SOC Health"],
       ["/brief", "Daily Brief"],
       ["/analytics", "Analytics"],
       ["/timeline", "Timeline"]
     ]],
-    ["Respond", [
+    ["Operations", [
+      ["/infrastructure", "Infrastructure"],
+      ["/services", "Services"],
+      ["/websites", "Websites"],
+      ["/metrics", "Metrics"],
+      ["/incidents", "Incidents"],
+      ["/jobs", "Critical Jobs"],
+      ["/employees", "AI Employees"],
+      ["/analyst-reports", "Analyst Reports"]
+    ]],
+    ["Security response", [
       ["/triage", "Triage"],
       ["/tuning", "Detection Tuning"],
       ["/rules", "Rules"],
@@ -105,11 +115,11 @@
       ["/intel", "Threat Intel"],
       ["/known-ips", "Known IPs"]
     ]],
-    ["Vuln Mgmt", [
+    ["Vulnerabilities", [
       ["/scans", "Scans"],
       ["/remediation", "Remediation"]
     ]],
-    ["Estate", [
+    ["Estate records", [
       ["/systems", "Systems"],
       ["/databases", "Databases"],
       ["/backups", "Backups"],
@@ -126,8 +136,14 @@
   ];
 
   const pages = [
+    ...[
+      ["/infrastructure", "Infrastructure"], ["/services", "Services"], ["/websites", "Websites"],
+      ["/metrics", "Metrics"], ["/incidents", "Incidents"], ["/jobs", "Critical Jobs"],
+      ["/employees", "AI Employees"], ["/analyst-reports", "Analyst Reports"]
+    ].map(([path, label]) => ({ path, group: "Operations", label, variant: "operations", localOnly: true,
+      searchTerms: "native monitoring resources metrics collection incidents jobs execution schedule output employees instructions reports", panels: [] })),
     {
-      path: "/", group: "Monitor", label: "Overview", displayTitle: "Security Posture — Overview", variant: "overview",
+      path: "/", group: "Security overview", label: "Overview", displayTitle: "Security Posture — Overview", variant: "overview",
       panels: [
         metrics("Needs review", "Sources needing attention", "Register overdue", "Dependabot open"),
         table("Detections", ["Time", "Host", "Severity", "Rule", "Event"]),
@@ -136,7 +152,7 @@
       ]
     },
     {
-      path: "/health", group: "Monitor", label: "SOC Health", panelsBeforeTabs: ["summary-metrics"],
+      path: "/health", group: "Security overview", label: "SOC Health", panelsBeforeTabs: ["summary-metrics"],
       panels: [metrics(
         "Feeds needing attention", "Untriaged", "Rules never fired", "Noise concentration",
         "Largest repeat group", "Detect to notify", "Alert queue persistence"
@@ -153,7 +169,7 @@
       ]}]
     },
     {
-      path: "/brief", group: "Monitor", label: "Daily Brief",
+      path: "/brief", group: "Security overview", label: "Daily Brief",
       tabsets: [{ param: "btab", default: "brief", items: [
         { id: "brief", label: "Daily Brief", panels: [info("Do today"), info("Security brief"), info("Are we affected? · latest review")] },
         { id: "turnover", label: "Turnover board", panels: [
@@ -167,7 +183,7 @@
       ]}]
     },
     {
-      path: "/analyst", group: "Monitor", label: "Analyst Briefings", hidden: true,
+      path: "/analyst", group: "Security overview", label: "Analyst Briefings", hidden: true,
       tabsets: [
         { param: "btab", default: "analyst", items: [
           { id: "brief", label: "Daily Brief", path: "/brief" },
@@ -189,14 +205,14 @@
       ]
     },
     {
-      path: "/analytics", group: "Monitor", label: "Analytics", panelsBeforeTabs: ["summary-metrics"],
+      path: "/analytics", group: "Security overview", label: "Analytics", panelsBeforeTabs: ["summary-metrics"],
       tabsets: [{ param: "h", default: "48", items: [
         { id: "24", label: "24h" }, { id: "48", label: "48h" }, { id: "168", label: "7 days" }
       ]}],
       panels: [metrics("Events collected", "Detections", "Channels reporting", "History held"), chart("Events collected per hour", ["Events by channel"]), chart("Detections per hour", ["Critical", "High", "Info"]), bars("What is firing"), bars("Most-blocked source addresses"), info("How to read this")]
     },
     {
-      path: "/timeline", group: "Monitor", label: "Timeline", variant: "timeline",
+      path: "/timeline", group: "Security overview", label: "Timeline", variant: "timeline",
       queryBranches: [{ id: "host-timeline", whenQuery: { host: "present" } }],
       tabsets: [{ param: "range", default: "24h", items: [
         { id: "15m", label: "15m" }, { id: "1h", label: "1h" },
@@ -205,7 +221,7 @@
       panels: [table("Unified timeline", ["When", "Kind", "Event"])]
     },
     {
-      path: "/triage", group: "Respond", label: "Triage", variant: "triage",
+      path: "/triage", group: "Security response", label: "Triage", variant: "triage",
       tabsets: [{ param: "view", default: "queue", items: [
         { id: "queue", label: "Queue" }, { id: "approvals", label: "Awaiting approval" }, { id: "cases", label: "Cases" }, { id: "closed", label: "Closed" }, { id: "all", label: "All" }
       ]}],
@@ -215,7 +231,7 @@
       ]
     },
     {
-      path: "/tuning", group: "Respond", label: "Detection Tuning", variant: "tuning",
+      path: "/tuning", group: "Security response", label: "Detection Tuning", variant: "tuning",
       queryBranches: [
         { id: "detail", whenQuery: { id: "present" }, panels: tuningDetailPanels() },
         { id: "occurrence-chooser", whenQuery: { id: "absent", choose: "present" }, panels: [
@@ -250,7 +266,7 @@
       ]
     },
     {
-      path: "/rules", group: "Respond", label: "Detection Rules", variant: "rules",
+      path: "/rules", group: "Security response", label: "Detection Rules", variant: "rules",
       queryBranches: [{ id: "rule-detail", whenQuery: { ruleView: "present" }, panels: ruleDetailPanels() }],
       tabAliases: {
         rtab: {
@@ -324,7 +340,7 @@
       ]
     },
     {
-      path: "/alerts", group: "Respond", label: "Alert Comms",
+      path: "/alerts", group: "Security response", label: "Alert Comms",
       tabsets: [{ param: "atab", default: "path", items: [
         { id: "path", label: "Alert path", panels: [cards("Alert path", ["Reachable people", "Sent (24h)", "Failed (24h)", "Highs waiting to batch", "Durable overflow"])] },
         { id: "paged", label: "Who gets paged", panels: [table("Who gets paged", ["Person", "Address", "Added", "Sends on", ""]), form("Add a recipient", [field("Email address", "email"), field("Who is this?"), field("Minimum severity", "select")], ["Add"])] },
@@ -336,7 +352,7 @@
       ]}]
     },
     {
-      path: "/honeypots", group: "Respond", label: "Honeypots",
+      path: "/honeypots", group: "Security response", label: "Honeypots",
       tabsets: [{ param: "htab", default: "decoys", items: [
         { id: "decoys", label: "Decoy files", panels: [info("Decoy files — catch tampering"), form("Plant a decoy file", [field("Host", "select"), field("Decoy type", "select"), field("Path")], ["Plant decoy"]), table("Decoy files", ["Host", "Path", "Decoy type", "State", ""])] },
         { id: "canaries", label: "Canaries", panels: [
@@ -351,7 +367,7 @@
       ]}]
     },
     {
-      path: "/phishing", group: "Respond", label: "Phishing",
+      path: "/phishing", group: "Security response", label: "Phishing",
       panels: [
         ...conditioned({ id: "absent" }, [
           metrics("Reports", "Likely phishing", "Suspicious", "Clean", "Scorer faults", "Newest report"),
@@ -477,7 +493,7 @@
       ]
     },
     {
-      path: "/scans", group: "Vuln Mgmt", label: "Scans",
+      path: "/scans", group: "Vulnerabilities", label: "Scans",
       tabsets: [{ param: "tab", default: "trivy", items: [
         {
           id: "trivy", label: "Trivy",
@@ -599,21 +615,21 @@
       ]}]
     },
     {
-      path: "/host-scan", group: "Vuln Mgmt", label: "Scan Detail", hidden: true, variant: "scan-detail",
+      path: "/host-scan", group: "Vulnerabilities", label: "Scan Detail", hidden: true, variant: "scan-detail",
       queryBranches: [{ id: "no-host", whenQuery: { host: "absent" } }, { id: "host", whenQuery: { host: "present" } }],
       panels: [info("Trivy scan"), table("Trivy findings", ["CVE", "Package", "Severity", "Exploited", "EPSS"])]
     },
     {
-      path: "/kev", group: "Vuln Mgmt", label: "KEV Detail", hidden: true, variant: "kev-detail",
+      path: "/kev", group: "Vulnerabilities", label: "KEV Detail", hidden: true, variant: "kev-detail",
       queryBranches: [{ id: "no-cve", whenQuery: { cve: "absent" } }, { id: "cve", whenQuery: { cve: "present" } }],
       panels: [cards("Known Exploited Vulnerability detail", ["Product", "Catalog status", "Known ransomware use", "Why it is listed here", "References"])]
     },
     {
-      path: "/remediation", group: "Vuln Mgmt", label: "Remediation",
+      path: "/remediation", group: "Vulnerabilities", label: "Remediation",
       panels: remediationPanels()
     },
     {
-      path: "/systems", group: "Estate", label: "Systems",
+      path: "/systems", group: "Estate records", label: "Systems",
       tabsets: [{ param: "stab", default: "estate", items: [
         { id: "estate", label: "Estate", panels: [
           table("External attack surface — what the internet sees", ["Host", "Public IP", "Ports Shodan sees", "Baseline", "Verdict"]),
@@ -627,7 +643,7 @@
       ]}]
     },
     {
-      path: "/databases", group: "Estate", label: "Databases",
+      path: "/databases", group: "Estate records", label: "Databases",
       panels: [
         table("Schema drift watch", ["Database", "Tables", "Tracked items", "Snapshot"]),
         table("Schema changes detected", ["When", "Database", "Changes"]),
@@ -635,7 +651,7 @@
       ]
     },
     {
-      path: "/backups", group: "Estate", label: "Backups",
+      path: "/backups", group: "Estate records", label: "Backups",
       panels: [
         table("Push side — the backup chain reporting in", ["Chain", "What a green means", "Status", "State"]),
         table("Pull side — independent verification from the watchtower", ["Bucket", "Contents", "Freshness", "State"]),
@@ -644,7 +660,7 @@
       ]
     },
     {
-      path: "/retention", group: "Estate", label: "Retention",
+      path: "/retention", group: "Estate records", label: "Retention",
       tabsets: [{ param: "vtab", default: "policy", items: [
         { id: "policy", label: "Policy · declared", panels: [
           facts("Declared policy", [
@@ -663,10 +679,11 @@
       ]}]
     },
     {
-      path: "/sources", group: "Estate", label: "Sources",
-      searchTerms: "guided setup monitor my application check my setup live monitoring Sentry application errors Slack collection health connectors integrations vendor imports",
+      path: "/sources", group: "Estate records", label: "Sources",
+      searchTerms: "guided setup monitor my application check my setup live monitoring Sentry application errors Slack collection health connectors integrations vendor imports server logs Docker journald plain text collector",
       tabsets: [{ param: "stab", default: "expected", items: [
         { id: "setup", label: "Guided setup", panels: [] },
+        { id: "logs", label: "Server logs", panels: [] },
         { id: "mapping", label: "Map a custom source", panels: [] },
         { id: "operations", label: "Private deployment", panels: [] },
         { id: "expected", label: "Expected sources", panels: [
@@ -700,7 +717,7 @@
       ]}]
     },
     {
-      path: "/source", group: "Estate", label: "Source Detail", hidden: true,
+      path: "/source", group: "Estate records", label: "Source Detail", hidden: true,
       panels: [
         facts("Source declaration", ["What it does", "Why it matters", "If it goes quiet", "State", "Activity", "How it is graded", "If the row is red"]),
         facts("Latest collection", ["Collection state", "Reader proof", "Inputs checked", "Activity", "Failure"]),
@@ -708,7 +725,7 @@
       ]
     },
     {
-      path: "/agents", group: "Estate", label: "Agent Management",
+      path: "/agents", group: "Estate records", label: "Agent Management",
       variant: "administration-agents",
       searchTerms: "agents prompts enrollment credentials connection proof pause resume archive restore provider model capabilities",
       panels: [],
@@ -855,7 +872,7 @@
       panels: []
     },
     {
-      path: "/event", group: "Respond", label: "Event Detail", hidden: true, variant: "event",
+      path: "/event", group: "Security response", label: "Event Detail", hidden: true, variant: "event",
       panels: [
         cards("Decision status", ["Status", "Severity", "Owner", "Activity", "Tune"]),
         table("Findings in this decision", ["Severity", "Detector", "Finding", "Action"]),

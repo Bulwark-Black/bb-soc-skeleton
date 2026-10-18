@@ -184,7 +184,7 @@ function normalizeConnectors(state) {
   }));
 }
 
-function normalizeSources(state, records, nowDate, indexedCounts) {
+function normalizeSources(state, records, nowDate, indexedCounts, indexedActivity, projectSourceHealth) {
   const hosts = new Map(normalizeHosts(state).map((host) => [host.hostId, host]));
   const connectors = new Map(normalizeConnectors(state).map((connector) => [connector.connectorInstanceId, connector]));
   const manifests = new Map(getIntegrationManifests(state).map((manifest) => [manifest.connectorType, manifest]));
@@ -192,6 +192,8 @@ function normalizeSources(state, records, nowDate, indexedCounts) {
   records.forEach((record) => recordCounts.set(record.sourceId, (recordCounts.get(record.sourceId) || 0) + 1));
 
   return state.sources.filter((source) => source.state !== "removed").map((source, index) => {
+    const projectedHealth = projectSourceHealth?.(source);
+    if (projectedHealth) source = { ...source, health: projectedHealth };
     const label = `state.sources[${index}]`;
     const sourceId = identifier(source.sourceId, `${label}.sourceId`);
     const connectorInstanceId = identifier(source.connectorInstanceId, `${label}.connectorInstanceId`);
@@ -212,13 +214,30 @@ function normalizeSources(state, records, nowDate, indexedCounts) {
     if (!Number.isSafeInteger(cadenceSeconds) || cadenceSeconds < 1 || cadenceSeconds > 31_536_000) {
       throw new TypeError(`${label}.cadenceSeconds must be a positive bounded integer.`);
     }
-    const declaredLastSeen = source.lastSeenAt === undefined && source.health
+    const nativeMonitor = connector.connectorType === "native-monitor";
+    const declaredLastSeen = nativeMonitor ? source.health?.lastAttemptAt : source.lastSeenAt === undefined && source.health
       ? source.health.lastSuccessAt
       : source.lastSeenAt;
     const lastSeenAt = optionalTimestamp(declaredLastSeen, `${label}.lastSeenAt`);
     const declaredHealth = source.health && typeof source.health.state === "string" ? source.health.state : null;
     const thresholds = scaledHealthThresholds(connector.connectorType, cadenceSeconds, manifests.get(connector.connectorType));
-    const health = sourceHealth(connector.state, declaredHealth, lastSeenAt, thresholds, nowDate);
+    const serverLog = connector.connectorType === "server-log-push";
+    // Native collection quality and freshness come from its own durable store.
+    // Last collection can be a failed attempt; it does not imply last success.
+    const nativeHealth = nativeMonitor && source.state === "active" && connector.state === "active"
+      && ["unknown", "pending", "healthy", "degraded", "stale", "offline", "error", "disabled"].includes(declaredHealth);
+    const health = nativeHealth
+      ? { state: declaredHealth, tone: healthTone(declaredHealth), detail: source.health.message || healthDetail(declaredHealth) }
+      : serverLog && declaredHealth === "pending"
+      ? { state: "pending", tone: "warn", detail: "Awaiting a completed server-log read" }
+      : sourceHealth(connector.state, declaredHealth, lastSeenAt, thresholds, nowDate);
+    const activity = indexedActivity?.get(sourceId) || {};
+    if (serverLog && !indexedActivity) {
+      for (const receipt of state.receipts || []) if (receipt.sourceId === sourceId
+          && (!activity.lastDeliveryAt || Date.parse(receipt.receivedAt) > Date.parse(activity.lastDeliveryAt))) activity.lastDeliveryAt = receipt.receivedAt;
+      for (const record of records) if (record.sourceId === sourceId
+          && (!activity.lastEventAt || Date.parse(record.observedAt) > Date.parse(activity.lastEventAt))) activity.lastEventAt = record.observedAt;
+    }
     const applicationName = state.apps.find((app) => app.appId === source.appId)?.displayName || "Application";
     const environment = source.environment || "default";
     return {
@@ -232,6 +251,11 @@ function normalizeSources(state, records, nowDate, indexedCounts) {
       contextName: `${applicationName} / ${environment}${host ? ` · collector ${host.name}` : ""}`,
       cadenceSeconds,
       lastSeenAt,
+      serverLog,
+      lastDeliveryAt: activity.lastDeliveryAt || null,
+      lastEventAt: activity.lastEventAt || null,
+      collectionAttemptAt: source.health?.lastAttemptAt || null,
+      collectionMessage: source.health?.message || "Awaiting a completed server-log read.",
       receivedRecords: recordCounts.get(sourceId) || 0,
       state: source.state === undefined ? connector.state : boundedText(source.state, `${label}.state`, 40),
       health
@@ -347,6 +371,26 @@ function sourceTable(sources) {
   };
 }
 
+function serverLogPanels(sources) {
+  const all = sources.filter(source => source.serverLog).sort((left, right) => left.displayName.localeCompare(right.displayName));
+  if (!all.length) return [];
+  const shown = all.slice(0, MAX_TABLE_ROWS);
+  return [{ id: "server-log-collection-scope", type: "notice", title: "Server log collection proof", tone: "info",
+    body: "Collection health uses the producer's completed read time. A successful quiet read can contain 0 log events. Receiving queued logs or replaying a proof does not refresh collection health. Delivery and event times below describe retained receipts and log records; absence is not proof of no historical activity. " + summarySuffix(shown.length, all.length) },
+  { id: "server-log-collection-status", type: "table", title: "Server log reads and delivery",
+    caption: "Completed reads, delivery and event activity are separate observations",
+    columns: [{ key: "source", label: "Source" }, { key: "read", label: "Last read attempt" },
+      { key: "success", label: "Last successful read" }, { key: "delivery", label: "Last delivery" },
+      { key: "event", label: "Last log event" }, { key: "events", label: "Retained log events" },
+      { key: "outcome", label: "Read outcome" }],
+    rows: shown.map(source => [source.displayName,
+      source.collectionAttemptAt ? { type: "time", value: source.collectionAttemptAt } : "No completed read",
+      source.lastSeenAt ? { type: "time", value: source.lastSeenAt } : "No successful read",
+      source.lastDeliveryAt ? { type: "time", value: source.lastDeliveryAt } : "No retained delivery",
+      source.lastEventAt ? { type: "time", value: source.lastEventAt } : "No retained log events",
+      { type: "number", value: source.receivedRecords, unit: "events" }, source.collectionMessage]) }];
+}
+
 function projectSources(state, records, sources, nowDate) {
   if (sources.length === 0) {
     return emptyEnvelope(
@@ -368,7 +412,7 @@ function projectSources(state, records, sources, nowDate) {
     title: "Sources",
     summary: `${sources.length} configured source${sources.length === 1 ? "" : "s"}; ${records.length} canonical log event${records.length === 1 ? "" : "s"} retained.${summarySuffix(table.rows.length, sources.length)}`,
     updatedAt: nowDate.toISOString(),
-    panels: [table]
+    panels: [table, ...serverLogPanels(sources)]
   };
 }
 
@@ -573,7 +617,7 @@ function projectHealth(state, records, sources, nowDate) {
       id: "is-the-collection-working",
       type: "table",
       title: "Is the collection working",
-      caption: "Source cadence and most recent successful collection",
+      caption: "Source cadence and most recent collection",
       columns: [
         { key: "feed", label: "Feed" },
         { key: "expected", label: "Expected" },
@@ -588,7 +632,7 @@ function projectHealth(state, records, sources, nowDate) {
         source.lastSeenAt ? formatAge(source.lastSeenAt, nowDate) : source.health.detail,
         { type: "badge", label: source.health.state, tone: source.health.tone }
       ])
-    }]
+    }, ...serverLogPanels(sources)]
   };
 }
 
@@ -639,7 +683,7 @@ function projectOverview(state, records, sources, nowDate, recentRecords) {
   };
 }
 
-function createPageEnvelope(route, query, state, now) {
+function createPageEnvelope(route, query, state, now, projectSourceHealth) {
   const runtime = loadAdapterRuntime();
   const request = runtime.validateRequest({
     schemaVersion: "1",
@@ -682,7 +726,7 @@ function createPageEnvelope(route, query, state, now) {
   }
   const records = canonicalLogRecords(checkedState);
   const hosts = normalizeHosts(checkedState);
-  const sources = normalizeSources(checkedState, records, nowDate);
+  const sources = normalizeSources(checkedState, records, nowDate, undefined, undefined, projectSourceHealth);
   const projectors = {
     "/": () => projectOverview(checkedState, records, sources, nowDate),
     "/sources": () => projectSources(checkedState, records, sources, nowDate),
@@ -693,7 +737,7 @@ function createPageEnvelope(route, query, state, now) {
   return runtime.validateEnvelope(projectors[route](), route);
 }
 
-function createIndexedPageEnvelope(route, query, store, now) {
+function createIndexedPageEnvelope(route, query, store, now, projectSourceHealth) {
   const runtime = loadAdapterRuntime();
   const request = runtime.validateRequest({ schemaVersion: "1", route, query: query || {}, reason: "navigation" });
   const state = store.controlSnapshot();
@@ -711,10 +755,12 @@ function createIndexedPageEnvelope(route, query, store, now) {
       if (selection.sourceLimit) envelope.summary += " Latest-report summaries are limited to the 200 most recent reporting sources.";
       return runtime.validateEnvelope(envelope, route);
     }
-    return createPageEnvelope(route, request.query, state, nowDate);
+    return createPageEnvelope(route, request.query, state, nowDate, projectSourceHealth);
   }
   const totals = store.logSummary();
-  const sources = normalizeSources(state, [], nowDate, totals.counts);
+  const activitySources = ["/sources", "/health"].includes(route) ? state.sources.filter(source => source.connectorType === "server-log-push" && source.state !== "removed")
+    .sort((left, right) => left.displayName.localeCompare(right.displayName)).slice(0, MAX_TABLE_ROWS).map(source => source.sourceId) : [];
+  const sources = normalizeSources(state, [], nowDate, totals.counts, typeof store.sourceActivity === "function" ? store.sourceActivity(activitySources) : new Map(), projectSourceHealth);
   const hosts = normalizeHosts(state);
   const retained = { length: totals.count };
   let envelope;

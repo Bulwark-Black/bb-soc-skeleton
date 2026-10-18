@@ -14,7 +14,7 @@ adoption review, not a formal security assessment, deployment certification, or
 benchmark result. CI, repository workflows, branch protections and release
 automation are outside its scope.
 
-**Vendor-pack update:** ten checked-in vendor export/API-page normalizers,
+**Vendor-pack update:** fifteen checked-in vendor export/API-page normalizers,
 Sources → Vendor imports, and an external durable SQLite outbox now ship.
 Read the [vendor setup and delivery guide](VENDOR-INTEGRATIONS.md) for exact
 supported formats, permissions, queue behavior and limitations.
@@ -101,7 +101,7 @@ only a complete successful API window proves collection, including empty windows
 
 Custom installation is human-authorized, revision-checked and audited. Each
 manifest is at most 64 KiB; the registry supports at most 86 custom definitions
-alongside 14 built-ins, respecting the 100-entry contract bound. Connector
+alongside 16 built-ins, respecting the 102-entry contract bound. Connector
 types are lowercase identifiers beginning with a letter, using letters,
 digits, periods or hyphens, at most 80 characters. An installed type cannot
 replace a built-in or an existing type. Use a new type for a changed contract.

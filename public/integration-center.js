@@ -184,6 +184,9 @@
       filters.append(form); container.insertBefore(filters, content);
       function choice(label, name) { const wrapper = el("label", label, "form-field"), select = el("select"); select.name = name; const all = el("option", "All"); all.value = ""; select.append(all); wrapper.append(select); form.append(wrapper); return select; }
       const app = choice("Application", "appFilter"), source = choice("Source", "sourceFilter"), kind = choice("Record kind", "kindFilter");
+      const after = field("Observed at or after (local time)", "observedAfterFilter", "datetime-local", false);
+      const before = field("Observed before (local time)", "observedBeforeFilter", "datetime-local", false);
+      form.append(el("p", "Times use your browser's local timezone. The start is included and the end is excluded. Leave either bound empty to search all retained observations on that side.", "muted"));
       const apply = button("Apply filters"); apply.type = "submit"; form.append(apply);
       let previousOffsets = [];
       const previous = button("Previous page", () => {
@@ -200,6 +203,13 @@
       async function readObservations(requestedOffset = offset, history = previousOffsets) {
         const query = new URLSearchParams({ limit: "25", offset: String(requestedOffset) });
         if (app.value) query.set("appId", app.value); if (source.value) query.set("sourceId", source.value); if (kind.value) query.set("kinds", kind.value);
+        for (const [name, input] of [["observedAfter", after], ["observedBefore", before]]) {
+          if (!input.value) continue;
+          const timestamp = new Date(input.value);
+          if (!Number.isFinite(timestamp.getTime())) throw new Error("Choose a valid observed time before applying filters.");
+          query.set(name, timestamp.toISOString());
+        }
+        if (query.has("observedAfter") && query.has("observedBefore") && query.get("observedAfter") >= query.get("observedBefore")) throw new Error("The observed start must be earlier than the end.");
         const data = await request(API + "/observations?" + query); if (disposed) return;
         offset = requestedOffset; previousOffsets = history;
         setDirty(false); nextOffset = offset + data.records.length;
@@ -207,10 +217,10 @@
         const rows = data.records.map((record) => {
           const source = context.get(record.sourceId), detail = el("details");
           detail.append(el("summary", record.payload.title), el("p", "Record ID: " + record.recordId), el("pre", JSON.stringify(record.payload, null, 2)));
-          return [record.observedAt, source ? source.application + " / " + source.environment : record.estateId, source ? source.displayName + " (" + source.state + ")" : record.sourceId, record.kind, record.payload.state, detail];
+          return [record.observedAt, source ? source.application + " / " + source.environment : record.estateId, source ? source.displayName + " (" + source.state + ")" : record.sourceId, record.kind, record.payload.state, record.payload.severity || "Not reported", detail];
         });
         content.replaceChildren(el("h2", "Stored canonical facts"), el("p", "These are upstream observations, not independently verified verdicts or locally approved workflow records. No uploaded text can run scripts, fetch links, or issue commands here.", "muted"),
-          table("Received canonical observations", ["Observed", "Application / environment", "Source / lifecycle", "Kind", "Reported state", "Details"], rows), previous, document.createTextNode(" "), next);
+          table("Received canonical observations", ["Observed", "Application / environment", "Source / lifecycle", "Kind", "Reported state", "Reported severity", "Details"], rows), previous, document.createTextNode(" "), next);
         previous.dataset.unavailable = String(!previousOffsets.length); next.dataset.unavailable = String(!data.hasMore || !data.records.length);
         notice(data.matched + " matching retained records; showing " + data.records.length + " from offset " + offset + ". Retention may remove older data; this is not a complete historical archive.");
       }

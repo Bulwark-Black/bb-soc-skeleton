@@ -5,8 +5,10 @@
 const ConnectorContract = require("../public/connector-contract");
 const { REFERENCE_CONNECTOR_MANIFESTS } = require("./reference-manifest");
 
-const MAX_INTEGRATION_MANIFESTS = 100;
-const MAX_CUSTOM_INTEGRATIONS = MAX_INTEGRATION_MANIFESTS - REFERENCE_CONNECTOR_MANIFESTS.length;
+// Built-in additions must not consume an operator's already occupied slots.
+// Keep the original custom capacity, including when reopening existing stores.
+const MAX_CUSTOM_INTEGRATIONS = 86;
+const MAX_INTEGRATION_MANIFESTS = MAX_CUSTOM_INTEGRATIONS + REFERENCE_CONNECTOR_MANIFESTS.length;
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const BUILTIN_TYPES = new Set(REFERENCE_CONNECTOR_MANIFESTS.map((manifest) => manifest.connectorType));
 

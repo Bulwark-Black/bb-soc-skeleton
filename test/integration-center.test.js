@@ -181,3 +181,31 @@ test("static integration center performs no requests and disposing an active wid
   assert.equal(active.container.textContent, before);
   assert.equal(active.errors.length, 0);
 });
+
+test("observations apply local-time bounds with source/kind filters and display reported severity", async t => {
+  const observedQueries = [];
+  const h = harness(t, { mode: "observations", fetch: url => {
+    if (url === API) return response(catalog());
+    if (url.startsWith("/api/v1/control/snapshot")) return response({ apps: [], setups: [], sources: [{ sourceId: "server-source", displayName: "Server", environment: "test" }] });
+    const query = new URL(url, "http://127.0.0.1").searchParams; observedQueries.push(Object.fromEntries(query));
+    return response({ matched: 1, hasMore: false, sourceContexts: [], records: [{ sourceId: "server-source", estateId: "server-app", kind: "log.event",
+      recordId: "synthetic-server-log", observedAt: "2026-10-18T12:00:00.000Z", payload: { title: "Synthetic server event", state: "failed", severity: "high", message: "Synthetic error" } }] });
+  } });
+  await settle();
+  assert.equal(observedQueries[0].observedAfter, undefined); assert.equal(observedQueries[0].observedBefore, undefined);
+  assert.match(h.container.textContent, /Reported severity/); assert.match(h.container.textContent, /high/);
+  input(h.field("sourceFilter"), "server-source", "change"); input(h.field("kindFilter"), "log.event", "change");
+  input(h.field("observedAfterFilter"), "2026-10-18T01:00"); input(h.field("observedBeforeFilter"), "2026-10-18T03:00");
+  h.form().requestSubmit(); await settle();
+  assert.deepEqual(observedQueries.at(-1), { limit: "25", offset: "0", sourceId: "server-source", kinds: "log.event",
+    observedAfter: new Date("2026-10-18T01:00").toISOString(), observedBefore: new Date("2026-10-18T03:00").toISOString() });
+  input(h.field("observedAfterFilter"), "2026-10-18T04:00");
+  const before = observedQueries.length; h.form().requestSubmit(); await settle();
+  assert.equal(observedQueries.length, before, "an inverted range is refused before requesting records");
+  assert.match(h.container.textContent, /start must be earlier/); assert.equal(h.cleanup.isDirty(), true);
+  input(h.field("observedAfterFilter"), "invalid date"); h.form().requestSubmit(); await settle();
+  assert.equal(observedQueries.length, before); assert.match(h.container.textContent, /valid observed time/);
+  input(h.field("observedAfterFilter"), ""); input(h.field("observedBeforeFilter"), ""); h.form().requestSubmit(); await settle();
+  assert.equal(observedQueries.at(-1).observedAfter, undefined); assert.equal(observedQueries.at(-1).observedBefore, undefined);
+  assert.equal(h.cleanup.isDirty(), false);
+});

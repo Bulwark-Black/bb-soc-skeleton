@@ -33,7 +33,7 @@ test("private integration HTTP workflow installs, binds, validates, receives, pr
   const signed = await request("/api/auth/sign-in/email", { body: { email: "integration@example.invalid", password } });
   assert.equal(signed.status, 200); cookie = signed.headers.getSetCookie().map((value) => value.split(";")[0]).join("; "); await signed.arrayBuffer();
   let catalog = await expect(request("/api/v1/integrations"), 200);
-  assert.equal(catalog.recordKinds.length, 29); assert.equal(catalog.integrations.length, 14); assert.ok(catalog.coverage.length > 30);
+  assert.equal(catalog.recordKinds.length, 29); assert.equal(catalog.integrations.length, 16); assert.ok(catalog.coverage.length > 30);
   const manifest = structuredClone(REFERENCE_CONNECTOR_MANIFESTS.find((item) => item.connectorType === "canonical-events"));
   manifest.connectorType = "reviewed-web-events"; manifest.displayName = "Reviewed application events";
   manifest.supportedSourceKinds = ["application.events"];

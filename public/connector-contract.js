@@ -1082,7 +1082,7 @@
       ], label);
       if (value.schemaVersion !== VERSION) throw new TypeError(`${label}.schemaVersion must be ${VERSION}.`);
       if (value.documentType !== "connector-control-snapshot") throw new TypeError(`${label}.documentType must be connector-control-snapshot.`);
-      assertArray(value.connectorTypes, `${label}.connectorTypes`, 0, 100);
+      assertArray(value.connectorTypes, `${label}.connectorTypes`, 0, 102);
       const connectorTypes = value.connectorTypes.map(validateConnectorManifest);
       const manifestMap = new Map();
       connectorTypes.forEach((manifest) => {

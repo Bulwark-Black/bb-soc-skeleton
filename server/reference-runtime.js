@@ -3,6 +3,7 @@
 const crypto = require("node:crypto");
 const ConnectorContract = require("../public/connector-contract");
 const { validateIngestBatch, validateNormalizedRecord, validateTimestamp } = require("../tools/ingest-contract");
+const { validateCollectionRecord } = require("../tools/log-collection-contract");
 const { currentOperator } = require("./operator-context");
 const {
   scaledHealthThresholds
@@ -97,6 +98,35 @@ function addChange(state, resourceType, resourceId, action, status, at, message)
   trimBounded(state.changes, 200);
 }
 
+function serverLogHealth(source, now, proof, records, received) {
+  const previous = source.health;
+  const at = proof && new Date(proof.observedAt).toISOString();
+  // Receipt replay exits before the transaction. Repeated records in a new
+  // receipt and older proofs also cannot move collection time or repair failure.
+  const newer = at && (!previous.lastAttemptAt || Date.parse(at) > Date.parse(previous.lastAttemptAt)
+    || (Date.parse(at) === Date.parse(previous.lastAttemptAt) && !proof.payload.fields.ok));
+  const updates = { receivedRecords: received, acceptedRecords: records.length,
+    message: previous.lastAttemptAt ? previous.message : "Awaiting a completed server-log read; log delivery alone does not prove collection health." };
+  let state = previous.state, reason = previous.reason;
+  if (newer) {
+    const { ok, linesRead, linesDropped, inputsRead, inputsPlanned } = proof.payload.fields;
+    Object.assign(updates, { attempts: 1, successfulAttempts: ok ? 1 : 0, lastAttemptAt: at,
+      nextExpectedAt: new Date(Date.parse(at) + source.config["cadence-seconds"] * 1000).toISOString() });
+    if (ok) {
+      updates.lastSuccessAt = at;
+      const age = (Date.parse(now) - Date.parse(at)) / 1000;
+      const thresholds = scaledHealthThresholds(source.connectorType, source.config["cadence-seconds"]);
+      state = age > thresholds.offlineAfterSeconds ? "offline" : age > thresholds.staleAfterSeconds ? "stale" : "healthy";
+      reason = state === "healthy" ? "none" : "late";
+      updates.message = `Completed server-log read: ${inputsRead}/${inputsPlanned} inputs, ${linesRead} lines read, ${linesDropped} dropped. Collection freshness uses completion time, not delivery time.`;
+    } else {
+      state = "degraded"; reason = "connector-error";
+      updates.message = `Server-log read failed: ${proof.payload.fields.error || "collection-failed"}; ${inputsRead}/${inputsPlanned} inputs, ${linesRead} lines read, ${linesDropped} dropped. Coverage is incomplete.`;
+    }
+  }
+  return makeHealth(source, now, state, reason, updates);
+}
+
 function resultWithoutCredential(result) {
   const safe = clone(result);
   if (safe.output) delete safe.output.oneTimeCredential;
@@ -176,7 +206,7 @@ class ReferenceControlPlane {
       throw new TypeError("Reference ingest TTL must be from one minute through one year.");
     }
     this.enabledConnectorTypes = new Set(options.enabledConnectorTypes || ["canonical-push"]);
-    if ([...this.enabledConnectorTypes].some((type) => !["canonical-push", "canonical-events", "trivy-report"].includes(type))) throw new TypeError("An unimplemented connector driver cannot be enabled.");
+    if ([...this.enabledConnectorTypes].some((type) => !["canonical-push", "canonical-events", "trivy-report", "native-monitor"].includes(type))) throw new TypeError("An unimplemented connector driver cannot be enabled.");
     this.store = options.store || new ReferenceStateStore({ directory: options.stateDirectory, clock: this.clock });
   }
 
@@ -194,7 +224,7 @@ class ReferenceControlPlane {
 
   connectorAvailable(type, state = this.controlState()) {
     return this.enabledConnectorTypes.has(type) || (this.enabledConnectorTypes.has("canonical-events")
-      && (state.integrationManifests || []).some((manifest) => manifest.connectorType === type));
+      && (type === "server-log-push" || (state.integrationManifests || []).some((manifest) => manifest.connectorType === type)));
   }
 
   listIntegrations() {
@@ -280,18 +310,26 @@ class ReferenceControlPlane {
       const projected = clone(source);
       const cadence = source.config["cadence-seconds"];
       const thresholds = scaledHealthThresholds(source.connectorType, cadence, manifestsByType.get(source.connectorType));
-      if (source.state === "active" && source.health.lastSuccessAt) {
+      const serverLog = source.connectorType === "server-log-push";
+      if (source.state === "active" && source.health.lastSuccessAt
+          && !(serverLog && ["pending", "degraded", "error"].includes(source.health.state))) {
         const ageSeconds = Math.max(0, (now.getTime() - Date.parse(source.health.lastSuccessAt)) / 1000);
         if (ageSeconds > thresholds.offlineAfterSeconds) {
-          projected.health = makeHealth(projected, now.toISOString(), "offline", "late", { message: "No successful delivery within the manifest-scaled offline threshold." });
+          projected.health = makeHealth(projected, now.toISOString(), "offline", "late", { message: serverLog
+            ? "No successful completed server-log read within the offline threshold. Delivery does not refresh collection health."
+            : "No successful delivery within the manifest-scaled offline threshold." });
         } else if (ageSeconds > thresholds.staleAfterSeconds) {
-          projected.health = makeHealth(projected, now.toISOString(), "stale", "late", { message: "The latest delivery exceeds the manifest-scaled stale threshold." });
+          projected.health = makeHealth(projected, now.toISOString(), "stale", "late", { message: serverLog
+            ? "The latest completed server-log read exceeds the stale threshold. Delivery does not refresh collection health."
+            : "The latest delivery exceeds the manifest-scaled stale threshold." });
         } else {
           projected.health.observedAt = now.toISOString();
         }
       } else {
         projected.health.observedAt = now.toISOString();
       }
+      const nativeHealth = this.nativeSourceHealth(source, now);
+      if (nativeHealth) projected.health = nativeHealth;
       return projected;
     });
     const document = {
@@ -309,10 +347,19 @@ class ReferenceControlPlane {
     return ConnectorContract.validateControlSnapshot(document);
   }
 
+  nativeSourceHealth(source, now) {
+    if (source.connectorType !== "native-monitor" || source.state !== "active") return null;
+    const native = this.monitoringHealth ? this.monitoringHealth(source) : null;
+    return ConnectorContract.validateSourceHealthSnapshot(makeHealth(source, now.toISOString(), native?.state || "pending", native?.reason || "awaiting-first-delivery",
+      { ...native, message: native?.message || "Configure the Operations registry and collect native measurements. Health is evaluated in the Operations store." }));
+  }
+
   readPage(route, query) {
+    const now = dateAt(this.clock);
+    const projectSourceHealth = source => this.nativeSourceHealth(source, now);
     return typeof this.store.logQuery === "function"
-      ? createIndexedPageEnvelope(route, query || {}, this.store, dateAt(this.clock))
-      : createPageEnvelope(route, query || {}, this.store.snapshot(), dateAt(this.clock));
+      ? createIndexedPageEnvelope(route, query || {}, this.store, now, projectSourceHealth)
+      : createPageEnvelope(route, query || {}, this.store.snapshot(), now, projectSourceHealth);
   }
 
   execute(requestValue) {
@@ -524,7 +571,8 @@ class ReferenceControlPlane {
     if (source.hostId && (!host || host.connectionState !== "proven" || proofAge < 0 || proofAge > CONNECTION_STALE_MS)) {
       throw new ReferenceControlError("test-failed", "Complete the one-time connection check before testing this source.", { status: 422 });
     }
-    if (source.connectorType === "canonical-push" && !source.hostId && !request.input.sample) throw new ReferenceControlError("test-failed", "Paste a real, redacted log sample before activating this application source.", { status: 422 });
+    if (["canonical-push", "server-log-push"].includes(source.connectorType) && !source.hostId && !request.input.sample
+        && !(source.connectorType === "server-log-push" && request.input.recordSample)) throw new ReferenceControlError("test-failed", "Paste a real, redacted log sample before activating this application source.", { status: 422 });
     const canonicalIntegration = source.connectorType === "canonical-events"
       || (state.integrationManifests || []).some((manifest) => manifest.connectorType === source.connectorType);
     if (canonicalIntegration && !request.input.recordSample) throw new ReferenceControlError("test-failed", "Provide a real, redacted complete canonical record before activating this integration source.", { status: 422 });
@@ -534,6 +582,7 @@ class ReferenceControlPlane {
         const manifest = getIntegrationManifest(state, source.connectorType);
         if (sample.sourceId !== source.sourceId || sample.estateId !== source.appId || !manifest.payload.recordKinds.includes(sample.kind)
             || Date.parse(sample.observedAt) > dateAt(this.clock).getTime() + REQUEST_FUTURE_SKEW_MS) throw new TypeError("Sample binding does not match.");
+        if (source.connectorType === "server-log-push" && sample.kind === "source.heartbeat") validateCollectionRecord(request.input.recordSample);
       } catch {
         throw new ReferenceControlError("test-failed", "The canonical sample kind, source/application binding, timestamp or payload is invalid.", { status: 422 });
       }
@@ -872,6 +921,22 @@ class ReferenceControlPlane {
     }
   }
 
+  authorizePlatformSource(credentialValue) {
+    const presentedHash = hashCredential(credentialValue), state = this.controlState();
+    const credential = presentedHash && state.sourceCredentials.find(entry => secureEqualHex(entry.hash, presentedHash));
+    if (!credential || credential.revokedAt !== null || Date.parse(credential.expiresAt) <= dateAt(this.clock).getTime()) {
+      throw new ReferenceControlError("not-authorized", "Source ingest credential is invalid or expired.", { status: 401 });
+    }
+    const source = state.sources.find(entry => entry.sourceId === credential.sourceId);
+    const { listVendorAdapters } = require("../tools/vendor-adapters");
+    const selected = source && listVendorAdapters().find(item => item.id === source.sourceKind);
+    if (!selected || source.connectorType !== selected.manifest.connectorType || !this.connectorAvailable(source.connectorType, state)) {
+      throw new ReferenceControlError("not-authorized", "Credential requires an installed platform adapter source.", { status: 403 });
+    }
+    if (source.state !== "active") throw new ReferenceControlError("activation-blocked", "Source is not active.", { status: 409 });
+    return clone(source);
+  }
+
   authorizeScannerSource(sourceId, credentialValue) {
     const presentedHash = hashCredential(credentialValue);
     const state = this.controlState();
@@ -883,6 +948,22 @@ class ReferenceControlPlane {
     const source = state.sources.find((entry) => entry.sourceId === sourceId);
     if (!source || source.connectorType !== "trivy-report" || !this.enabledConnectorTypes.has("trivy-report")) {
       throw new ReferenceControlError("not-authorized", "Credential is not bound to an installed report source.", { status: 403 });
+    }
+    if (source.state !== "active") throw new ReferenceControlError("activation-blocked", "Source is not active.", { status: 409 });
+    return clone(source);
+  }
+
+  authorizeMonitoringSource(sourceId, credentialValue) {
+    const presentedHash = hashCredential(credentialValue);
+    const state = this.controlState();
+    const credential = presentedHash && state.sourceCredentials.find(entry => secureEqualHex(entry.hash, presentedHash));
+    if (!credential || credential.revokedAt !== null || Date.parse(credential.expiresAt) <= dateAt(this.clock).getTime()) {
+      throw new ReferenceControlError("not-authorized", "Source ingest credential is invalid or expired.", { status: 401 });
+    }
+    if (credential.sourceId !== sourceId) throw new ReferenceControlError("not-authorized", "Credential is not bound to this source.", { status: 403 });
+    const source = state.sources.find(entry => entry.sourceId === sourceId);
+    if (!source || source.connectorType !== "native-monitor" || !this.enabledConnectorTypes.has("native-monitor")) {
+      throw new ReferenceControlError("not-authorized", "Credential is not bound to an installed native monitoring source.", { status: 403 });
     }
     if (source.state !== "active") throw new ReferenceControlError("activation-blocked", "Source is not active.", { status: 409 });
     return clone(source);
@@ -910,6 +991,7 @@ class ReferenceControlPlane {
     if (!operatorImport && sourceCredential.sourceId !== batch.sourceId) throw new ReferenceControlError("not-authorized", "Credential is not bound to this source.", { status: 403 });
     const source = state.sources.find((entry) => entry.sourceId === batch.sourceId);
     if (!source || source.state !== "active") throw new ReferenceControlError("activation-blocked", "Source is not active.", { status: 409 });
+    if (source.connectorType === "native-monitor") throw new ReferenceControlError("validation-failed", "Native monitoring sources require their dedicated monitoring endpoint.", { status: 422 });
     if (!this.connectorAvailable(source.connectorType, state)) {
       throw new ReferenceControlError("connector-unavailable", "The requested source admission driver is not enabled.", { status: 422 });
     }
@@ -922,6 +1004,20 @@ class ReferenceControlPlane {
     if (scannerImport && source.connectorType !== "trivy-report") throw new ReferenceControlError("validation-failed", "Report-import credentials must belong to a Trivy report source.", { status: 422 });
     if (batch.records.some((record) => record.estateId !== source.appId)) {
       throw new ReferenceControlError("not-authorized", "Record estateId does not match the source application.", { status: 403, field: "records.estateId" });
+    }
+    let collectionProof = null;
+    if (source.connectorType === "server-log-push") {
+      const proofs = batchValue.records.filter(record => record.kind === "source.heartbeat");
+      try {
+        if (proofs.length > 1) throw new TypeError();
+        if (proofs.length) {
+          collectionProof = validateCollectionRecord(proofs[0]);
+          if (Date.parse(collectionProof.observedAt) > nowDate.getTime()
+              || Date.parse(collectionProof.observedAt) < Date.parse(source.createdAt)) throw new TypeError();
+        }
+      } catch {
+        throw new ReferenceControlError("validation-failed", "Server log batches accept at most one exact collection proof, completed between source creation and receipt time.", { status: 422 });
+      }
     }
     if (typeof this.store.assertReplayWindow === "function") this.store.assertReplayWindow(batch.sentAt, nowDate.toISOString());
     const priorReceipt = typeof this.store.findReceipt === "function"
@@ -969,7 +1065,9 @@ class ReferenceControlPlane {
       action: "ingest.accept", actor: operatorImport ? currentOperator() : "loopback:source", targetType: "source", targetId: source.sourceId,
       detail: "durably accepted bounded normalized record batch"
     }, (next) => {
-      newRecords.forEach((record) => next.records.push({
+      const derivedRecords = this.detectionEngine ? this.detectionEngine.derive(newRecords) : [];
+      this.store.derivedRecordIds = new Set(derivedRecords.map(record => record.recordId));
+      [...newRecords, ...derivedRecords].forEach((record) => next.records.push({
         ...clone(record), connectorInstanceId: source.connectorInstanceId,
         ...(source.hostId ? { hostId: source.hostId } : {}), receivedAt: now
       }));
@@ -984,7 +1082,9 @@ class ReferenceControlPlane {
       const mutableSource = next.sources.find((entry) => entry.sourceId === source.sourceId);
       mutableSource.revision += 1;
       mutableSource.updatedAt = now;
-      mutableSource.health = makeHealth(mutableSource, now, "healthy", "none", {
+      mutableSource.health = source.connectorType === "server-log-push"
+        ? serverLogHealth(mutableSource, now, collectionProof && newRecords.find(record => record.recordId === collectionProof.recordId), newRecords, batch.records.length)
+        : makeHealth(mutableSource, now, "healthy", "none", {
         lastAttemptAt: now, lastSuccessAt: now, nextExpectedAt,
         attempts: 1, successfulAttempts: 1, receivedRecords: batch.records.length,
         acceptedRecords: newRecords.length, message: "A normalized record batch was durably accepted."

@@ -7,7 +7,7 @@ what the adopting stack must provide, how applications, hosts, connector
 instances, and sources are registered, how telemetry becomes canonical records,
 and how those records populate every screen. Section 55 describes the current
 universal/custom canonical integration path, sender, received-observation views
-and exact boundaries. Section 56 covers ten vendor import mappings and the
+and exact boundaries. Section 56 covers fifteen vendor import mappings and the
 durable sender queue; section 57 covers the built-in Sentry collector, encrypted
 credential onboarding, collection health and optional Slack delivery.
 Sections 58 through 63 explain the guided setup center, custom sample mapping,
@@ -133,7 +133,7 @@ boundaries. It includes:
 - a loopback-only reference control plane;
 - hashed one-time host and source credentials in reference mode;
 - bounded canonical log, universal canonical-event and Trivy report admission,
-  with human-installed immutable custom definitions and ten vendor mappings;
+  with human-installed immutable custom definitions and fifteen vendor mappings;
 - one supervised Sentry Cloud collector with guided secret onboarding,
   durable checkpoints, verified quiet-poll health, local alerts and optional Slack;
 - resumable application/source setup and read-only local evidence checks,
@@ -174,9 +174,9 @@ documents the implemented catalog; section 10 also discusses the unshipped
 executable-package lifecycle. Do not imply that the
 current browser can download or execute an arbitrary third-party connector.
 
-There are 40 registered paths: the original 38 SOC routes plus Documents and
-Technical Docs. Of the 39 non-docs routes, 30 are primary and nine are linked
-details. The private service populates five canonical-log read surfaces plus
+There are 48 registered paths: the original 38 SOC routes, eight dedicated
+Operations/report pages, Documents and Technical Docs. Of the 47 non-docs routes,
+38 are primary and nine are linked details. The private service populates five canonical-log read surfaces plus
 its source, agent/governance, and document management workflows. Other screens
 remain structural until their real record producers and projectors are built.
 See section 48 for the capability matrix and sections 49–52 for setup,
@@ -2751,7 +2751,7 @@ Origin values intact through the proxy.
 Canonical log push currently feeds Overview, Sources, Logs, Analytics, and SOC
 Health. The document library and administration workflows use their own service
 state rather than pretending a log entry is a document, prompt, attestation, or
-risk. The 40-path catalog consists of 38 SOC paths, Documents, and Technical
+risk. The 48-path catalog consists of 38 adapter SOC paths, eight Operations/report pages, Documents, and Technical
 Docs; 30 are primary destinations, nine are linked details, and Docs is local
 implementation guidance.
 
@@ -3616,7 +3616,7 @@ operations; updating a source requires revalidation and fresh activation.
 The registry is saved in the same control-state transaction as its audit entry.
 Concurrent changes use the telemetry control revision and return 409 on a stale
 revision. Refresh and review before resubmitting. The registry is bounded to
-100 types: 14 built-ins and at most 86 custom definitions. Each custom manifest
+102 types: 16 built-ins and at most 86 custom definitions. Each custom manifest
 is at most 64 KiB; the installation request allows 66 KiB including its envelope.
 These are implementation bounds, not an allowlist of vendors or a claim of
 unlimited sources. Existing bounded control snapshots and telemetry capacity
@@ -5148,5 +5148,134 @@ activation, credential issuance, agent privilege expansion and prompt activation
 remain blocked through private MCP. Live collector creation, vendor imports,
 document upload, guide writes and generic filesystem/shell access are not tools
 in this bridge. Human or separately approved external-host work is required.
+
+## 65. Server logs and collector health
+
+Sources → Server logs explains the new private `server-log-push` source, with
+source kind `server.log`, optional collector host, and the existing canonical
+admission/authentication boundary. This driver is enabled in private mode;
+the default reference workbench stays limited to canonical log push.
+
+The external `collect:logs` CLI reads a reviewed plain-text, Docker JSON or
+journald JSON file. Preview returns one normalized record for source testing
+without persistent state or network access. After activation, a source token
+file authenticates bounded delivery; MCP/service credentials cannot replace it.
+Use one source, dedicated owner-only reader state and separate private outbox
+per input. Paths must be canonical and outside the checkout. The input and
+its messages must already be reviewed/redacted; no automatic redactor is implied.
+
+~~~sh
+npm run collect:logs -- --help
+npm run events -- --help
+~~~
+
+The file reader persists an exact pending batch, durably enqueues it and only
+then advances its cursor. Restart reuses the original batch and receipt. Prior
+unfinished delivery is resolved before reading farther. One pass is bounded to
+100 logs and 1 MiB scanned; messages are at most 4,000 characters. A partial
+line, invalid record, changed file or queue failure is not silently skipped.
+Device/inode and content anchors bind the checkpoint. Automatic rotation and
+copy-truncation recovery are not implemented. Schedule bounded passes externally
+and monitor exit status, backlog and queue state. Keep input/state/queue backups
+and reconcile filesystem identity changes deliberately.
+
+The exact collection proof uses the existing `source.heartbeat` kind with
+category `log-collection`. Fields are `collectorSchemaVersion` (1),
+`inputsPlanned`, `inputsRead`, `linesRead`, `linesDropped`, `ok` and `error`.
+A successful proof means all planned inputs were read with zero drops and no
+error; the failure code vocabulary is closed. `observedAt` is original read
+completion. A batch has at most one proof. Log-only chunks do not turn
+collection healthy. Replays and older proofs cannot overwrite newer health,
+and delivering an old proof does not make its read fresh. Quiet successful
+reads add no log events. This is a source-authenticated claim, not independent
+host verification or a guarantee of complete monitoring coverage.
+
+Sources and Health show reader completion, last delivery and latest retained
+log event independently. Received observations adds local-time start/end
+filters (inclusive/exclusive) and reported severity; the collector does not
+infer security severity. Guided setup's custom path recognizes reader evidence.
+
+The `events` CLI exposes enqueue/status/drain/retry for all canonical batches,
+including custom mapper output, using the existing bounded SQLite outbox.
+Its explicit `prune --before RFC3339` removes only delivered receipts strictly
+older than a cutoff at least 24 hours old, preserving unfinished delivery and
+the queue's inode. No automatic pruning occurs. The queue still has 10,000
+entries, 64 MiB pending bytes, ten attempts and a seven-day pending age limit;
+operators must monitor capacity, prune reviewed receipt history and resolve
+blocked work. Delayed delivery must fit the receiver's retention/replay policy.
+
+Read **docs/SERVER-LOGS.md** for exact commands, format behavior, privacy,
+commissioning and recovery. This portable update does not install private
+rules, detection tuning, triage mutations, phishing/intel adapters or scanner
+runners. Existing private credentials, paths, host inventory and records stay
+outside this public baseline.
+
+## 66. Native monitoring and Operations
+
+The deployed October 18 monitoring upgrade adds seven Operations boards and
+Analyst reports, using the private session/source boundaries. They are dedicated
+application pages, separate from canonical page envelopes. The total shell
+catalog is now 48 paths: the original 38 adapter routes, eight Operations/report
+pages, Documents and Technical Docs. Agent Management retains its own route.
+
+Read **docs/NATIVE-OPERATIONS.md** for reviewed external configuration, collector
+commands, endpoint schemas, lifecycle meaning, storage, commissioning and port
+boundaries. The private state file `operations-config.json` starts absent/empty;
+no production inventory or employee roster is installed. Register an application
+and a native-monitor source first, bind its actual source ID to a configured
+host, then restart with the reviewed registry. Each application's monitoring
+SQLite database is isolated. Machine admission requires that active source's
+credential and rejects browser cookies; operator writes require sessions and
+same-origin requests. MCP has no native observation or operational write scope.
+
+The native engine retains metric quality, freshness, dwell/hysteresis, service
+failure/recovery counts, immutable stream/sequence receipts, incidents and
+rollups. Late/future data cannot refresh current health. Charts preserve gaps,
+min/max, thresholds, history and bounded data exports. Incident and job history
+use scoped snapshot cursors. Acknowledgment and expiring maintenance do not
+alter health. Website probes distinguish observed success from cadence coverage.
+
+Jobs separate execution, schedule evidence, output proof and observer freshness.
+Employee runs and report receipts are distinct. Next-visit guidance requires an
+explicit per-employee read acknowledgment; GET never acknowledges or completes
+work. Assignments retain leases and intent/start/finish/verification evidence;
+uncertain actions must be reconciled before reassignment. The console does not
+execute commands, install schedules or grant an employee authority.
+
+Native notifications support opt-in durable Resend delivery, as described in
+section 67. Production recipients, private routines, custom detection policy
+and deployment watchdogs are not copied. Older
+adapter-owned workflow controls retain their existing documented boundary.
+
+## 67. Notifications and expanded platform ingestion
+
+Native incident email can be enabled per application through reviewed private
+configuration and an external Resend credential. The worker persists recipient,
+payload, provider key and request evidence before sending. Pausing stops sends;
+ambiguous responses keep their exact retry identity within the provider window.
+Operations exposes pause and audited reconciliation controls. Read
+**docs/NATIVE-NOTIFICATIONS.md** before enabling a recipient. Canonical security
+findings and native incidents have separate lifecycles.
+
+The vendor catalog now includes 15 mappings. **docs/WINDOWS-EVENTS.md** describes
+the Windows EventLogReader/WEF collector, origin identity, durable bookmarks,
+pending delivery and channel-gap recovery. **docs/PLATFORM-COVERAGE.md** gives
+the supported RFC5424, CEF, OTLP JSON and Microsoft 365 content-record formats,
+plus a deployment plan informed by Checkmk, Wazuh, Fluent Bit and OpenTelemetry.
+Those external products are not installed or directly connected by this update.
+
+**docs/PLATFORM-INGEST.md** documents the source-authenticated
+POST /api/v1/ingest/platform gateway. It accepts the BB envelope, validates the
+bound adapter, normalizes supplied records and commits a canonical receipt.
+It is not a syslog socket, native OTLP receiver or background cloud poller.
+
+The private Rules page includes 25 original MIT review rules. Enable a reviewed
+application policy through owner-only detection-config.json and restart.
+**docs/DETECTION-RULES.md** specifies field/version prerequisites, fixed event-time
+buckets, durable deduplication, atomic findings, limits and commissioning.
+Imported rules are not automatically executed. A configured source or rule
+is not proof of complete collection. Windows live-host commissioning and
+deployment-specific scheduler, audit policy, secrets and network setup remain
+the adopter's responsibility.
 
 End of version-1 technical implementation manual.

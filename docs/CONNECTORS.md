@@ -2,7 +2,8 @@
 
 For the current runnable integration path, start with the
 [integration review and implementation map](INTEGRATION-REVIEW.md). Private
-mode supports narrow log push, universal canonical events, custom immutable
+mode supports narrow log push, the proof-bearing `server-log-push` collector,
+universal canonical events, custom immutable
 canonical-push definitions registered through Sources → Integrations, and the
 separate Trivy report importer. An external adapter translates vendor payloads
 into the 29 canonical kinds; definitions cannot execute code or resolve vendor
@@ -58,10 +59,10 @@ but all provisioned operators have full application access: resource-scoped
 RBAC and multitenancy are not implemented for operators. Private telemetry now
 uses indexed SQLite transactions; administration remains bounded/single-writer.
 Scoped service credentials authorize the narrow MCP control API separately
-from browser sessions and source ingest credentials. Managed secret storage,
-durable queues, multi-process coordination, more vendor drivers, pull
-scheduling, webhook signature handlers, OTLP/syslog listeners and an agent
-runner remain adopter work. See the technical manual for exact service scopes,
+from browser sessions and source ingest credentials. The external SQLite outbox supplies bounded durable delivery, and Sentry has
+a private managed polling loop. Distributed queue coordination, additional
+collectors, external file-collector scheduling, webhook signature handlers,
+OTLP/syslog listeners and an agent runner remain adopter work. See the technical manual for exact service scopes,
 retention, replay, migration and Trivy import limits.
 
 ## Current version-1 vocabulary
@@ -730,3 +731,25 @@ redaction/rotation, source and tenant binding, body-bound replay, partial/crash
 failure, stale/offline health, projector replay, capacity/backpressure,
 dependency-aware removal, and the guarantee that MCP cannot become a telemetry
 or plaintext-secret channel.
+
+## Server log collection proof
+
+The built-in `server-log-push` / `server.log` source is available in the private
+application through canonical admission. It allows `log.event` plus a strictly
+validated `source.heartbeat` reader proof. Existing `canonical-push` and generic
+heartbeat behavior are unchanged. The reference workbench does not enable this
+driver by default. See [the setup and recovery guide](SERVER-LOGS.md).
+
+One proof at most may appear in a batch. Its category is `log-collection` and
+its exact scalar fields are `collectorSchemaVersion`, `inputsPlanned`,
+`inputsRead`, `linesRead`, `linesDropped`, `ok`, and `error`. Version is 1;
+`ok` means every planned input was read, no lines were dropped, and no error
+occurred. Success requires state `ok`; failure requires state `failed` and a
+closed safe error code. Unknown fields and inconsistent claims are rejected.
+
+Collection completion comes from the proof's original `observedAt`, independently
+of the server's delivery receipt time. Log-only chunks cannot turn collection
+healthy; replays and older proofs cannot overwrite newer collection health.
+A quiet proof contains no invented log event. This is an authenticated claim by
+the source credential holder, not independent host attestation or a guarantee
+that the configured inputs cover every relevant log.

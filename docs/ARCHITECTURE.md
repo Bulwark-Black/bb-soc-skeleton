@@ -15,8 +15,11 @@ management. Private telemetry and scoped service credentials use dedicated
 SQLite stores; administration retains the bounded JSON reference core. All
 operators have full access, while service identities have exact installation-
 wide scopes. Granular resource authorization and multitenancy remain adopter
-work. There is no scheduler, durable queue, vendor polling, agent runner or
-remote MCP listener. The stdio MCP client uses scoped private service access.
+work. The private Sentry collector has its own polling loop and notification
+queue. External senders can use a separate SQLite outbox; the file-log collector
+adds a durable cursor and reader proof. External collection scheduling, an agent
+runner and a remote MCP listener remain adopter work. The stdio MCP client uses
+scoped private service access.
 
 The custom integration registry stores immutable data-only manifests within
 the telemetry control transaction. It reuses canonical admission; it never
@@ -25,7 +28,9 @@ The source manifest's allowed record kinds govern admission, and an independent
 coverage catalog governs actual read-only observation screens. Upstream facts
 cannot mutate authored governance, permissions, rules or agent prompts.
 The sender SDK/CLI retries a stable batch with source credentials, but is not a
-durable spool or scheduler. See [the integration review](INTEGRATION-REVIEW.md).
+durable spool or scheduler by itself. The `events` and `vendor` CLIs wrap the
+separate durable outbox; `collect:logs` pairs it with a checkpointed file reader.
+See [server logs](SERVER-LOGS.md) and [the integration review](INTEGRATION-REVIEW.md).
 
 `npm run start:static` retains the dependency-free static preview. A separate
 opt-in development workbench (`start:connectors`) exercises source and
@@ -363,11 +368,11 @@ logout-token validation, and resource authorization belong to the BFF. See
 The UI catalog is the source for route lookup, primary navigation, compact
 selection, detail-parent relationships, titles, focus behavior, and tests.
 
-- **Twenty-seven SOC primary paths** populate the six grouped navigation areas;
-  the local `/documents` library adds a twenty-eighth grouped destination.
+- **Thirty-five SOC primary paths**, including eight Operations/report pages, populate the seven grouped navigation areas;
+  the local `/documents` library adds a thirty-sixth grouped destination.
 - **Two additional primary paths**, `/onboard` and `/settings`, are reached
   through shell controls instead of sidebar destinations. These complete the
-  29-SOC-primary-route set (30 primary destinations including Documents).
+  37-SOC-primary-route set (38 primary destinations including Documents).
 - **Nine detail/utility paths**—`/analyst`, `/event`, `/ip`, `/search`,
   `/host-scan`, `/kev`, `/source`, `/attestation`, `/risk`—remain directly addressable and
   adapter-readable without being duplicated as primary navigation.
@@ -375,7 +380,9 @@ selection, detail-parent relationships, titles, focus behavior, and tests.
   manual and is deliberately excluded from the page, connector, and
   administration providers.
 - **One application-owned local page**, `/documents`, uses the private document
-  API instead of SOC page envelopes. The catalog therefore registers 40 paths.
+  API instead of SOC page envelopes. The eight Operations/report pages also use
+  their private API. The catalog therefore registers 48 paths; the original 38
+  adapter-addressable paths retain their version-1 envelope contract.
 - Unknown paths render not found; they are not normalized to Overview.
 - Query values remain untrusted and are validated/authorized by the host.
 
@@ -551,3 +558,23 @@ action.
 
 CI and GitHub repository-readiness work is intentionally outside this
 architecture. The adopter owns delivery/repository governance.
+
+## Native Operations boundary
+
+Eight dedicated Operations/report pages use session-authenticated reads and writes,
+with source-scoped machine admission into per-application SQLite stores. They are
+separate from the original 38 page-adapter routes. Inventory and employees are
+reviewed private configuration; native notifications stay shadow-only. See
+[NATIVE-OPERATIONS.md](NATIVE-OPERATIONS.md) for schemas, atomicity and lifecycle.
+
+## Platform monitoring expansion
+
+The private application includes source-authenticated platform delivery, a
+Windows Event Log/WEF collector, four additional log import profiles and
+25 opt-in original detection rules. Native incident email uses an external
+Resend credential with durable delivery state and operator reconciliation.
+Read [platform ingestion](PLATFORM-INGEST.md), [platform coverage](PLATFORM-COVERAGE.md),
+[Windows events](WINDOWS-EVENTS.md), [detection rules](DETECTION-RULES.md) and
+[native notifications](NATIVE-NOTIFICATIONS.md) for the exact supported contracts,
+private configuration, tests and deployment-specific prerequisites.
+No checked-in credentials, inventory, enabled rules or recipients are supplied.

@@ -69,9 +69,9 @@ function receipt(value) {
 }
 function respond(response, value, status = 200) { response.writeHead(status, { "Content-Type": "application/json" }); response.end(JSON.stringify(value)); }
 
-test("vendor npm command lists ten adapters as clean JSON and help states the collection boundary", async () => {
+test("vendor npm command lists fifteen adapters as clean JSON and help states the collection boundary", async () => {
   const catalog = success(await run(["list"], { npm: true }));
-  assert.equal(catalog.length, 10); assert.equal(new Set(catalog.map(item => item.id)).size, 10);
+  assert.equal(catalog.length, 15); assert.equal(new Set(catalog.map(item => item.id)).size, 15);
   assert.ok(catalog.every(item => item.automaticPolling === false && item.delivery === "export-or-api-page"));
   const help = await run(["--help"]); assert.equal(help.code, 0); assert.equal(help.stderr, "");
   assert.match(help.stdout, /not automatic vendor polling/); assert.match(help.stdout, /one bounded pass/);

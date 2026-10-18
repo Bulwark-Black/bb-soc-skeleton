@@ -11,6 +11,51 @@ const root = path.resolve(__dirname, "..");
 // happens to live in the repository. New publication surfaces must be reviewed
 // and added here deliberately.
 const requiredTextFiles = new Set([
+  "docs/DETECTION-RULES.md",
+  "docs/NATIVE-NOTIFICATIONS.md",
+  "docs/PLATFORM-COVERAGE.md",
+  "docs/PLATFORM-INGEST.md",
+  "docs/WINDOWS-EVENTS.md",
+  "server/detection-engine.js",
+  "server/detection-rules.js",
+  "server/platform-ingest.js",
+  "server/native-monitor/notifications.js",
+  "test/detection-engine.test.js",
+  "test/native-notifications.test.js",
+  "test/private-native-notifications.test.js",
+  "test/platform-adapters.test.js",
+  "test/platform-ingest.test.js",
+  "test/windows-collector-test.py",
+  "test/windows-events.test.js",
+  "tools/collect-windows-events.py",
+  "tools/vendors/windows.js",
+  "tools/vendors/platforms.js",
+
+  "docs/NATIVE-OPERATIONS.md",
+  "public/operations.js",
+  "public/operations.css",
+  "server/operations-service.js",
+  "server/native-monitor/employee-inbox.js",
+  "server/native-monitor/history.js",
+  "server/native-monitor/operations-runtime.js",
+  "server/native-monitor/operations.js",
+  "server/native-monitor/registry.js",
+  "server/native-monitor/response.js",
+  "server/native-monitor/store.js",
+  "server/native-monitor/websites.js",
+  "test/native-monitor-core.test.js",
+  "test/native-operations.test.js",
+  "test/native-websites.test.js",
+  "test/private-operations.test.js",
+  "test/operations-ui.test.js",
+  "test/native-monitor-agent.py",
+  "test/native-monitor-agent.test.js",
+  "test/native-operations-sender.test.js",
+  "test/native-website-probe.test.js",
+  "tools/native-monitor/collector.py",
+  "tools/native-monitor/send-operation.py",
+  "tools/native-monitor/website-probe.py",
+
   ".github/workflows/ci.yml",
   ".gitignore",
   "CONTRIBUTING.md",
@@ -37,6 +82,16 @@ const requiredTextFiles = new Set([
   "docs/LIVE-MONITORING.md",
   "docs/GUIDED-SETUP.md",
   "docs/AI-SETUP.md",
+  "docs/SERVER-LOGS.md",
+  "public/server-logs.js",
+  "tools/log-collection-contract.js",
+  "tools/log-collector.js",
+  "tools/collect-logs.js",
+  "tools/events-cli.js",
+  "test/server-log-health.test.js",
+  "test/log-collector.test.js",
+  "test/events-cli.test.js",
+  "test/private-server-logs.test.js",
   "server/live-monitoring.js",
   "server/live-monitoring-transport.js",
   "public/live-monitoring.js",
@@ -252,10 +307,62 @@ const browserDocumentationFiles = new Set(["public/technical-docs.js"]);
 // These opt-in private application modules may issue same-origin HTTP requests.
 // The empty static shell still has connect-src 'none'; all other browser
 // restrictions (storage, sockets, unsafe HTML, and tokens) remain in force.
-const privateApplicationClients = new Set(["public/private-sign-in.js", "public/document-library.js", "public/service-access.js", "public/scanner-import.js", "public/integration-center.js", "public/vendor-import.js", "public/live-monitoring.js", "public/setup-guides.js", "public/source-mapping.js", "public/setup-assistance.js"]);
+const privateApplicationClients = new Set(["public/private-sign-in.js", "public/document-library.js", "public/service-access.js", "public/scanner-import.js", "public/integration-center.js", "public/vendor-import.js", "public/live-monitoring.js", "public/operations.js", "public/setup-guides.js", "public/source-mapping.js", "public/setup-assistance.js"]);
 
 // Exact public reference pages, not general vendor hosts or deployment URLs.
 const publicReferenceUrls = new Set([
+  "https://developer.okta.com/docs/reference/api/system-log/",
+  "https://docs.ansible.com/projects/ansible/latest/collections/ansible/windows/win_service_module.html",
+  "https://docs.ansible.com/projects/ansible/latest/collections/community/windows/win_scheduled_task_module.html",
+  "https://docs.aws.amazon.com/awscloudtrail/latest/APIReference/API_StopLogging.html",
+  "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/best-practices-security.html",
+  "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-event-reference-aws-console-sign-in-events.html",
+  "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/get-and-view-cloudtrail-log-files.html",
+  "https://docs.aws.amazon.com/guardduty/latest/ug/guardduty_findings_eventbridge.html",
+  "https://docs.checkmk.com/latest/en/apis_intro.html",
+  "https://docs.checkmk.com/latest/en/ec.html",
+  "https://docs.fluentbit.io/manual/data-pipeline/buffering.md",
+  "https://docs.fluentbit.io/manual/data-pipeline/inputs/windows-event-log-winevtlog",
+  "https://docs.fluentbit.io/manual/installation/windows",
+  "https://docs.microfocus.com/doc/2097/25.4/siemcefimplementationstandard",
+  "https://documentation.wazuh.com/current/installation-guide/index.html",
+  "https://documentation.wazuh.com/current/user-manual/capabilities/log-data-collection/index.html",
+  "https://github.com/Checkmk/checkmk/blob/master/CONTRIBUTING.md",
+  "https://github.com/SigmaHQ/Detection-Rule-License/blob/main/LICENSE.Detection.Rules.md",
+  "https://github.com/elastic/detection-rules",
+  "https://github.com/fluent/fluent-bit/blob/master/LICENSE",
+  "https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/receiver/filelogreceiver/README.md",
+  "https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/receiver/windowseventlogreceiver/README.md",
+  "https://github.com/open-telemetry/opentelemetry-collector/blob/main/LICENSE",
+  "https://github.com/open-telemetry/opentelemetry-proto/blob/main/opentelemetry/proto/logs/v1/logs.proto",
+  "https://kubernetes.io/docs/concepts/cluster-administration/logging/",
+  "https://learn.microsoft.com/dotnet/api/System.Diagnostics.Eventing.Reader.EventLogReader",
+  "https://learn.microsoft.com/en-us/azure/sentinel/connect-cef-ama",
+  "https://learn.microsoft.com/en-us/graph/api/signin-list?view=graph-rest-1.0",
+  "https://learn.microsoft.com/en-us/office/office-365-management-api/office-365-management-activity-api-reference",
+  "https://learn.microsoft.com/en-us/office/office-365-management-api/office-365-management-activity-api-schema",
+  "https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/set-adminauditlogconfig?view=exchange-ps",
+  "https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-1102",
+  "https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4688",
+  "https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4769",
+  "https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4776",
+  "https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/plan/Appendix-L--Events-to-Monitor",
+  "https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/plan/security-best-practices/advanced-audit-policy-configuration",
+  "https://learn.microsoft.com/en-us/windows/security/operating-system-security/device-management/use-windows-event-forwarding-to-assist-in-intrusion-detection",
+  "https://learn.microsoft.com/en-us/windows/win32/wes/bookmarking-events",
+  "https://learn.microsoft.com/en-us/windows/win32/wes/eventschema-systempropertiestype-complextype",
+  "https://opentelemetry.io/docs/collector/install/binary/windows/",
+  "https://opentelemetry.io/docs/platforms/kubernetes/helm/collector/",
+  "https://opentelemetry.io/docs/specs/otlp/",
+  "https://resend.com/changelog/idempotency-keys",
+  "https://sigmahq.io/docs/digging-deeper/backends",
+  "https://sigmahq.io/docs/digging-deeper/pipelines.html",
+  "https://www.elastic.co/licensing/elastic-license/",
+  "https://www.microfocus.com/documentation/arcsight/arcsight-smartconnectors-8.3/cef-implementation-standard/Content/CEF/Chapter%202%20ArcSight%20Extension.htm",
+  "https://www.postgresql.org/docs/current/runtime-config-logging.html",
+  "https://www.rfc-editor.org/rfc/rfc5424",
+  "https://www.rfc-editor.org/rfc/rfc5424.html",
+
   "https://code.claude.com/docs/en/mcp",
   "https://learn.chatgpt.com/docs/extend/mcp?surface=cli",
   "https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference",
@@ -296,6 +403,8 @@ const publicReferenceUrls = new Set([
   "https://docs.sentry.io/api/events/list-a-projects-error-events/",
   "https://docs.sentry.io/api/events/retrieve-an-event-for-a-project/",
   "https://docs.sentry.io/api/events/list-an-issues-events/",
+  "https://docs.docker.com/engine/logging/drivers/json-file/",
+  "https://www.freedesktop.org/software/systemd/man/latest/systemd.journal-fields.html",
   "https://docs.datadoghq.com/api/latest/logs/search-logs-post/",
   "https://docs.datadoghq.com/logs/guide/access-your-log-data-programmatically/"
 ]);
@@ -325,7 +434,8 @@ function report(findings, rule, file, text, index = 0) {
 }
 
 function isAllowedAddress(value) {
-  if (value === "127.0.0.1") return true;
+  // Loopback and the all-zero missing-address sentinel contain no private host identity.
+  if (value === "127.0.0.1" || value === "0.0.0.0") return true;
   const match = /^(192\.0\.2|198\.51\.100|203\.0\.113)\.(\d{1,3})$/.exec(value);
   return Boolean(match && Number(match[2]) <= 255);
 }
@@ -336,6 +446,11 @@ function isAllowedUrl(value) {
   if (normalized === "http://www.w3.org/2000/svg") return true;
   if (normalized === "https://json-schema.org/draft/2020-12/schema") return true;
   if (publicReferenceUrls.has(normalized)) return true;
+  // Fixed provider endpoint and XML namespace, not deployment-specific hosts.
+  if (normalized === "https://api.resend.com/emails") return true;
+  if (["http://schemas.microsoft.com/win/2004/08/events/event",
+       "http://schemas.microsoft.com/win/2004/08/events/event}",
+       "http://manifests.microsoft.com/win/2004/08/windows/eventlog"].includes(normalized)) return true;
   try {
     const candidate = new URL(normalized);
     if (candidate.protocol === "http:"
@@ -446,8 +561,17 @@ function audit() {
       if (index >= 0) report(findings, "identity.private-marker", entry.file, text, index);
     }
     for (const fragment of operationalFragments) {
-      const index = text.indexOf(fragment);
-      if (index >= 0) report(findings, "operations.private-fragment", entry.file, text, index);
+      // The portable Linux collector intentionally calls this one fixed,
+      // read-only binary. This does not allow shell commands or deployment
+      // paths in any other publication surface.
+      let index = text.indexOf(fragment);
+      while (index >= 0) {
+        const fixedCollectorBinary = rel === "tools/native-monitor/collector.py"
+          && fragment === ["system", "ctl"].join("")
+          && text.slice(index - 10, index + fragment.length + 1) === '"/usr/bin/' + fragment + '"';
+        if (!fixedCollectorBinary) report(findings, "operations.private-fragment", entry.file, text, index);
+        index = text.indexOf(fragment, index + fragment.length);
+      }
     }
     const privateTailnetHost = /\b[a-z0-9][a-z0-9.-]+\.ts\.net\b/i.exec(text);
     if (privateTailnetHost) report(findings, "operations.private-tailnet-host", entry.file, text, privateTailnetHost.index);

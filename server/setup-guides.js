@@ -159,10 +159,16 @@ function checkSetup({ runtime, monitoring, clock = () => new Date() }, input) {
       const staleAfter = manifest ? scaledHealthThresholds(source.connectorType, source.config["cadence-seconds"], manifest).staleAfterSeconds * 1000 : 0;
       const recent = instant(last) && now - Date.parse(last) >= 0 && now - Date.parse(last) <= staleAfter;
       const failed = ["offline", "stale", "degraded", "disabled"].includes(health.state), healthy = health.state === "healthy";
+      const reader = source.connectorType === "server-log-push";
       add("collection", "Collection status", active && recent && healthy ? "pass" : !active || failed || last ? "attention" : "waiting",
-        active && recent && healthy ? "The latest accepted delivery is within the configured cadence. The external sender process, its scheduling, and upstream completeness were not inspected."
-          : !last ? "No successful delivery is recorded. Configure the external sender and verify an actual accepted batch. Registration and sample validation are not delivery."
-            : "Delivery is inactive, failed, or overdue under the configured cadence. Historical records do not prove that the external sender is still running.", route);
+        active && recent && healthy ? reader
+          ? "The external collector reported a complete, error-free read within the configured cadence. A quiet read is healthy even with no log events. This is an authenticated producer claim, not independent verification of the host or its coverage."
+          : "The latest accepted delivery is within the configured cadence. The external sender process, its scheduling, and upstream completeness were not inspected."
+          : !last ? reader
+            ? "No successful completed read is recorded. Inspect the collector and its delivery queue; log delivery or sample validation alone does not prove a complete read."
+            : "No successful delivery is recorded. Configure the external sender and verify an actual accepted batch. Registration and sample validation are not delivery."
+            : reader ? "Collection is inactive, failed, or overdue. Inspect the reader proof and queue; delayed delivery does not make an old read fresh."
+              : "Delivery is inactive, failed, or overdue under the configured cadence. Historical records do not prove that the external sender is still running.", route);
     }
     const kinds = manifest?.payload.recordKinds || [];
     add("projection", "Screen population", selection.count ? "pass" : "waiting", selection.count

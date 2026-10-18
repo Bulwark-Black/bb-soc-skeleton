@@ -44,6 +44,9 @@ function readBoundedFile(filename, maximum, token = false) {
       if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error();
     }
     const named = fs.lstatSync(filename);
+    // Refuse devices and FIFOs before opening: a named pipe can otherwise block
+    // indefinitely, before size or regular-file validation has a chance to run.
+    if (!named.isFile() || named.size < 1 || named.size > maximum) throw new Error();
     fd = fs.openSync(filename, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
     const stat = fs.fstatSync(fd);
     if (!stat.isFile() || stat.size < 1 || stat.size > maximum || named.ino !== stat.ino || named.dev !== stat.dev

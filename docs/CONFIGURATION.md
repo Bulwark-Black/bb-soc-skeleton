@@ -45,7 +45,7 @@ Private mode installs `canonical-push`, `canonical-events` and `trivy-report`,
 plus custom canonical-push definitions registered by a human operator in
 Sources → Integrations. Definitions live in the transactional telemetry control
 state; no plugin directory or executable module is loaded. They are immutable,
-with 86 custom/100 total slots and 64 KiB per definition. Use Sources → Received
+with 86 custom/102 total slots and 64 KiB per definition. Use Sources → Received
 observations for all supported kinds. See the
 [integration review](INTEGRATION-REVIEW.md) for the sender, lifecycle and limits.
 The eleven legacy
@@ -146,7 +146,7 @@ reconfigure a mounted application.
 Unknown keys and unsupported schema versions are errors. Nested values must be
 plain objects. Logo paths reject absolute paths, traversal, backslashes, query,
 and fragments. Default routes reject query/fragment/traversal and must match one
-of the 40 registered paths when the application is created. Misspelled keys fail
+of the 48 registered paths when the application is created. Misspelled keys fail
 visibly rather than being ignored. The catalog contains the 38 SOC paths plus
 the application-owned `/documents` library and shell-owned `/docs` utility.
 Neither local route calls the page adapter. `/docs` never reads control
@@ -432,9 +432,27 @@ validate, or make cross-origin credentials safe.
 - [ ] The administration global name matches the host object when the
       administration runtime is installed; its absence otherwise fails closed.
 - [ ] `auth.required` matches the deployment's gating requirement.
-- [ ] `routing.defaultRoute` is one of the 40 registered routes, including the
+- [ ] `routing.defaultRoute` is one of the 48 registered routes, including the
       local `/docs` or `/documents` page when intentionally selected.
 - [ ] Effective response CSP permits only required BFF connections and denies
       framing.
 - [ ] Config, UI, page adapter, browser auth, connector control, canonical
       ingest, and server contracts have a tested compatibility/rollback plan.
+
+## Native monitoring registry
+
+Configure `operations-config.json` in private state after registering the app and
+activating a native-monitor source. The file must be owner-only and external to
+the checkout. Restart to apply it. See [NATIVE-OPERATIONS.md](NATIVE-OPERATIONS.md).
+
+## Platform monitoring expansion
+
+The private application includes source-authenticated platform delivery, a
+Windows Event Log/WEF collector, four additional log import profiles and
+25 opt-in original detection rules. Native incident email uses an external
+Resend credential with durable delivery state and operator reconciliation.
+Read [platform ingestion](PLATFORM-INGEST.md), [platform coverage](PLATFORM-COVERAGE.md),
+[Windows events](WINDOWS-EVENTS.md), [detection rules](DETECTION-RULES.md) and
+[native notifications](NATIVE-NOTIFICATIONS.md) for the exact supported contracts,
+private configuration, tests and deployment-specific prerequisites.
+No checked-in credentials, inventory, enabled rules or recipients are supplied.

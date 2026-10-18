@@ -10,14 +10,18 @@ Imported read-only observations do not implement native workflow actions.
 This guide is for teams that want to take the public interface skeleton from a
 source checkout, place it in an existing stack, and supply authorized SOC page
 models, or run the included private Node application. The repository supplies
-the browser shell, all 38 SOC route paths, a document library, one shell-owned
+the browser shell, all 38 adapter-addressable SOC route paths, eight Operations/report pages, a document library, one shell-owned
 technical documentation route, the product's committed
 visual language, empty/failure states, and versioned page, auth,
 connector-control, administration, and canonical-ingest contracts. The
-invariant is **38 SOC routes plus `/documents` plus local `/docs`: 40 paths**.
+invariant is **38 adapter routes plus eight Operations/report pages, `/documents`, and local `/docs`: 48 paths**.
 The private starter includes real sign-in, indexed telemetry, scoped service
 access, Trivy report import, and durable document storage but no
 committed operational data or all-purpose production security backend.
+
+For file-based server logs, follow [Server logs](SERVER-LOGS.md). It covers
+plain text, Docker JSON and journald JSON, sample validation, durable collection,
+reader health, scheduling and recovery without a vendor account.
 
 ## Start with the private application
 

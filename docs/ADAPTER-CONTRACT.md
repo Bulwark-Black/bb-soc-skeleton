@@ -10,7 +10,7 @@ implicit capabilities from becoming part of the UI API. It does not provide
 authentication, authorization, transport security, storage, or command safety;
 those remain adopter responsibilities.
 
-The route-count invariant is **38 SOC routes plus one local `/docs` utility**.
+The shell contains **38 adapter routes plus eight Operations/report pages, `/documents`, and local `/docs`: 48 paths**.
 Only the 38 SOC routes participate in this page-adapter contract. The
 shell-owned `#/docs` route is not a `PageRequest` target and never calls
 `readPage`, the connector provider's `getSnapshot`, or its `execute` method.

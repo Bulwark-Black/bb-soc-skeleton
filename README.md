@@ -4,7 +4,7 @@
 
 A data-free, self-hosted private application starter for the Bulwark Black SOC
 interface. It preserves the committed product mark and visual system, includes
-the 38 SOC paths, a Documents library, and Technical Docs, and gives adopters
+the original 38 SOC paths, eight Operations/report pages, a Documents library, and Technical Docs, and gives adopters
 versioned integration contracts for monitoring their own web applications.
 
 > `npm start` runs the private application with real Better Auth sign-in and
@@ -32,6 +32,41 @@ error events, inspect collection health and actionable evidence, and optionally
 send alerts to Slack. This is one built-in collector, separate from the ten
 import mappings. Follow the [detailed live monitoring guide](docs/LIVE-MONITORING.md)
 and complete its real-account commissioning checklist before relying on it.
+
+## Ingest your server and application logs
+
+Open **Sources → Server logs** for the new file-collection setup path. A
+checkpointed external collector supports reviewed plain-text, Docker JSON and
+journald JSON lines. It writes canonical batches to a private durable outbox
+before advancing its file position. The **Server log collector** source keeps
+successful reader completion separate from transport delivery and event
+activity, so a complete quiet read can be healthy without inventing log events.
+
+Use `npm run collect:logs -- --help` for collection and
+`npm run events -- --help` to enqueue, inspect, deliver or retry any canonical
+batch, including output from the custom mapper. **Received observations** now
+includes event-time filters and reported severity. Start with the
+[server log setup and recovery guide](docs/SERVER-LOGS.md).
+
+## Monitoring and Operations from the deployed update
+
+The skeleton now carries the deployed October 18 monitoring runtime and seven
+Operations boards: Infrastructure, Services, Websites, Metrics, Incidents,
+Critical jobs and AI Employees, plus Analyst reports. These include durable
+incident/job history, gap-aware charts, service health, employee instructions
+and separate execution/output evidence. Configure your own inventory and source
+bindings using the [native Operations guide](docs/NATIVE-OPERATIONS.md).
+No private hosts, credentials, employee prompts or operational records are seeded.
+Native incident email delivery is available through Resend with durable retries,
+per-application pause and explicit reconciliation; see [notifications](docs/NATIVE-NOTIFICATIONS.md).
+
+Windows Server/AD collection, RFC5424 syslog, CEF, OpenTelemetry JSON and
+Microsoft 365 mappings extend the platform catalog. Read the
+[coverage and deployment plan](docs/PLATFORM-COVERAGE.md),
+[Windows collector guide](docs/WINDOWS-EVENTS.md),
+[authenticated gateway](docs/PLATFORM-INGEST.md), and
+[25 opt-in detection rules](docs/DETECTION-RULES.md).
+These are explicit supported formats and bounded rules, not universal coverage.
 
 ## What is included
 
@@ -77,8 +112,8 @@ and complete its real-account commissioning checklist before relying on it.
   summaries. It accepts reports from your scanner; it does not execute scans.
 - Universal canonical ingestion for all 29 supported record kinds, human-managed
   custom integration definitions, and a source-to-screen coverage catalog.
-- A private **Received observations** browser with application/source/kind
-  filters, payload inspection, bounded pagination and retained source history.
+- A private **Received observations** browser with application/source/kind/time
+  filters, reported severity, payload inspection, bounded pagination and retained source history.
 - Read-only imported-observation views across the relevant SOC categories,
   separated from native scanner results and locally authorized workflows.
 - A dependency-free Node sender and CLI with source-token files, validated
@@ -310,7 +345,7 @@ Trivy report. For these general push/import paths, vendor credentials stay in
 your external adapter; the generic registry does not resolve them. Only the
 separate Live monitoring path stores credentials for its fixed Sentry/Slack clients.
 
-For the ten vendor formats, start in **Sources → Vendor imports** and follow
+For the fifteen vendor formats, start in **Sources → Vendor imports** and follow
 the [step-by-step vendor guide](docs/VENDOR-INTEGRATIONS.md). For an external
 collector, use the source/app IDs from the corresponding installed preset:
 
@@ -330,7 +365,7 @@ poll them automatically; the separate Sentry live collector does.
 
 “Bring any source” means vendor-independent integration, **not unbounded
 storage or arbitrary event schemas**. The starter has 29 canonical kinds,
-100 total integration-type slots (86 custom), bounded registry snapshots,
+102 total integration-type slots (86 custom), bounded registry snapshots,
 1 MiB ingestion requests and explicit retention limits. A source's category is
 a label; the selected manifest's allowed-kind list controls admission. Extend
 the versioned contracts and capacity design deliberately when those bounds no
@@ -501,22 +536,23 @@ connector, or administration provider.
 
 | Area | Primary routes |
 | --- | --- |
-| Monitor | Overview, SOC Health, Daily Brief, Analytics, Timeline |
-| Respond | Triage, Detection Tuning, Rules, Alert Comms, Honeypots, Phishing |
+| Security overview | Overview, SOC Health, Daily Brief, Analytics, Timeline |
+| Operations | Infrastructure, Services, Websites, Metrics, Incidents, Critical Jobs, AI Employees, Analyst Reports |
+| Security response | Triage, Detection Tuning, Rules, Alert Comms, Honeypots, Phishing |
 | Investigate | Logs, Activity Learner, IOC Parser, Threat Intel, Known IPs |
-| Vuln Mgmt | Scans, Remediation |
-| Estate | Systems, Databases, Backups, Retention, Sources, Agent Management |
+| Vulnerabilities | Scans, Remediation |
+| Estate records | Systems, Databases, Backups, Retention, Sources, Agent Management |
 | Govern | Attestations, Risk Register, Documents, Access |
 | Shell utilities (primary, not sidebar destinations) | Onboarding, Settings |
 | Local implementation reference | Technical Docs (`/docs`) |
 
-There are 40 registered paths: the original 38 SOC paths, `/documents`, and
-`/docs`. Documents raises the primary count to 30; `/docs` remains local guidance.
+There are 48 registered paths: the original 38 SOC paths, eight Operations/report pages, `/documents`, and
+`/docs`. Operations and Documents raise the primary count to 38; `/docs` remains local guidance.
 The nine linked detail/utility paths are `/analyst`, `/event`, `/ip`, `/search`,
 `/host-scan`, `/kev`, `/source`, `/attestation`, and `/risk`. They are adapter-addressable
-without being duplicated as primary navigation items. The 30-primary count
+without being duplicated as primary navigation items. The 38-primary count
 includes Onboarding and Settings; those two top-level surfaces are opened from
-shell controls rather than repeated in the six grouped sidebar sections. The
+shell controls rather than repeated in the seven grouped sidebar sections. The
 Technical Docs utility is additional to those counts and is excluded from the
 page-provider contract.
 
