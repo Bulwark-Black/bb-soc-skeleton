@@ -8,23 +8,26 @@ than canonical page envelopes. See [NATIVE-OPERATIONS.md](NATIVE-OPERATIONS.md)
 for the deployed-runtime port, configuration and current boundaries. No records,
 inventory, prompts or credentials are seeded.
 
-An adopter supplies authorized content through the versioned adapter. Route
-paths are stable integration keys; labels and summaries are presentation text.
+The private application projects accepted records and registered state through
+the versioned adapter and dedicated APIs. Custom hosts can supply their own
+authorized models. Route paths are stable integration keys; labels and summaries
+are presentation text.
 
 The feature names, table schemas, filters, forms, and action labels below mirror
 the active product's structural catalog. In static mode they contain no records
 and perform no reads or mutations. The connector-control contract can activate
 only the documented Onboarding and Sources lifecycle actions. A separately
 validated administration contract can activate only its agent, prompt,
-enrollment, attestation, and risk vocabulary on matching surfaces; every other
-visible SOC action label is an integration requirement requiring its own
-authorized server workflow. The separate Documents page has a working private
-upload/version/metadata/archive API; it does not activate attachment controls
-elsewhere in the structural SOC catalog.
+enrollment, attestation, and risk vocabulary on matching surfaces. Separate
+private APIs implement document management, Operations, scoped service access,
+source import/setup, rule policy and mail controls. Other structural action labels
+still need an authorized server workflow; neither imported facts nor page-panel
+hydration enable them. The working Documents API does not activate attachment
+controls elsewhere in the catalog.
 
 `npm start` now installs the private Better Auth application and these shipped
-source, administration, document, scoped service-access, and Trivy report-import
-workflows. `npm run start:static` preserves the dependency-free empty preview.
+source, administration, document, scoped service-access, Trivy import, native
+monitoring/job/inbox, opt-in detection and reviewed notification workflows. `npm run start:static` preserves the dependency-free empty preview.
 The eleven legacy scanner setup templates remain non-executing; the separate
 private `trivy-report` importer processes reports but never runs a scanner.
 An Agent Management record is not a running agent, and a service credential
@@ -36,7 +39,9 @@ shows actual route coverage; Sources → Received observations provides bounded
 application/source/kind/time filtering, reported severity and payload inspection. Relevant category
 pages display explicitly read-only imported facts. These fallback observation
 views replace unsupported native workflow placeholders for that read; they do
-not implement native actions, detection engines or vendor-specific analysis.
+not turn imported facts into native workflow authority. The separate bounded
+detection engine evaluates opt-in original rules and reviewed JSON predicates;
+it is not a general Sigma/YARA/Snort runtime or universal vendor analysis engine.
 The static shell and adopter-supplied specialized page contracts remain intact.
 See [the integration review](INTEGRATION-REVIEW.md) for exact boundaries.
 
@@ -57,7 +62,7 @@ while keeping route content and tabs:
 | --- | --- | --- |
 | Brand/sidebar | Exact full mark, dark circuit field, deterministic pulses, seven grouped areas, current-route state | Preserve assets/tokens and route semantics when product parity is required |
 | Estate selector | Empty “No estate selected” structure with an Onboarding route link | Supply an authorized estate/scope model only through an explicitly designed host integration |
-| Compact navigation | Responsive route selector preserves the grouped SOC entry surfaces without exposing detail routes as duplicates | Keep all 38 SOC routes usable at narrow widths and retain the shell Docs entry |
+| Compact navigation | Responsive route selector preserves the grouped SOC entry surfaces without exposing detail routes as duplicates | Keep all registered routes usable at narrow widths and retain the shell Docs entry |
 | Authentication chip | Shows the closed auth projection; the private starter supplies Better Auth sign-in and sessions | Review deployment policy; custom hosts implement `SOC_CONSOLE_AUTH`; never place raw identity claims or tokens in the shell |
 | Page filter | Browser-local filtering of the current page's rendered, safe text | Do not reinterpret it as a server query or authorization filter |
 | Search-anything command palette | `/` or Cmd/Ctrl-K opens IP/CVE/host/case/rule/page/log dispatch; Enter uses `#/search`; `g` plus `o/a/r/s/l/y/d/b/u/f/t/p` performs the active board jumps; `?` shows help | Resolve host/case selectors through an authorized `search-dispatch` page panel; never make route search an authorization oracle |
@@ -79,8 +84,8 @@ Thirty-five SOC primary routes appear in seven navigation groups,
 alongside the local Documents page in Govern.
 Onboarding and Settings are also primary, top-level surfaces, but are opened
 through shell controls instead of appearing as sidebar destinations. Together
-they make the 29 SOC primary routes (30 primary navigation destinations when
-Documents is included).
+they make 37 SOC primary routes (38 primary destinations when Documents is
+included). The eight Operations/report pages are included in those totals.
 
 ### Monitor
 
@@ -92,14 +97,35 @@ Documents is included).
 | `#/analytics` | **Analytics:** 24h/48h/7-day ranges with 48h default; collection/detection/history measures, true stacked hourly event/detection series using the exact active palette, ranked firing/blocked-address structures, and accessible data tables | Pre-aggregated series, ranges, measurement caveats, and accessible values through `chart`/`bars` panels |
 | `#/timeline` | **Timeline:** application-supplied host selectors, 15m/1h/24h/7d ranges, and the unified When/Kind/Event view | Bounded event summaries with stable identifiers and RFC 3339 times |
 
+### Operations
+
+These eight pages use the shipped private API. They require reviewed inventory
+and real collector or runner observations; no host, job or employee is seeded.
+
+| Route | Working private surface | Adopter responsibility |
+| --- | --- | --- |
+| #/infrastructure | Host inventory, observed resource measurements and collection freshness | Configure source-bound hosts, run the external collector and validate coverage |
+| #/services | Registered checks, observed results and dependency health | Define the checks and send trustworthy observations from the monitored host |
+| #/websites | Registered target observations, status/latency, redirect and certificate evidence | Review each HTTPS target and commission the external probe; gaps remain unknown |
+| #/metrics | Bounded series/history and export with explicit missing intervals | Select measured series, capacity and retention; a chart does not prove complete collection |
+| #/incidents | Durable native incident episodes, acknowledgment/maintenance, native and finding mail status, pause and reconciliation | Review incident thresholds, recipients and transport config; SMTP verification sends no message, and explicit test-send needs a recipient |
+| #/jobs | Registered critical jobs, durable runs, execution and output evidence/history | Register expected jobs and send observations; the SOC never starts a job |
+| #/employees | Configured employee roster, work assignments and next-visit instructions with withdrawal and explicit acknowledgment | Connect a separately authorized runner and bound employee/source identity; an instruction is not proof of execution |
+| #/analyst-reports | Received report/output and assessment evidence with execution status kept separate | Supply and review reports; completed output does not by itself prove successful execution |
+
+Mail is disabled until configured. SMTP relay acceptance is not inbox delivery,
+and ambiguous outcomes require reconciliation before a duplicate-risk requeue.
+See [native Operations](NATIVE-OPERATIONS.md) and
+[notifications](NATIVE-NOTIFICATIONS.md).
+
 ### Respond
 
 | Route | Structural surface | Provider responsibility |
 | --- | --- | --- |
 | `#/triage` | **Triage:** Queue, Awaiting approval, Cases, Closed, and All views; filters, alerts, bulk disposition, and guidance | Authorized findings, grouping, filters, ownership, and separately authorized commands |
 | `#/tuning` | **Detection Tuning:** Definitions, Applied alerts, and Matched but held views with definition status filters; query-selected tune detail, retained-occurrence and exact-finding choosers, read-only draft builder, and exact eight-column Detection Rules Analyst recommendation slot | Versioned definitions, occurrences, recommendations, safety state, and approval workflow; panel hydration never enables lifecycle controls |
-| `#/rules` | **Detection Rules:** Palisade proposed/built-in/inline/custom rules, tested rule creation, recorded negative-space decisions, Sigma browse/import/subset guidance, YARA status/browse/manage, the deliberate Snort boundary, the embedded Tune registry, and stable read-only definition-detail slots | Rule metadata, provenance, source/effective definition text, scope, lifecycle, occurrence, and change-control state |
-| `#/alerts` | **Alert Comms:** exact reachability/delivery/overflow status, Who gets paged, Delivery log, and per-attempt Reconciliation views | Redacted delivery/recipient models and separately authorized send/retry/confirmation commands |
+| `#/rules` | **Detection Rules:** Palisade proposed/built-in/inline/custom rules, tested rule creation, recorded negative-space decisions, Sigma browse/import/subset guidance, YARA status/browse/manage, the deliberate Snort boundary, the embedded Tune registry, and stable read-only definition-detail slots | The private rule catalog exposes 25 opt-in original rules and reviewed JSON-pack policy/test/shadow/active/suppression controls. Imported definitions are read-only evidence; full Sigma/YARA/Snort execution and the remaining structural workflows need separate integrations |
+| `#/alerts` | **Alert Comms:** exact reachability/delivery/overflow status, Who gets paged, Delivery log, and per-attempt Reconciliation views | This structural Alert Comms surface needs an adapter. Shipped native/finding email status and controls are on Operations → Incidents, with reviewed recipients and durable reconciliation |
 | `#/honeypots` | **Honeypots:** tamper decoys, read/tamper canaries plus the system canary, estate-wide trap usernames, Trip log, and Clerk honey-account setup/proof views | Minimal inventory and trip projections; no control-plane credentials in the browser |
 | `#/phishing` | **Phishing:** queue metrics/report list without `id`; verdict, reported message, signal evidence, weights legend, extracted links, attachments, passive intel, and literal message-source body for non-empty `id`; detail sections expose stable metrics/table/text slots | Redacted message metadata and safe evidence/link/attachment projections; message source is never rendered as markup |
 
@@ -128,7 +154,7 @@ Documents is included).
 | `#/databases` | **Databases:** exact schema-watch and schema-change tables followed by adding-database and methodology panels | Structural inventory and change projections with records and connection fields removed |
 | `#/backups` | **Backups:** backup-chain push state, independent bucket pull verification, off-box evidence receipts, adding-chain guidance, and the two-side rationale | Backup-control summaries and evidence references, never storage credentials or environment endpoints |
 | `#/retention` | **Retention:** structural policy/reality/review views; private Policy/Reality now show configured indexed-telemetry limits and real record/byte/receipt/identity/audit counters with explicit capacity and pruning behavior | Per-source measured horizons, filesystem/free-disk measurements, archived baselines and analyst review still need integrations; canonical record-byte totals are not total disk usage |
-| `#/sources` | **Sources:** Expected sources shows application/environment and measured delivery health; **Add a source** configures, tests and activates a registered source; **Integrations** installs immutable data-only definitions and explains real screen coverage; **Received observations** filters retained records by app/source/kind; **Registry Changes** retains lifecycle history | Private mode supports canonical log push, all 29 canonical kinds through universal/custom definitions, and validated Trivy reports. Eleven legacy templates have no driver. Vendor acquisition and raw-payload mapping remain external; arbitrary kinds, unbounded storage and a full query language are not supported |
+| `#/sources` | **Sources:** Expected sources shows application/environment and measured delivery health; **Add a source** configures, tests and activates a registered source; **Integrations** installs immutable data-only definitions and explains real screen coverage; **Received observations** filters retained records by app/source/kind; **Registry Changes** retains lifecycle history | Private mode supports canonical log push, all 29 canonical kinds through universal/custom definitions, and validated Trivy reports. Eleven legacy templates have no driver. Selected external collectors, protocol receivers and 18 bounded platform mappings are shipped; commission each supported provider shape. Arbitrary kinds, unbounded storage and a full query language are not supported |
 | `#/agents` | **Agent Management:** Agents, Add Agent, Prompts, Enrollment, Service Access, and History tabs; lifecycle/capability metadata, separately authorized prompt-body reads, one-time enrollment output, pause/resume, archive/restore/remove, and audit; Service Access issues expiring scoped credentials with read-only defaults, rotation/revocation and its own audit | Keep runner execution, prompt privacy, enrollment proof and secrets server-side. Service Access is separate from managed-agent registration, does not schedule agents, and does not grant a credential permission to issue credentials or expand agent authority |
 
 ### Govern
@@ -204,7 +230,7 @@ query as strings and must still allowlist and authorize it.
 | `#/scans` | `tab`: **`trivy`**, `patch`, `fim`, `eol`, `exposure`, `ioc`, `urlscan`, `deps`, `av`, `quarantine`, `remediation`; the Remediation tab renders the same structure as `#/remediation` without leaving Scans |
 | `#/systems` | `stab`: **`estate`**, `affected` |
 | `#/retention` | `vtab`: **`policy`**, `reality`, `review` |
-| `#/sources` | `stab`: **`expected`**, `add`, `changes` |
+| `#/sources` | `stab`: **`expected`**, `add`, `changes`; private mode also supplies setup, server-log guidance, source mapping, Operations setup, integrations, live collection, vendor import and received-observation views |
 | `#/agents` | `atab`: **`agents`**, `add`, `prompts`, `enrollment`, `access`, `audit`; `agent` and `prompt` are application-validated stable selectors for management/detail within their matching tabs |
 | `#/attestations` | `gtab`: **`active`**, `create`, `archived`, `history` |
 | `#/register` | `riskTab`: **`active`**, `create`, `archived`, `history` |
@@ -265,8 +291,8 @@ route is not authorization to read the referenced resource.
 
 ### Adapter states and presentation primitives
 
-- Without an injected adapter, every known SOC route renders an honest empty
-  skeleton state. The local `/docs` utility renders its checked-in public
+- Without an injected adapter, the original 38 SOC routes render an honest
+  empty skeleton state. Documents and Operations require their private APIs. The local `/docs` utility renders its checked-in public
   technical manual independently of adapter state.
 - An adapter can return `loading`, `ready`, `empty`, `error`, `unavailable`, or
   `forbidden` page states.
@@ -310,11 +336,14 @@ route is not authorization to read the referenced resource.
 - Canonical records populate screens through page-envelope projectors. MCP may
   optionally mirror administrative commands through the same service, but it
   is never a telemetry or plaintext-secret transport.
-- Both private starter and development workbench implement one `log.event` push
-  path into Overview, Sources, Logs, Analytics, and SOC Health. Sample validation
-  proves shape, not delivery; only accepted ingest changes collection health.
-  Eleven legacy scanner setup templates have no drivers and cannot activate.
-  The private starter additionally installs `trivy-report`: supported JSON
+- The workbench implements one `log.event` push path. The private application
+  additionally supports all 29 canonical kinds, the source-bound platform and
+  native monitoring receivers, and reader-proof server-log health. Sample
+  validation proves shape, not delivery. A delivery receipt and a completed
+  reader observation are separate evidence; stale or failed reads cannot become
+  healthy just because queued bytes arrive. Eleven legacy scanner setup
+  templates have no drivers and cannot activate. The private `trivy-report`
+  importer accepts supported JSON
   imports produce scan summaries, package inventory and vulnerability records,
   with Trivy-only projections. Patch First and other acquisition modes remain adopter
   implementations; no server-side scanner execution is implied.
@@ -336,7 +365,8 @@ See [CONNECTORS.md](CONNECTORS.md).
   The connector provider enables only its twelve source-management commands. An
   independently validated administration provider enables only its closed
   agent/prompt/enrollment/attestation/risk commands on matching management
-  surfaces.
+  surfaces. Dedicated private API clients enable their own documented workflows;
+  none is activated merely by a page envelope.
 
 ## Human operating and population guide
 
@@ -346,6 +376,8 @@ no-source state for every category and subcategory:
 
 - Monitor: Overview, SOC Health, Daily Brief, Analytics, and Timeline in
   [chapter 39](../public/technical-reference.md#39-human-operating-guide-monitor);
+- Operations: Infrastructure, Services, Websites, Metrics, Incidents, Critical
+  jobs, AI Employees and Analyst reports in [native Operations](NATIVE-OPERATIONS.md);
 - Respond: Triage, Detection Tuning, Rules, Alert Comms, Honeypots, and Phishing
   in [chapter 40](../public/technical-reference.md#40-human-operating-guide-respond);
 - Investigate: Security Logs, Activity Baseline, IOC Parser, Threat Intel, and
@@ -373,26 +405,25 @@ compliant, or risk-free.
 
 | Capability | Skeleton owns | Adopter owns |
 | --- | --- | --- |
-| Thirty-eight adapter-addressable SOC routes plus local `/docs` and `/documents` pages | Yes | Optional intentional extension; keep local pages outside SOC page-adapter routing |
-| Exact default product styling and brand assets | Yes | Asset hosting and approved brand changes |
-| Versioned request/envelope/session validation | Yes | Producing authorized valid models/session projections |
-| Versioned connector manifest/snapshot/command validation | Yes | Authenticated service, manifest installation, authorization, and production persistence |
-| Versioned agent/governance administration validation | Browser contract | Authenticated service, authorization, durable state/audit, evidence policy, and production secret custody |
-| Canonical record and ingest-batch validation | Yes | Transport authentication, normalization, durable admission, and projectors |
-| Empty and failure-state rendering | Yes | Operational status and recovery behavior |
-| Page data and records | Empty by default; projects accepted canonical logs and registered state | Additional real providers/data mappings |
-| Server session and CSRF controls | Private Better Auth starter | Deployment policy, operation, external identity/OIDC if needed |
-| Authentication integration object | Browser contract and private bridge | Custom BFF integration if replacing starter |
-| Resource/action authorization | Full-access human operators plus exact scoped service identities | Human roles, per-app/tenant isolation, step-up approval policy |
-| Collection, search, storage, and retention | Private indexed SQLite telemetry, bounded search and count/byte/age retention; legacy JSON reference workbench remains separate | Capacity planning, deployment operations, advanced search, distributed/high-availability storage |
-| Source onboarding commands | Browser contract, private application UI/API, bounded reference core | Production scaling, fine-grained authorization, managed secrets, retention |
-| Agent, prompt, enrollment, attestation, and risk lifecycle commands | Browser contract and private application administration | Runner execution, fine-grained authorization, dependencies, scalable durability, secrets |
-| Agent-readable MCP resources and seven fixed control/setup tools | Authenticated private service routes with owner-only token-file client, optional setup:read diagnostics, scopes, expiry, rotation/revocation and audit; legacy loopback mode retained for original control tools; credential issuance, URLs, shell, telemetry, and secrets refused | Private deployment/TLS, permission selection, human approval workflow, availability and operations |
-| Document uploads, versions, metadata, history, archive/restore | Private authenticated library and bounded SQLite store | Scanning, retention, deletion policy, fine-grained access, backups |
-| Other commands, approvals, and catalog attachment controls | No | Yes |
-| Trivy vulnerability-report import | Supported JSON normalization, private UI/API, source credential admission, atomic ingest and Trivy-only projection | Running the scanner privately, producing supported fresh reports, coverage validation and remediation |
-| Other email, chat, ticketing, scanner, SIEM, cloud, or estate integrations | No | Yes |
-| Production availability, recovery, privacy, and incident response | No | Yes |
+| 48 catalog paths: 38 original adapter routes, eight Operations/report pages, Documents and Docs | Route metadata, navigation and private clients | Intentional extensions and authorized data sources |
+| Exact product styling and brand assets | Yes | Asset hosting and approved brand changes |
+| Versioned page/session/control validation | Closed contracts and private API implementations | Valid custom integrations and policy for extensions |
+| Canonical admission and read projections | Source authentication, 29 kinds, replay receipts, normalization and bounded projectors | Commissioning, source quality, unsupported mappings and coverage |
+| Empty/failure-state rendering | Explicit absence, unavailable, denied and error states | Investigating deployment faults and missing observations |
+| Human authentication and CSRF | Better Auth, optional account TOTP, fixed sessions and same-origin mutation checks | Account custody, deployment policy, external identity/OIDC if needed |
+| Authorization | Full-access human operators; exact installation-wide service scopes and source-bound machine receivers | Fine-grained human roles, tenant isolation and step-up approval |
+| Collection, search, storage and retention | Indexed SQLite, bounded search/retention, checkpointed log and Windows collection, selected cloud workers and private protocol receivers | Capacity, deployment, provider commissioning and distributed/high-availability storage |
+| Source onboarding | Private UI/API, immutable integration definitions, sample validation and lifecycle | Reviewed configuration, managed secrets and coverage verification |
+| Agent/prompt/enrollment and governance lifecycle | Private administration state/audit and closed commands | Runner execution, evidence/retention policy and fine-grained authorization |
+| Agent-readable MCP | Public resources and seven scoped control/setup tools; owner-only token-file client | Client installation, disclosure policy, permission selection and operations |
+| Documents | Authenticated uploads, immutable versions, metadata, history and archive/restore | Scanning, deletion policy, access policy and backups |
+| Native monitoring and Operations | Durable measurements, incidents, jobs/runs/output, work and employee inbox | Reviewed inventory, collector/runner observations and incident response |
+| Detection | 25 opt-in original rules, reviewed JSON packs, testing, shadow/active rollout, expiring suppression and rollback | Rule review, source coverage, tuning and response; no general Sigma/YARA/Snort engine |
+| Native and finding email | Durable Resend/TLS SMTP queues, pause, bounded retry, test and reconciliation controls | Mail relay/provider, external credentials, reviewed recipients and delivery commissioning |
+| Trivy report import | Supported JSON normalization, authenticated admission and Trivy-only projections | Run the scanner, supply fresh reports and assess coverage/remediation |
+| Deployment packs | Reviewed Windows Task Scheduler, systemd, Compose, Helm and Ansible generation | Apply, configure, commission, upgrade, back up and operate each supported target |
+| Other catalog commands, approvals, chat/ticketing integrations and attachment controls | Structural only unless a documented private workflow supplies them | Implement separate authorized services |
+| Production availability, recovery, privacy and incident response | Bounded tested mechanisms, not a managed service | Deployment-specific validation and operations |
 
 For the shipped private paths and their exact limits, see technical manual
 [section 52](../public/technical-reference.md#52-storage-limits-reliability-acceptance-and-remaining-parity-work),

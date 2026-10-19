@@ -1,6 +1,6 @@
 # Authenticated platform delivery
 
-Use **Sources → Vendor imports** to select one of the 15 checked-in adapters,
+Use **Sources → Vendor imports** to select one of the 18 checked-in adapters,
 install its immutable preset, register an application-scoped source, preview
 representative input, test that sample and activate the source. Activation
 returns a one-time source-ingest credential. Store it outside the checkout.
@@ -23,11 +23,14 @@ Bearer credential. Browser cookies are rejected. The credential determines the
 application; clients cannot choose another estate. Both adapter and source must
 match the registered preset. Paused, revoked and expired sources are refused.
 
-This is the BB SOC gateway protocol. It is not an OTLP /v1/logs endpoint,
-syslog socket, CEF network receiver, Microsoft cloud subscription or Checkmk
-API. An external bridge must wrap the selected format in this envelope.
-Windows' bundled collector normalizes on the host and uses the existing
-canonical /api/v1/ingest endpoint instead.
+This endpoint uses the BB SOC gateway envelope. The separate
+[protocol receiver](PROTOCOL-GATEWAYS.md) accepts bounded OTLP HTTP JSON or
+mutually authenticated syslog TLS and drains its durable outbox to canonical
+`/api/v1/ingest`. The [platform workers](PLATFORM-COLLECTORS.md) acquire the
+reviewed Checkmk, Wazuh, Microsoft 365, Entra, Okta and CloudTrail S3 profiles.
+Those workers and the [Windows collector](WINDOWS-EVENTS.md) normalize before
+canonical delivery. A custom bridge using `/api/v1/ingest/platform` must wrap
+its selected input in the envelope above; it is not a cloud subscription API.
 
 ## Durable delivery contract
 
@@ -51,7 +54,10 @@ Split export pages before checkpointing if they exceed limits; persist all
 chunks until acknowledged. Unsupported/invalid records reject the whole batch
 with a bounded error. Operator preview/import remains available for manual work.
 
-The gateway supplies neither polling schedules nor source-side durability.
+This HTTP endpoint supplies neither polling schedules nor source-side durability.
+The separate workers and receiver provide their documented checkpoints and
+outboxes; [deployment bundles](DEPLOYMENT-AUTOMATION.md) provide reviewable
+schedules and services without installing or activating them automatically.
 Delivery proves only receipt of supplied records, not complete collection.
 Monitor source-to-forwarder, forwarder queue and forwarder-to-SOC health
 separately. Canonical admission's retention/replay window still applies;

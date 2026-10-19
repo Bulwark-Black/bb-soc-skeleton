@@ -43,29 +43,33 @@ validated Trivy report views remain distinct. Imported governance, identity,
 backup, and remediation claims do not authorize actions or change local
 decisions.
 
-This does **not** mean arbitrary vendor JSON is accepted. Mapping upstream
-payloads to the canonical schema, running collectors, polling APIs, keeping
-cursors, resolving vendor secrets, scheduling work, and performing operational
-actions still require an external integration or further implementation outside
-the specifically shipped Sentry live-monitoring/Slack path.
+The supplied acquisition paths now include a proof-bearing server-log reader,
+a native Windows/WEF reader, six external platform worker profiles and private
+OTLP HTTP JSON/syslog TLS receivers. Native host/website monitoring and Operations
+have their own source-authenticated protocol. Deployment generation supplies
+reviewable schedules/services without applying them. The canonical engine has
+25 opt-in original rules plus reviewed JSON packs; native incidents and derived
+findings can use separate durable Resend/SMTP queues. None of these accepts
+arbitrary vendor JSON or commissions accounts, audit policies or deployment
+credentials automatically. Read the linked operating guides before enabling a path.
 
 ## Integration capability matrix
 
 | Area | Shipped behavior | Remaining work or boundary |
 | --- | --- | --- |
-| Private deployment | Better Auth sign-in, closed signup, external private state, loopback listener, explicit private origin | Supported service/container packaging, automated setup verification, backup/restore tooling and operational monitoring |
+| Private deployment | Better Auth sign-in, closed signup, external private state, loopback listener; generated Windows Task Scheduler/systemd/Compose/Helm/Ansible worker bundles | Operator installation and commissioning, server supervision, independent watchdog, consistent backup/restore and capacity monitoring |
 | Application scope | Register application and environment; collector host optional for canonical push/report import | Human app-level authorization, tenant isolation, account ownership transfers and richer application lifecycle |
 | Integration definitions | Built-in manifests plus human-installed immutable application-scoped canonical-push definitions | No uploaded executable plugins, runtime code loading, arbitrary network targets or vendor credential resolver |
-| Source setup | Manifest-owned fields, test/activation, once-only source credential, ten reviewed vendor presets, file preview/import, revisions and history | Arbitrary mapping wizard and automatic credential acquisition at a vendor |
-| Live monitoring | Guided Sentry Cloud project access, encrypted private credentials, managed source, bounded polling, pagination, overlap/checkpoints, empty-window proof and failure/recovery alerts | Real-account commissioning, additional vendor readers, upstream environment filtering, service supervisor/watchdog and supported deployment/restore tooling |
-| Canonical ingestion | Authenticated source-bound JSON batches, 29 supported kinds through the general canonical driver, schema validation, receipts and deduplication | Raw webhook signatures, provider-specific schemas, streaming OTLP/syslog receivers and unlimited custom kinds |
-| Sender toolkit | Node client/CLI, private destinations, token-file custody, bounded retry, matching receipts; external SQLite outbox with persistent leases, backoff, replay and blocked recovery | No automatic batch splitting, input tailer, installed scheduler, vendor polling or exactly-once guarantee |
-| Observations | Bounded indexed app/source/kind/time reads and read-only route projections | Rich domain projectors, stable cursor pagination, native workflow commands, broader detail views and full SIEM query language |
-| Log views | Canonical log events feed Logs, Overview, Analytics, Sources and SOC Health | A rules engine, correlation, anomaly modeling or a detector-generated alert count |
+| Source setup | Manifest-owned fields, test/activation, once-only source credential, 18 reviewed vendor presets, file preview/import, revisions and history | Arbitrary mapping wizard and automatic credential acquisition at a vendor |
+| Live monitoring | Guided Sentry collection; native metrics/checks/incidents, website evidence and Operations history; server-log collection proofs | Real-account/host commissioning, broader provider coverage, upstream Sentry environment filtering, server supervision/watchdog and restore verification |
+| Canonical ingestion | Source-bound batches and platform envelopes, 29 canonical kinds, schema validation, atomic receipts/deduplication; separate bounded OTLP JSON and syslog TLS receivers | Vendor webhook signature handlers, OTLP protobuf/gRPC, RFC 3164/UDP, arbitrary provider schemas and unlimited custom kinds |
+| Sender toolkit | Node client/CLI and durable outbox; bounded server-log/Windows readers; Checkmk, Wazuh, Microsoft 365, Entra, Okta and CloudTrail S3 workers | Reviewed per-profile bounds and recovery; no automatic installation, arbitrary reader or exactly-once guarantee |
+| Observations | Indexed canonical reads and route projections; separate native incident, job, employee and work history/commands | Broader canonical domain projectors/detail views, canonical stable cursor pagination and full SIEM query language |
+| Log views and rules | Searchable canonical logs; 25 opt-in original rules, bounded fixed-window correlation and reviewed JSON packs with shadow/source scope and expiring suppression | Statistical anomaly modeling, arbitrary rule code/Sigma execution, automatic tuning and retrospective replay |
 | Scanner ingestion | Trivy vulnerability-report upload/API/CLI with typed normalization and specialized display | Executing Trivy, polling scanner APIs, coverage verification and eleven legacy scan-template drivers |
 | Other scanner tabs | Matching canonical observations can be displayed with explicit limitations | Their presence does not implement patch prioritization, integrity baselines, EOL matching, scanning, antivirus or quarantine |
-| Notifications | Imported `alert.delivery` remains an upstream claim; Live monitoring has its own durable Slack queue, bounded retry/cooldown, explicit tests, delivery status and local acknowledgment | General routing/escalation policy, email/ticketing senders, exactly-once delivery, recipient read acknowledgment and upstream issue resolution |
-| Agent access | Scoped service identities, expiry, rotation/revocation, audit, stdio MCP reading docs and fixed management tools | Agent runner, scheduler, job leases/results, observed execution health and approval workflow |
+| Notifications | Separate Sentry Slack, native incident email and finding email queues; email supports Resend or authenticated TLS SMTP, pause and reconciliation | General routing/escalation, ticketing, exactly-once delivery, recipient read acknowledgment and upstream issue resolution; imported delivery remains an upstream claim |
+| Agent access and Operations | Scoped service identities/MCP; native job/employee execution evidence, reports, work leases/actions and next-visit instructions | Agent/model runner, job execution/scheduler, command cancellation and richer approvals; recording a lease never executes or stops work |
 | Human access | Authenticated full-access operators, optional TOTP/backup-code 2FA, account recovery and session revocation | Read-only/analyst/admin roles, app scoping, enforced MFA policy/passkeys, SSO and per-action step-up approvals |
 | Documents | Private uploads, immutable versions/hashes, metadata, review dates, download, history, archive/restore | Malware scanning, OCR/search, evidence approvals, retention/purge/legal hold and larger object storage |
 | Governance | Authored attestation/risk records and audited lifecycle commands | Programs/checklists, verified evidence links, approval separation, import/export and independently verified closure |
@@ -98,6 +102,13 @@ The Sentry live-monitoring workflow is a fifth, managed path: it creates and
 activates its own narrowly scoped source after vendor access validation. It
 does not require a user-issued source bearer token or an invented sample, and
 only a complete successful API window proves collection, including empty windows.
+
+The built-in `server-log-push` path accepts bounded local file logs and explicit
+completed-read proofs; [server-log health](SERVER-LOGS.md) distinguishes reads,
+delivery and event recency. The built-in `native-monitor` source uses a separate
+numeric/operational protocol described in [Native Operations](NATIVE-OPERATIONS.md),
+not arbitrary canonical ingestion. Installed vendor presets use the custom
+canonical driver, with the selected adapter's exact source binding.
 
 Custom installation is human-authorized, revision-checked and audited. Each
 manifest is at most 64 KiB; the registry supports at most 86 custom definitions
@@ -255,10 +266,10 @@ and fingerprint protection continues inside its window. See the detailed
 
 | Screen family | Accepted source facts visible now | Native behavior still absent |
 | --- | --- | --- |
-| Monitor: Overview, Health, Analytics, Logs | Existing log projections and committed source delivery metadata | Detector evaluation, correlation and all-domain aggregate posture |
+| Monitor: Overview, Health, Analytics, Logs | Log projections, truthful source health, configured native monitoring and enabled rule findings | Unconfigured domains and a complete all-domain posture |
 | Monitor: Timeline, Daily Brief | Timeline observes all supported kinds; Brief lists finding/case/remediation/evidence facts | Generated briefing, summarization, handover signoff and durable briefing editions |
-| Respond: Triage, Tuning, Rules | Finding/case/vulnerability and rule observations on corresponding routes | Mutable local case queue, dispositions, rule compiler/evaluation, tuning approvals and retrospective replay |
-| Respond: Alert Comms, Honeypots, Phishing | Upstream delivery, honeypot and phishing report observations | Message senders, honeypot deployment, mailbox ingestion, scoring and attachment inspection |
+| Respond: Triage, Tuning, Rules | Finding/case/vulnerability observations plus original/reviewed rule catalog and policy state | Mutable local case queue, dispositions, arbitrary rule compiler, tuning approvals and retrospective replay |
+| Respond: Alert Comms, Honeypots, Phishing | Upstream delivery, honeypot and phishing observations; native incident/finding email status is managed separately in Operations → Incidents | General notification routing, honeypot deployment, mailbox ingestion, scoring and attachment inspection |
 | Investigate: Activity, IOC, Threat Intel, Known IPs | Relevant activity and indicator/sync observations | Learned baseline, pasted-text extraction, polling feeds, enrichment, hunting and authoritative trusted-address registry |
 | Scans: Trivy | Specialized validated report summaries, package inventory and reported findings | Scanner execution, complete scan coverage, automatic scheduling and verified fixes |
 | Scans: Patch first, Dependencies, EOL | Matching package/vulnerability observations | Exploit/priority enrichment, advisory matching and lifecycle catalog joins |
@@ -269,7 +280,7 @@ and fingerprint protection continues inside its window. See the detailed
 | Estate: Retention | Actual local telemetry policy and counters | Per-source verified horizons, archive integrity, configurable policy migration and secure erasure |
 | Govern: Access | Default / Who shows actual local operator permissions; Observations (`atab=observations`) shows imported identity/auth/audit/offboarding facts without granting or revoking permissions | Per-user entitlements, device inventory, certification and automated offboarding |
 | Govern: Risks, Attestations, Documents | Local authored lifecycles and document versions remain separate from imported claims | Evidence approval relationships, policy/program/checklist semantics, legal acknowledgement and verified closure |
-| Agents | Management metadata, prompts, enrollment and scoped service access | Actual executing workers, scheduling, observed runs/results and job health |
+| Agents and Operations | Management metadata, prompts, enrollment, scoped service access; separate Operations run/result/health evidence and work leases | Actual agent/model execution, job scheduling and automatic command execution |
 
 Generic projections intentionally show only observation time, app/environment,
 source and its lifecycle, kind, reported title/state/severity. They do not
@@ -287,56 +298,56 @@ Only the dedicated validated Trivy source populates the specialized Trivy view.
 
 ## Remaining implementation work, ranked for adoption
 
-### 1. Turn canonical integration into a genuinely easy connector experience
+### 1. Commission the shipped acquisition paths
 
-The extension path removes the hard-coded single-kind bottleneck. Ten tested
-web-app-first vendor mappings and UI presets now handle supplied exports/API
-pages, with fixture tests, field minimization, stable IDs and time semantics.
-The first automatic vertical slice now adds Sentry read-only access, collection,
-actionable event evidence, optional Slack delivery and explicit collection-health
-proof. Next commission that full experience with authorized accounts and users
-unfamiliar with the repository, before broadening the catalog. Review additional
-event families and improve diagnostics without leaking sensitive content.
-An export mapper still does not itself collect a live account's data.
+The 18 mappings and UI presets handle documented supplied formats. Sentry owns
+its live polling loop; [platform workers](PLATFORM-COLLECTORS.md) implement six
+bounded acquisition profiles with separate source/provider credentials and
+checkpoint/outbox recovery. [Windows](WINDOWS-EVENTS.md), [server logs](SERVER-LOGS.md)
+and [protocol receivers](PROTOCOL-GATEWAYS.md) cover their explicit host/protocol
+contracts. Native host and website observations use [Operations](NATIVE-OPERATIONS.md).
+Commission each selected path with authorized accounts, real representative
+formats and adopter permissions. Fixture tests do not prove account visibility,
+audit-policy coverage or successful execution on a live Windows host.
 
-For a pull connector, define an external secret reference/resolver, pinned
-provider API version, cursor/checkpoint, pagination, quotas, least-privilege
-access, retry/backoff and delete/revocation behavior. Do not accept a URL or
-API-key form and imply those pieces already exist. Vendor secrets belong in a
-server-side secret facility, never a public manifest or canonical payload.
+Unsupported event families and providers still need explicit versions,
+least-privilege access, secret custody, pagination/cursors, quotas, backoff and
+revocation behavior. A preset or export mapper does not collect automatically.
 
-### 2. Add collectors, scheduling and durable delivery deliberately
+### 2. Install schedules and verify recovery deliberately
 
-The standalone sender has bounded in-process retries. The new external SQLite
-outbox adds persisted delivery, byte/entry/age bounds, leases, backoff and blocked
-recovery. Sentry's built-in reader now owns its bounded windows/cursors, recovery
-journal and in-process schedule. Other collectors still need that ownership;
-all deployments still need a supported process supervisor, independent watchdog,
-capacity monitoring and rehearsed backup/restore procedures. A stopped SOC
-cannot deliver its own outage alert. The co-located encryption key/database
-must be protected and restored together with the complete application state.
-Webhook receivers additionally need vendor signature/replay verification and
-acknowledgement ordering. OTLP and syslog need their own parsers and admission
-policies; pointing them at the JSON endpoint will not work.
+[Deployment generation](DEPLOYMENT-AUTOMATION.md) supplies role-specific Windows
+Task Scheduler, systemd, Compose, Helm and Ansible bundles with fixed arguments,
+external state, overlap protection and rollback/uninstall instructions. It does
+not apply bundles, activate sources or install a server watchdog. Review the
+inventory, install the selected role and test interruption, blocked queues,
+credential rotation and consistent restore. A stopped SOC cannot send its own
+outage alert. Keep Sentry's encryption key and database with the complete backup.
 
-An agent runner similarly needs durable jobs, claims/leases, heartbeat,
-deadlines, cancellation, retry policy and rejection of stale completions.
-Bind each run to a reviewed prompt/capability revision, retain observed results
-and distinguish registered, connected, queued, running, stale and failed states.
-MCP remains management/documentation access, not a shell or telemetry tunnel.
+The HTTP endpoint `/api/v1/ingest/platform` accepts the BB envelope; the separate
+receiver handles bounded OTLP HTTP JSON or RFC 5424/CEF syslog TLS. It does not
+add public webhooks, UDP, protobuf or gRPC. Vendor webhook signatures and new
+protocols still need their own authenticated replay/admission design.
 
-### 3. Implement native operational workflows behind their own commands
+Operations records job/employee execution evidence and work claims, leases,
+action events and reconciliation. It does not launch commands or implement an
+agent runner. Lease expiry is not proof of process cancellation. MCP remains
+management/documentation access, not a shell or telemetry tunnel.
 
-Observation projections make data accessible but do not implement triage,
-rule evaluation, general notification routing, remediation, quarantine, evidence
-approval or local risk decisions. The explicit live-monitoring alert/Slack
-lifecycle is a limited exception, not permission for imported facts to execute
-arbitrary actions. For each additional workflow, specify the authoritative record,
-allowed transitions, permission/approval policy, expected revision,
-idempotency key, evidence requirements and audit before enabling UI actions.
-The shipped Slack path has durable bounded delivery state; queued/configured
-and delivered remain distinct. Broader destinations still need their own
-durability/reconciliation; an imported success label is not independent proof.
+### 3. Extend operational workflows within their own authority
+
+Native incidents provide dwell/recovery, acknowledgment and maintenance.
+The canonical engine has 25 opt-in original rules and bounded reviewed packs,
+source-scoped shadow rollout, fixed-window correlation and expiring suppression.
+Native incident and finding email have separate durable Resend/SMTP queues;
+Sentry retains its Slack queue. Provider acceptance is not recipient read
+confirmation, and uncertain delivery requires the documented reconciliation.
+
+General case/triage workflows, escalation/ticketing, remediation, quarantine
+and evidence approval still need authoritative records, permissions, allowed
+transitions, expected revisions, idempotency and audit. Imported facts alone
+cannot enable actions. See [rules](DETECTION-RULES.md),
+[reviewed packs](REVIEWED-RULE-PACKS.md) and [notifications](NATIVE-NOTIFICATIONS.md).
 
 ### 4. Add team authorization and governed evidence
 
@@ -353,16 +364,18 @@ imported governance claims distinct from locally authored decisions.
 
 ### 5. Make private operation reproducible and recoverable
 
-Provide one supported deployment profile with service restart behavior,
-owner-only external storage, exact origin/Tailnet configuration and
-preflight checks. Add consistent backup/export, restore-to-a-copy verification,
+Commission the generated worker/service bundles in the intended environment,
+and separately configure the private application origin, supervision and
+access controls. Add consistent backup/export, restore-to-a-copy verification,
 upgrade/migration rollback, capacity warnings and actionable process-lock
-recovery. Do not turn an unexplained lock refusal into automatic data deletion.
+recovery. The generator's uninstall path preserves state; do not turn an
+unexplained lock refusal into automatic data deletion.
 
 Telemetry is now indexed, but administration still has bounded JSON state and
 audit. SQLite payload quotas are not disk-space quotas: indexes, WAL, receipts,
-audits, identity and document stores also consume space. Retention runs on
-successful mutations, not on an idle timer, and changing a stored retention
+audits, identity and document stores also consume space. Canonical telemetry
+retention runs on successful mutations, while native monitoring has its own
+maintenance loop and metric retention. Changing stored canonical retention
 policy requires a deliberate migration. These constraints need operating
 tooling before advertising unattended or high-volume deployments.
 

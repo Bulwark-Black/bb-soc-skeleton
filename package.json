@@ -1,7 +1,7 @@
 {
   "name": "soc-console-skeleton",
   "version": "0.1.0",
-  "description": "A data-free SOC interface skeleton with versioned page, auth, connector, and ingest contracts.",
+  "description": "A private SOC monitoring and log-ingestion starter with native Operations, opt-in detections, and versioned integration contracts.",
   "type": "commonjs",
   "scripts": {
     "start": "node server/private-application.js",

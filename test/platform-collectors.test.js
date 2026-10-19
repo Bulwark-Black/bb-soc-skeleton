@@ -87,10 +87,39 @@ test("Okta polling keeps next link including quiet read and resumes after restar
   f.transport = async req => { assert.equal(req.url, next); return http([{ uuid: "late-event", published: "2026-10-17T01:00:00Z", eventType: "user.session.start", outcome: { result: "SUCCESS" } }], { link: `<${next.replace("opaque-fixture", "next-fixture")}>; rel="next"` }); };
   assert.equal((await runCollector(f)).records, 1); assert.equal(queued(f)[0].records[0].observedAt, "2026-10-17T01:00:00.000Z");
 });
-test("Checkmk only reads selected host/service status and retains source state/time", async t => {
-  const f = setup(t, "checkmk", { origin: "https://127.0.0.1", site: "fixture", apiVersion: "1.0", hosts: ["host-one"] }); fs.writeFileSync(f.config.providerCredentialFile, JSON.stringify({ username: "readonly", secret: ACCESS }));
-  let count = 0; f.transport = async req => { count++; assert.equal(req.method, "POST"); assert.equal(req.privateNetwork, true); const b = JSON.parse(req.body); assert.equal(b.query.right, "host-one"); const host = req.url.includes("/host/"); return http({ domainType: host ? "host" : "service", value: [{ extensions: { ...(host ? { name: "host-one" } : { host_name: "host-one", description: "CPU" }), state: host ? 0 : 2, has_been_checked: 1, last_check: (NOW - 60000) / 1000, plugin_output: "Reviewed check fixture" } }] }); };
-  const r = await runCollector(f); assert.equal(r.complete, true); assert.equal(count, 2); assert.equal(queued(f)[1].records[0].payload.fields.upstreamState, "CRIT"); assert.equal(queued(f)[1].records[0].observedAt, new Date(NOW - 60000).toISOString());
+test("Checkmk mixed service page including WARN queues all states before completing the checkpoint", async t => {
+  const f = setup(t, "checkmk", { origin: "https://127.0.0.1", site: "fixture", apiVersion: "1.0", hosts: ["host-one"] });
+  fs.writeFileSync(f.config.providerCredentialFile, JSON.stringify({ username: "readonly", secret: ACCESS }));
+  const checkedAt = new Date(NOW - 60000).toISOString();
+  let count = 0;
+  f.transport = async req => {
+    count++; assert.equal(req.method, "POST"); assert.equal(req.privateNetwork, true);
+    assert.equal(JSON.parse(req.body).query.right, "host-one");
+    const host = req.url.includes("/host/");
+    const value = host ? [{ extensions: { name: "host-one", state: 0, has_been_checked: 1,
+      last_check: (NOW - 60000) / 1000, plugin_output: "Reviewed host fixture" } }]
+      : [0, 1, 2, 3].map(state => ({ extensions: { host_name: "host-one", description: "Service " + state,
+        state, has_been_checked: 1, last_check: (NOW - 60000) / 1000, plugin_output: "Reviewed service fixture " + state } }));
+    if (!host) value.push({ extensions: { host_name: "host-one", description: "Pending service", state: 1,
+      has_been_checked: 0, last_check: 0, plugin_output: "Not checked" } });
+    return http({ domainType: host ? "host" : "service", value });
+  };
+  const result = await runCollector(f);
+  assert.equal(result.complete, true); assert.equal(result.records, 6); assert.equal(count, 2);
+  const batches = queued(f);
+  assert.equal(batches.length, 2); assert.equal(batches[0].records.length, 1); assert.equal(batches[1].records.length, 5);
+  for (const [index, name, state] of [[0, "OK", "ok"], [1, "WARN", "warn"], [2, "CRIT", "failed"], [3, "UNKNOWN", "unknown"]]) {
+    const record = batches[1].records.find(row => row.payload.fields.service === "Service " + index);
+    assert.equal(record.payload.state, state); assert.equal(record.payload.fields.upstreamState, name);
+    assert.equal(record.payload.fields.originalState, index); assert.equal(record.payload.fields.hasBeenChecked, true);
+    assert.equal(record.observedAt, checkedAt); assert.equal(record.sourceId, f.config.sourceId); assert.equal(record.estateId, f.config.appId);
+  }
+  const pending = batches[1].records.find(row => row.payload.fields.service === "Pending service");
+  assert.equal(pending.payload.state, "unknown"); assert.equal(pending.payload.fields.upstreamState, "PENDING");
+  assert.equal(pending.payload.fields.hasBeenChecked, false); assert.equal(pending.observedAt, new Date(NOW).toISOString());
+  assert.deepEqual(readState(f, "cursor"), {}); assert.equal(readState(f, "pending"), null);
+  assert.equal((await runCollector(f)).records, 0, "Reopening the worker must not duplicate the completed mixed page");
+  assert.deepEqual(queued(f), batches);
 });
 test("Wazuh partial append retains offset, then completes without dropping or duplicating", async t => {
   const line = JSON.stringify(wazuh("one")); const f = wazuhSetup(t, line.slice(0, 30));

@@ -64,8 +64,10 @@ expire after 24 hours. Match identities are durable and not automatically
 pruned; reaching capacity refuses admission atomically. Monitor capacity and
 plan an archive/migration before exhaustion. Splitting a batch helps only the
 per-batch bound; it does not fix a full ledger. This release does not include
-a match-ledger archive command. Detection findings do not automatically send
-native monitoring emails; the two lifecycles remain distinct.
+a match-ledger archive command. Active derived findings can enter their own
+durable email queue when finding notifications are explicitly configured.
+Native monitoring incidents use a separate notification lifecycle; importing an
+arbitrary finding does not automatically send either kind of email.
 
 ## Grow coverage without importing assumptions
 
@@ -73,9 +75,11 @@ The checked-in catalog is in server/detection-rules.js; additions require
 a documented normalized field contract, original/publicly licensed rule logic,
 positive and negative fixtures, and a representative commissioning event.
 No arbitrary expressions, scripts, regex rules or downloadable code execute.
-Third-party Sigma/Wazuh/Elastic catalogs need a separately reviewed licensing,
-mapping, testing and update pipeline. Copying thousands of signatures without
-their required fields and data sources would misrepresent coverage.
+Third-party Sigma/Wazuh/Elastic content requires source-specific license review,
+translation into the supported bounded JSON format, field mapping, fixtures,
+and an update policy before using the shipped reviewed-pack pipeline. Their
+native formats do not execute directly. Copying signatures without their
+required fields and data sources would misrepresent coverage.
 
 Read [Windows events](WINDOWS-EVENTS.md) and [platform coverage](PLATFORM-COVERAGE.md)
 for source prerequisites and deployment phases. Enable a small reviewed set,

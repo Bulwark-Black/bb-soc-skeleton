@@ -13,7 +13,10 @@ modules for connectors and administration. Private telemetry uses indexed SQLite
 admission. The integration core exposes universal/custom canonical sources,
 eighteen vendor export/API-page mappings with a private import UI and external
 durable outbox, a private Trivy importer, and eleven data-only scan templates; those templates are schemas,
-not scanner drivers. `npm start` runs the private application;
+not scanner drivers. Native Operations persists metrics, incidents, jobs, work
+and employee instructions. Opt-in detection, durable email, selected external
+collectors and deployment generators are also supplied; each needs reviewed
+private configuration and commissioning. `npm start` runs the private application;
 `npm run start:static` installs no provider and performs no operational writes.
 A narrow reference MCP
 process publishes public documentation/contracts and scoped connector/
@@ -83,9 +86,10 @@ static inspection mode. All starter operators have full access; the role
 separation described above is a requirement for a richer deployment, not a
 claim about currently implemented RBAC.
 
-## The three browser boundaries
+## Page and lifecycle browser boundaries
 
-The application keeps reads, source control, and administration separate:
+The original browser contracts keep page reads, source control and
+administration separate:
 
 | Boundary | Default global | Authority |
 | --- | --- | --- |
@@ -93,7 +97,14 @@ The application keeps reads, source control, and administration separate:
 | Connector provider | `SOC_CONSOLE_CONNECTORS` | Register apps, enroll hosts, and configure/test/activate manifest-backed sources |
 | Administration provider | `SOC_CONSOLE_ADMINISTRATION` | Manage agents, prompt revisions/enrollment, attestations, and risks through its closed command vocabulary |
 
-All three objects are narrow browser clients of adopter-owned server services.
+The shipped private application also has dedicated document, service-access,
+source-import/setup, Operations, rule-policy and notification APIs. These are
+not arbitrary extensions to the three version-1 objects. See
+[NATIVE-OPERATIONS.md](NATIVE-OPERATIONS.md),
+[REVIEWED-RULE-PACKS.md](REVIEWED-RULE-PACKS.md) and
+[NATIVE-NOTIFICATIONS.md](NATIVE-NOTIFICATIONS.md) before using those workflows.
+
+All three objects are narrow browser clients of adopter-operated server services.
 They are not databases, authorization engines, secret stores, or places to put
 endpoints and tokens. The browser runtime validates shape and correlation; the
 server still authenticates the caller, authorizes the exact resource/action,
@@ -193,10 +204,12 @@ Use this lifecycle:
 6. **Update.** Change metadata or capabilities with the exact current
    administration snapshot revision. Material privilege expansion requires explicit
    review. Concurrent/stale writes conflict instead of overwriting.
-7. **Pause/archive.** `agent.pause` stops operation while retaining the record;
-   `agent.archive` moves the record to archived. Revoke live credentials and
-   leases as production policy requires. Neither erases prompt/enrollment/audit
-   history.
+7. **Pause/archive.** `agent.pause` changes the managed record to paused;
+   `agent.archive` changes it to archived. Neither stops an external process or
+   automatically revokes a separately issued Service Access credential. A runner
+   must enforce the intended lifecycle policy, and operators must explicitly
+   revoke relevant credentials/leases. These changes retain prompt/enrollment/
+   audit history.
 8. **Restore.** `agent.restore` returns an archived record to active through an
    authorized command and a new revision. It does not automatically reissue an
    enrollment or validate an old runtime credential; re-review both.
@@ -215,8 +228,12 @@ budgets, and forbidden operations remain server-enforced.
 ## Agent assignments and credentials
 
 The checked-in version-1 agent document exposes a bounded capability list; it
-does not define a separate assignment entity. If a production extension adds
-assignments, they must reference stable IDs and describe one bounded
+does not define a separate assignment entity. The dedicated Operations API does
+persist work assignments and next-visit instructions for an explicitly configured
+employee roster; these are separate from managed-agent registration and Service
+Access identities. They do not schedule or execute an agent. If an extension adds
+assignments to the version-1 administration model, they must reference stable IDs
+and describe one bounded
 relationship, such as an estate, app, source, scanner, route capability, or
 review queue. The server must verify that the administrator and agent are both
 authorized for the target. Removing an assignment takes effect for new commands
@@ -230,18 +247,21 @@ by the runner; records and snapshots carry only opaque references, store type,
 version, and safe rotation/expiry metadata. Revocation must terminate leases,
 invalidate tokens/certificates, and be visible as a separate audited result.
 
-The local reference administration runtime demonstrates one connection proof.
-After `enrollment.issue`, the intended agent submits the returned one-time value
-to loopback `POST /api/v1/agents/connection` using the `Enrollment` authorization
+The administration runtime supports a bounded connection proof in both the
+private application and the disposable workbench. After `enrollment.issue`, the
+intended agent submits the returned one-time value to the configured private
+application (or loopback workbench) `POST /api/v1/agents/connection` using the
+`Enrollment` authorization
 scheme and a separate data document containing exactly
 `schemaVersion: "1"`, the issued `agentId`, the issued `enrollmentId`, and a
 fresh RFC 3339 `observedAt`. The credential is not a JSON field. A successful
 proof marks that enrollment connected and updates safe last-seen metadata; it
 does not create a general command, telemetry, or remote-execution channel.
-Exact endpoint/bind behavior belongs to the application or loopback host that
-mounts the runtime. Production replaces the proof with authenticated private
-TLS and a rotated workload identity while retaining purpose, audience, expiry,
-replay, and revocation checks.
+Shared private application access uses the configured exact Tailnet HTTPS
+origin; the workbench stays loopback-only. An external runner still needs its
+own separately provisioned, rotated workload credential. Enrollment proof never
+substitutes for purpose, source/scope, expiry, replay and revocation checks on
+later calls.
 
 ## Optional MCP facade
 
@@ -253,7 +273,7 @@ prompt read, and two read-only setup tools. It authenticates to the private star
 service credential. With no token file it retains the explicitly disposable
 loopback workbench mode. Do not extract an operator's browser cookies, invent an
 auth bypass, or publish the workbench to make a connection succeed.
-The facade calls the same canonical API/RBAC decision boundary as UI or CLI
+The facade calls the canonical command authorization boundary used by UI or CLI
 clients; it must never maintain a parallel registry or weaker policy.
 
 For the private application, sign in as an operator, open **Agents → Service
@@ -446,8 +466,11 @@ For the included private starter, the safe sequence is:
    supply its required bounded sample to `source.test`. A test validates but
    does not ingest that sample. Activate only after approval, handle the one-time
    token privately, then submit real authorized events through ingest.
-6. Verify the five supported canonical-log projections. Leave unsupported
-   screens honestly empty/unavailable; do not manufacture records.
+6. Verify actual route coverage and retained observations for the selected
+   source. For server logs, inspect reader proof independently from delivery and
+   log activity. Commission native monitoring, rule rollout or notification
+   delivery only when explicitly configured; preserve unknown/missing evidence.
+   Leave unsupported screens empty/unavailable and do not manufacture records.
 7. Upload an approved document via the private Documents UI. Verify versions,
    hash/download integrity, metadata, history, archive/restore, and restart.
 8. For shared access, configure ACL-restricted Tailnet HTTPS Serve with the
@@ -470,8 +493,9 @@ For a custom enterprise or multi-tenant integration, extend that foundation:
 6. Integrate a write-only secret provisioning flow that returns opaque
    references; never ask the agent to paste secrets into source code or public
    config.
-7. Implement the administration provider and its durable audit/lifecycle store
-   before enabling agent, attestation, or risk mutations.
+7. Review the shipped administration provider and state/audit model; extend or
+   replace them when enterprise authorization, durability or retention requires
+   it. Verify lifecycle behavior before enabling the extended mutations.
 8. Bind the resulting services to loopback/private tailnet addresses, apply
    private TLS and ACLs, and verify there is no public ingress or public DNS.
 9. Exercise absence, denial, conflict, stale revision, replay, partial failure,
@@ -501,6 +525,26 @@ Never claim that a source is collecting because setup/test succeeded, that an
 agent is safe because it connected, or that a scan/governance screen is managed
 because its structural UI is visible. State must come from an authenticated
 result and the corresponding authorized read projection.
+
+## Native employee and job observations
+
+Operations uses explicitly configured employee and host/source identities, not
+managed-agent display names. Operators can create work and next-visit guidance;
+the bound machine lane can read and explicitly acknowledge instructions for its
+configured employee. Withdrawal and acknowledgment are retained lifecycle facts.
+None proves that an external runner acted on the instruction.
+
+Critical jobs are registered expectations with separate schedule, execution,
+observer and output evidence. The external operation sender queues a stable
+observation before delivery; it never launches the described job. Host collectors
+and the reviewed-target website probe use their own source credentials and
+durable external state. MCP does not acquire those execution, filesystem,
+network-probe or telemetry permissions by exposing their documentation.
+
+Read [native Operations](NATIVE-OPERATIONS.md) for exact commissioning examples.
+Preserve pending and uncertain delivery evidence across restart. Explicit
+abandonment is not proof of non-delivery, and SMTP acceptance uncertainty must
+be reconciled before any duplicate-risk requeue.
 
 ## Platform monitoring expansion
 

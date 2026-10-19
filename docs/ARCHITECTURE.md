@@ -3,8 +3,9 @@
 ## Purpose
 
 The repository provides a data-free Bulwark Black SOC interface and a runnable
-private starter. It preserves product design and the 38-route SOC topology,
-plus local technical documentation and a private document library. Narrow
+private starter. Its 48 catalog paths preserve the original 38 page-adapter
+routes and add eight private Operations/report pages, local technical
+documentation and a private document library. Narrow
 browser contracts separate page data, identity projection, source management,
 and agent/governance administration.
 
@@ -17,9 +18,15 @@ operators have full access, while service identities have exact installation-
 wide scopes. Granular resource authorization and multitenancy remain adopter
 work. The private Sentry collector has its own polling loop and notification
 queue. External senders can use a separate SQLite outbox; the file-log collector
-adds a durable cursor and reader proof. External collection scheduling, an agent
-runner and a remote MCP listener remain adopter work. The stdio MCP client uses
-scoped private service access.
+adds a durable cursor and reader proof. Native monitoring persists host metrics,
+service checks, website observations, incident episodes, jobs, work and employee
+instructions in per-application SQLite stores. The canonical admission transaction
+can derive findings with opt-in rules and reserve filtered finding email. Native
+incident mail and finding mail use separate durable queues with Resend or TLS SMTP.
+Reviewed configuration and commissioning are required before collection or sending.
+Generated scheduling/deployment packs support selected external collectors; the
+adopter applies and operates them. An agent runner and a remote MCP listener
+remain adopter work. The stdio MCP client uses scoped private service access.
 
 The custom integration registry stores immutable data-only manifests within
 the telemetry control transaction. It reuses canonical admission; it never
@@ -48,7 +55,7 @@ remotely. Only the private starter requires the installed runtime dependencies.
 │                              │                                   │
 │ page + browser-auth + connector + administration contracts       │
 │                              │                                   │
-│ 38 SOC routes + Docs + Documents -> controller -> safe renderers│
+│ 48 catalog paths -> controller -> safe private/API renderers     │
 │                              │                                   │
 │ page/control providers absent OR explicit/injected providers     │
 └──────────────────────────────┬───────────────────────────────────┘
@@ -60,13 +67,16 @@ remotely. Only the private starter requires the installed runtime dependencies.
 │                              │                                   │
 │ connector registry + administration + identity/workflow services │
 │                              │                                   │
-│ telemetry admission -> canonical records -> page projectors      │
-│ SQLite identity/documents/telemetry/services + JSON admin state   │
+│ canonical admission -> records + opt-in findings -> projectors   │
+│ native monitoring -> incidents / jobs / work / employee inbox    │
+│ reviewed mail config -> durable queues -> Resend or TLS SMTP     │
+│ SQLite private stores + bounded JSON administration state        │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
 The adopter operates and reviews this application boundary. The starter now
-implements real sessions and document persistence but does not remove capacity,
+implements authentication, durable ingestion, monitoring and selected workflows,
+but does not remove capacity,
 authorization, deployment, backup, or integration responsibilities. Browser
 contracts and the development workbench do not confer server privileges.
 
@@ -99,8 +109,18 @@ public/index.html
   +-- public/application-bridge.js
   |                              inert static integration hook
   +-- public/technical-docs.js   generated frozen technical manual
-  +-- public/ui-catalog.js       define 38 SOC routes, /docs, /documents
+  +-- public/ui-catalog.js       define 48 paths and navigation relationships
   +-- public/document-library.js private document UI/API client
+  +-- public/service-access.js   scoped service identity UI/API client
+  +-- public/scanner-import.js   Trivy report import
+  +-- public/integration-center.js
+  +-- public/vendor-import.js    canonical definitions/observations and mappings
+  +-- public/live-monitoring.js  private Sentry collection configuration/status
+  +-- public/setup-guides.js
+  +-- public/setup-assistance.js
+  +-- public/source-mapping.js   source setup and reviewed mapping clients
+  +-- public/server-logs.js      file-log collector setup guidance
+  +-- public/operations.js       native Operations and finding-mail clients
   +-- public/app.js              empty states, renderers, factory/controller
   +-- public/bootstrap.js        resolve integrations and mount once
   |
@@ -177,10 +197,10 @@ provider/controller pair instead of remounting it.
 ## Empty baseline flow
 
 ```text
-URL hash -> 38 SOC routes -> route heading + data-free structural panels
+URL hash -> original 38 routes -> heading + data-free structural panels
          -> adapter-absent state (no envelope, provider read, or refresh timer)
          -> /docs -> checked-in manual (no page/connector/admin provider read)
-         -> /documents -> explicit private-service-required state in preview
+         -> /documents and 8 Operations pages -> private-service-required state
 ```
 
 No route renderer owns records, counts, identities, timestamps, events,
@@ -245,8 +265,9 @@ searchable.
 Applications do not require hosts. Canonical push selects a registered app
 environment and can be configured/tested/activated with no collector. A bounded
 real sample validates shape only and is not ingested or evidence of delivery.
-Selecting a collector adds enrollment/proof requirements. Scanner setup
-templates require hosts and fail closed because no drivers are installed.
+Selecting a collector adds enrollment/proof requirements. The eleven legacy
+scanner setup templates require hosts and fail closed because they have no
+drivers; the separate Trivy report importer accepts supported report files.
 Pause refuses ingest; update/revoke/archive/remove/rotation invalidate the
 appropriate old credentials. Removal retains a tombstone and historical data.
 
@@ -254,9 +275,12 @@ Telemetry does not travel through the command provider. Push, webhook, pull,
 OTLP, syslog, and agent transports terminate in server-side admission logic,
 which authenticates a stable source, validates a bounded payload, deduplicates
 it, commits a receipt and canonical records, and drives idempotent page
-projectors. The private app supports canonical `log.event` push and bounded
-Trivy report normalization; the disposable workbench retains its reference
-behavior. Selected cloud pollers and private OTLP JSON/syslog TLS receivers are shipped as separate collector workers; generic webhook/pull integrations remain extension guidance.
+projectors. The private app supports all 29 canonical record kinds through
+universal/custom sources, bounded Trivy report normalization and supplied-log
+platform adapters. Opt-in rule evaluation and finding-mail admission share the
+canonical telemetry transaction. Native metrics, jobs and website observations
+use separate source-bound receivers and per-application stores. The disposable
+workbench retains its narrower log-push reference behavior. Selected cloud pollers and private OTLP JSON/syslog TLS receivers are shipped as separate collector workers; generic webhook/pull integrations remain extension guidance.
 The private machine ingest endpoint uses scoped bearer proof
 without a browser cookie/Origin; browser control endpoints require the operator
 session and matching Origin. See [CONNECTORS.md](CONNECTORS.md).
@@ -330,8 +354,8 @@ private service API: digest-backed credentials, expiry/revocation and exact
 command scopes are checked server-side. Without a token it targets the disposable
 workbench. Service scopes are installation-wide, not resource-specific RBAC.
 Browser cookies must not be exported to the client.
-A production replacement uses the same canonical service/RBAC
-decisions. It must not become another store, authorization engine, telemetry
+A replacement must preserve the canonical service authorization decisions;
+finer resource or human-role policy requires an explicit extension. It must not become another store, authorization engine, telemetry
 transport, plaintext-secret channel, arbitrary URL client, or execution
 tunnel. See [AGENTS.md](AGENTS.md).
 
@@ -357,7 +381,9 @@ is an operator CLI action. SQLite session storage, mutation-origin checks, and
 the full-access operator gate live on the server, not in browser capabilities.
 The private-only Access → Who projection reports that real session and operator
 inventory, bounded to 200 displayed names plus the total. It does not manufacture
-roles or populate the other Access tabs and is separate from telemetry projectors.
+roles. Other Access views can show imported identity, authentication, audit and
+offboarding observations through separate read-only telemetry projectors; those
+records cannot grant console access or execute offboarding.
 For an OIDC replacement, Authorization Code + PKCE, token
 validation, confidential client credentials, server session/cookies, CSRF,
 logout-token validation, and resource authorization belong to the BFF. See
@@ -438,8 +464,9 @@ are not browser config. See [CONFIGURATION.md](CONFIGURATION.md).
   preview JavaScript performs no persistence, upload, telemetry collection, or
   environment discovery on its own. The private server deliberately installs
   authenticated providers and enables the separate document upload client.
-- All 38 SOC routes are empty without an injected provider; `/docs` remains
-  readable from trusted checked-in content.
+- The original 38 page-adapter routes remain empty without an injected provider.
+  Documents and the eight Operations pages require their private APIs;
+  `/docs` remains readable from trusted checked-in content.
 - Page/auth objects are strictly allowlisted, normalized, and frozen/bound.
 - Provider-supplied markup, raw auth artifacts, and executable values are
   rejected.
@@ -472,6 +499,17 @@ server/private-application.js    default private application / authenticated API
 server/private-auth.js           Better Auth and SQLite identity/session store
 server/document-store.js         SQLite metadata, immutable versions, audit
 server/reference-*.js            bounded connector/admin core and development host
+server/sqlite-telemetry-store.js   canonical records, receipts, retention and audit
+server/operations-service.js      per-application native monitoring boundary
+server/native-monitor/           metric/incident/job/inbox/mail persistence
+server/detection-*.js            opt-in original and reviewed-pack evaluation
+server/finding-notifications.js  canonical finding email queue and delivery
+tools/collect-logs.js            checkpointed file-log collection
+tools/collect-windows-events.py Windows event collection
+tools/native-monitor/          external host, job and website observations
+tools/platform-collectors/      selected cloud, Checkmk and Wazuh workers
+tools/receive-platform.js       private OTLP JSON and syslog TLS receivers
+tools/deployment/               reviewed bundle generation, not installation
 ```
 
 ## Extension points
@@ -530,17 +568,19 @@ documents, tests, and documentation.
 ### Enable other networking or commands
 
 The connector contract activates only its closed source-management vocabulary.
-Keep every other operational integration outside the strict empty-skeleton
-audit boundary unless a downstream repository establishes a reviewed policy.
-Replace the baseline CSP with one reviewed response-header policy. Define
+The private application separately supplies document, Operations, rule-policy,
+service-access and notification APIs with their own validation and authorization.
+New integrations need reviewed contracts and public-safe committed examples.
+Preserve the distinction between the inert static CSP and the private server
+response-header policy. Define
 versioned command contracts, server authorization, idempotency/concurrency,
 audit, failure, and abuse controls before activating any other structural
 action.
 
 ## Architectural invariants
 
-1. The checked-in shell and all 38 SOC routes remain data-free; the additional
-   documentation route contains public implementation guidance only.
+1. All 48 catalog paths remain free of seeded operational data; the Docs
+   utility contains public implementation guidance only.
 2. Operational authority stays outside the static renderer; injected providers
    are clients of an application-owned server boundary.
 3. Browser configuration contains no secret, record, or policy decision.
@@ -556,15 +596,22 @@ action.
 11. The strict public audit remains meaningful; the inert static mode and
     opt-in loopback reference workbench remain explicitly distinguishable.
 
-CI and GitHub repository-readiness work is intentionally outside this
-architecture. The adopter owns delivery/repository governance.
+The repository includes automated checks and a CI workflow. The adopter owns
+merge/release governance, deployed updates, capacity and recovery operations.
 
 ## Native Operations boundary
 
 Eight dedicated Operations/report pages use session-authenticated reads and writes,
 with source-scoped machine admission into per-application SQLite stores. They are
 separate from the original 38 page-adapter routes. Inventory and employees are
-reviewed private configuration; native notifications stay shadow-only. See
+reviewed private configuration. Jobs, runs, output evidence, work assignments and
+next-visit instructions are durable records; recording them never launches a
+process or sends an instruction to an external agent. Instructions require an
+explicit recipient acknowledgment or operator withdrawal. Native incident email
+is disabled until reviewed configuration enables Resend or TLS SMTP. The separate
+canonical finding queue does not manufacture native hosts or incidents. Both
+mail paths retain delivery attempts and park ambiguous SMTP outcomes for explicit
+reconciliation; relay acceptance is not inbox delivery. See
 [NATIVE-OPERATIONS.md](NATIVE-OPERATIONS.md) for schemas, atomicity and lifecycle.
 
 ## Platform monitoring expansion

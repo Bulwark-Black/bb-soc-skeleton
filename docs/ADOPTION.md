@@ -2,10 +2,11 @@
 
 For source-first adoption, use the [integration review](INTEGRATION-REVIEW.md)
 alongside this guide. The private starter now accepts all 29 canonical kinds
-through Universal canonical events and human-installed custom definitions;
-vendor translation remains in an external adapter. Sources → Integrations
-shows actual screen coverage, and Received observations confirms live data.
-Imported read-only observations do not implement native workflow actions.
+through Universal canonical events and human-installed custom definitions.
+Eighteen checked-in vendor adapters translate their documented inputs; other
+formats require an external mapper. Sources → Integrations shows actual screen
+coverage, and Received observations confirms admitted data. Receipt alone does
+not prove complete collection or authorize native workflow actions.
 
 This guide is for teams that want to take the public interface skeleton from a
 source checkout, place it in an existing stack, and supply authorized SOC page
@@ -16,12 +17,22 @@ visual language, empty/failure states, and versioned page, auth,
 connector-control, administration, and canonical-ingest contracts. The
 invariant is **38 adapter routes plus eight Operations/report pages, `/documents`, and local `/docs`: 48 paths**.
 The private starter includes real sign-in, indexed telemetry, scoped service
-access, Trivy report import, and durable document storage but no
-committed operational data or all-purpose production security backend.
+access, Trivy report import, durable documents, native monitoring/Operations,
+opt-in original and reviewed rules, and separate native-incident/finding email
+queues. It contains no committed operational data or all-purpose production
+security backend.
 
 For file-based server logs, follow [Server logs](SERVER-LOGS.md). It covers
 plain text, Docker JSON and journald JSON, sample validation, durable collection,
-reader health, scheduling and recovery without a vendor account.
+reader health, scheduling and recovery without a vendor account. Use
+[Windows events](WINDOWS-EVENTS.md) for native Event Log/WEF collection, including
+optional Defender Operational; [platform workers](PLATFORM-COLLECTORS.md) for
+six reviewed cloud/Checkmk/Wazuh profiles; [protocol receivers](PROTOCOL-GATEWAYS.md)
+for bounded OTLP JSON or syslog TLS; and [Native Operations](NATIVE-OPERATIONS.md)
+for host metrics, website probes and operational evidence. The
+[deployment generator](DEPLOYMENT-AUTOMATION.md) creates reviewable worker
+bundles without installing them or issuing credentials. Each source/configuration
+must be commissioned separately; the included fixtures are not live-platform proof.
 
 ## Start with the private application
 
@@ -76,10 +87,10 @@ are not prerequisites for merely starting this included application.
 
 The repository has five deliberately separate browser layers:
 
-1. **Presentation:** the Bulwark Black SOC shell, 30 primary routes including Documents, nine
-   adapter-addressable detail/utility routes, the separate local `#/docs`
-   utility, responsive behavior, accessibility behavior, and exact default
-   brand assets/colors.
+1. **Presentation:** the Bulwark Black SOC shell with 38 adapter-addressable SOC
+   routes, eight Operations/report pages, Documents and the local `#/docs`
+   utility: 48 registered paths with responsive/accessibility behavior and the
+   default brand assets/colors.
 2. **Page adapter boundary:** a strict JavaScript contract through which an
    adopter supplies already-authorized presentation models.
 3. **Authentication integration boundary:** a closed browser contract for
@@ -381,8 +392,10 @@ supports this closed sequence:
 3. `source.setup` selects an installed `connectorType` and one of that
    manifest's `supportedSourceKinds`, then creates independent stable
    `connectorInstanceId` and `sourceId` values.
-4. `source.test` verifies the configured path without creating telemetry;
-   hostless canonical push requires a bounded message sample.
+4. `source.test` validates the selected manifest's setup without creating
+   telemetry. Narrow log push requires a bounded message sample;
+   canonical-events/custom sources require a full bound normalized record.
+   Native-monitor structural validation is not evidence that a probe ran.
 5. `source.activate` enables the source and may return a distinct one-time
    source-ingest credential.
 6. Maintain sources with `source.update`, `source.pause`, `source.resume`,
@@ -565,7 +578,8 @@ Passing this repository's tests or public audit does not satisfy the checklist.
 
 ## Deliberate non-goals
 
-This work does not add or prescribe CI pipelines, GitHub workflows, branch
-protections, issue templates, release automation, package publishing, or
-repository marketplace readiness. Those concerns remain intentionally out of
-scope and belong to the adopting organization's delivery/governance model.
+The repository includes a GitHub CI workflow for documentation freshness,
+serialized tests and the public-data audit. Passing it does not commission a
+production environment. Branch protections, approval policy, credential
+provisioning, production rollout, package distribution and marketplace readiness
+remain the adopting organization's delivery/governance responsibility.

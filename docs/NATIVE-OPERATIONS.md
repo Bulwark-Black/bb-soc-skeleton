@@ -67,7 +67,11 @@ and state-directory arguments. `check-config` validates without collecting or
 sending. `collect` takes local Linux measurements and commits an immutable
 batch to private disk. `send` delivers pending batches to the configured private
 origin and requires a matching durable receipt before retiring them. Schedule
-collection every minute and delivery externally. Keep the collector's config,
+collection every minute and delivery externally. The
+[deployment generator](DEPLOYMENT-AUTOMATION.md) can produce bounded systemd
+or Ansible `native-monitor` workers; review and install them separately. Native
+host probes are not offered as container/Helm roles because their namespaces
+would change the meaning of host measurements. Keep the collector's config,
 token and dedicated state outside the repository, with restrictive permissions.
 The first CPU delta may be unknown until a second measurement is available.
 
@@ -352,7 +356,7 @@ employee-inbox,websites,website-history`. Metric queries take `series` (up to
 eight CSV IDs), `from` and `to` in epoch milliseconds. Writes include
 `incidents/ack,maintenance,streams/activate,jobs,jobs/events,employees/events,
 employees/import,work,work/claim,work/events,employee-inbox/create,
-employee-inbox/withdraw`. Writes requiring replay protection take a stable
+employee-inbox/withdraw,notifications/pause,notifications/reconcile`. Writes requiring replay protection take a stable
 `idempotencyKey`; revision-sensitive changes also take `expectedRevision`.
 Retry the original body after an uncertain result. Do not regenerate identity.
 
@@ -406,10 +410,16 @@ it does not attest an adopter's operating system, network or scheduler.
 The deployed monitoring state machines and Operations UI are portable here.
 Production inventories, private analyst definitions/prompts, scheduler units,
 provider credentials, source-specific detection policy and personal workflows
-are intentionally not copied. Native incident notifications now have an opt-in Resend email sender with
-durable retries and explicit reconciliation; read [notifications](NATIVE-NOTIFICATIONS.md).
-No production watchdog or recipient configuration is installed.
-The existing separate Sentry/Slack integration retains its documented behavior.
-The original detection-tuning, phishing, scanner and other adapter-owned
-workflows still require their documented adopters' implementations; this port
-does not claim the entire private deployment is reproduced.
+are intentionally not copied. Native incident notifications have opt-in Resend
+or authenticated TLS SMTP delivery, durable queues, pause controls and explicit
+reconciliation. Canonical findings use a separate email queue; read
+[notifications](NATIVE-NOTIFICATIONS.md). No production watchdog or recipient
+configuration is installed. The separate Sentry/Slack integration retains its
+documented behavior.
+
+The canonical [detection engine](DETECTION-RULES.md) supplies 25 opt-in original
+rules and [reviewed JSON packs](REVIEWED-RULE-PACKS.md), including source-scoped
+shadow rollout and expiring suppression. It is separate from numeric native
+health and incident evaluation. General triage/case workflows, phishing,
+scanner execution and automated remediation still need their documented
+adopter implementations; this port does not reproduce every private workflow.

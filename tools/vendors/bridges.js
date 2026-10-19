@@ -42,7 +42,7 @@ function checkmk(input) {
       timeBasis: checked ? "last_check" : "collection-time-no-check" };
     if (service) fields.service = service;
     const message = x.plugin_output === "" ? "Checkmk returned an empty check summary." : text(x.plugin_output, 4000);
-    const state = !checked || e.dataset === "service" && x.state === 3 ? "unknown" : x.state === 0 ? "ok" : e.dataset === "service" && x.state === 1 ? "degraded" : "failed";
+    const state = !checked || e.dataset === "service" && x.state === 3 ? "unknown" : x.state === 0 ? "ok" : e.dataset === "service" && x.state === 1 ? "warn" : "failed";
     const payload = { title: "Checkmk " + e.dataset + " status", state, category: "checkmk.status", message, fields };
     return { upstreamId: "checkmk:" + hash([observedAt, payload]), observedAt, kind: "log.event", payload };
   });
