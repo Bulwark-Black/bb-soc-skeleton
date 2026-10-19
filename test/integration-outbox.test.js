@@ -313,3 +313,34 @@ test("outbox refuses corrupt or foreign SQLite state without overwriting it", t 
   fs.writeFileSync(invalid.filename, "not a database", { mode: 0o600 });
   assert.throws(() => invalid.open()); assert.equal(fs.readFileSync(invalid.filename, "utf8"), "not a database");
 });
+
+test("explicit maintenance prunes only delivered receipts strictly before an old cutoff and preserves queue identity", async t => {
+  const f = fixture(t), remote = await serve(t, (entry, response) => respond(response, receipt(entry.batch)));
+  let queue = f.open();
+  const delivered = [1, 2, 3].map(index => queue.enqueue(batch(index), remote.baseUrl));
+  assert.equal((await drain(queue, f, remote.baseUrl)).processed, 3);
+  const unfinished = [4, 5, 6].map(index => queue.enqueue(batch(index), remote.baseUrl));
+  const cutoff = Date.now() - 2 * 86400000, before = new Date(cutoff).toISOString();
+  f.sql(db => {
+    const update = db.prepare("UPDATE deliveries SET created_at=?,updated_at=? WHERE id=?");
+    delivered.forEach((entry, index) => update.run(cutoff - 86400000, cutoff + index - 1, entry.id));
+    unfinished.forEach(entry => update.run(cutoff - 86400000, cutoff - 1000, entry.id));
+    db.prepare("UPDATE deliveries SET state='inflight',claim=?,lease_until=? WHERE id=?").run(crypto.randomUUID(), Date.now() + 60000, unfinished[1].id);
+    db.prepare("UPDATE deliveries SET state='blocked',error_code='ingest-rejected',status=429,next_at=? WHERE id=?").run(Date.now() + 86400000, unfinished[2].id);
+  });
+  const originalRows = f.sql(db => db.prepare("SELECT * FROM deliveries ORDER BY id").all());
+  const originalInode = fs.statSync(f.filename).ino;
+  queue.close(); queue = f.open();
+  assert.equal(queue.list().page.total, 6, "reopening never prunes delivered receipts automatically");
+  for (const invalid of [undefined, null, 0, {}, "", "2026-01-01", "bad cutoff", "2026-02-30T00:00:00Z", new Date().toISOString(), new Date(Date.now() + 86400000).toISOString(), new Date(Date.now() - 23 * 3600000).toISOString()]) {
+    assert.throws(() => queue.pruneDelivered(invalid), /at least 24 hours/);
+    assert.deepEqual(f.sql(db => db.prepare("SELECT * FROM deliveries ORDER BY id").all()), originalRows);
+  }
+  assert.deepEqual(queue.pruneDelivered(before), { removed: 1, before });
+  assert.equal(fs.statSync(f.filename).ino, originalInode, "maintenance preserves the collector's bound queue identity");
+  assert.deepEqual(f.sql(db => db.prepare("SELECT * FROM deliveries ORDER BY id").all()), originalRows.filter(row => row.id !== delivered[0].id), "every unfinished body, lease and cooldown survives unchanged");
+  assert.deepEqual(queue.pruneDelivered(before), { removed: 0, before });
+  queue.close(); queue = f.open();
+  assert.equal(queue.list().page.total, 5);
+  assert.equal(queue.enqueue(batch(7), remote.baseUrl).state, "pending", "the same queue remains usable after maintenance");
+});

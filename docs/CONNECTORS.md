@@ -2,11 +2,14 @@
 
 For the current runnable integration path, start with the
 [integration review and implementation map](INTEGRATION-REVIEW.md). Private
-mode supports narrow log push, universal canonical events, custom immutable
+mode supports narrow log push, the proof-bearing `server-log-push` collector,
+universal canonical events, custom immutable
 canonical-push definitions registered through Sources → Integrations, and the
-separate Trivy report importer. An external adapter translates vendor payloads
-into the 29 canonical kinds; definitions cannot execute code or resolve vendor
-credentials. Sources → Received observations and the actual coverage matrix
+separate Trivy report importer. The 18 checked-in vendor adapters translate
+supported payloads into canonical records; arbitrary upstream formats still
+need an external mapper. There are 29 canonical kinds. Data-only definitions
+cannot execute code or resolve vendor credentials. Native monitoring uses the
+separate `native-monitor` source protocol described in [Operations](NATIVE-OPERATIONS.md). Sources → Received observations and the actual coverage matrix
 distinguish received facts from specialized workflows. The reference workbench
 still enables only its original log-push admission path.
 
@@ -58,11 +61,16 @@ but all provisioned operators have full application access: resource-scoped
 RBAC and multitenancy are not implemented for operators. Private telemetry now
 uses indexed SQLite transactions; administration remains bounded/single-writer.
 Scoped service credentials authorize the narrow MCP control API separately
-from browser sessions and source ingest credentials. Managed secret storage,
-durable queues, multi-process coordination, more vendor drivers, pull
-scheduling, webhook signature handlers, OTLP/syslog listeners and an agent
-runner remain adopter work. See the technical manual for exact service scopes,
-retention, replay, migration and Trivy import limits.
+from browser sessions and source ingest credentials. The external SQLite outbox
+supplies bounded durable delivery, and Sentry has a private managed polling loop.
+[Platform workers](PLATFORM-COLLECTORS.md), [Windows collection](WINDOWS-EVENTS.md),
+[server-log collection](SERVER-LOGS.md) and private [protocol receivers](PROTOCOL-GATEWAYS.md)
+are executable paths with distinct health/checkpoint contracts. Reviewable
+[deployment bundles](DEPLOYMENT-AUTOMATION.md) provide schedules and services;
+installation, source activation and commissioning remain operator actions.
+Distributed queue coordination, unsupported provider readers, vendor webhook
+signature handlers and an agent runner remain adopter work. See the technical
+manual for exact service scopes, retention, replay, migration and Trivy limits.
 
 ## Current version-1 vocabulary
 
@@ -161,7 +169,7 @@ closed command set is:
 | `app.register` | Display name, optional environments/host labels/HTTPS public pages | `registered` app; no host required |
 | `host.enroll` | Existing owning `appId` and `hostId` | `enrolled`; may return one connection-check credential once |
 | `source.setup` | App/environment/optional host, installed connector/source kind, display name, non-secret config, credential references | independent source and connector instance in `configured` |
-| `source.test` | Stable source/instance IDs plus `expectedRevision` and a bounded real `sample` (required without a host) | `tested`; sample is not ingested |
+| `source.test` | Source/instance IDs plus `expectedRevision`; narrow logs use `sample`, canonical/custom sources use bound `recordSample`, native monitoring validates setup shape | `tested`; samples are not ingested and collection is not proven |
 | `source.activate` | Stable source/instance IDs plus `expectedRevision` | `active`; may return one source-ingest credential once |
 | `source.update` | Stable source/instance IDs, revision, and display name/config/credential-reference changes | `configured`; revokes old credentials and requires retest/reactivation |
 | `source.pause` | Stable source/instance IDs plus `expectedRevision` | `paused`; rejects ingest |
@@ -198,14 +206,19 @@ The implemented UI guides an operator through these gates:
    connector type, and one supported kind. The form is generated from manifest
    config fields and credential-reference slots. A selected host must be enrolled
    and needs fresh connection proof before testing; scan templates require a host.
-5. **Validate a real sample.** Supply `sample: { message, channel?, severity? }`
-   from the intended source. This bounded validation changes lifecycle state but
-   neither persists the sample nor proves delivery or marks collection healthy.
-   Scanner templates fail closed until a reviewed server driver is installed.
+5. **Validate the selected source.** Narrow hostless log push uses
+   `sample: { message, channel?, severity? }`; canonical-events/custom sources
+   require a complete `recordSample` bound to the exact source/application.
+   Server-log sources also accept a permitted complete record sample. Native
+   monitoring uses structural validation of its configuration. These tests
+   neither ingest a sample nor prove delivery or collection. Scanner templates
+   fail closed until a reviewed server driver is installed.
 6. **Activate.** Pin the source/instance and issue any source-bound ingest
    identity. Copy its one-time value into the sender's server-side secret store.
    Follow the displayed source/app IDs and ingest instructions; never put it in
-   web-page JavaScript. Collection health remains pending until a real batch is accepted.
+   web-page JavaScript. Delivery and collection remain distinct: server-log
+   health requires a fresh completed-read proof, and native health requires its
+   bound observation protocol. Activation alone establishes neither.
 7. **Observe.** Project accepted records and source health into existing panel
    IDs. An old successful test or delivery cannot mask a current failure.
 
@@ -391,10 +404,15 @@ atomic replacement, journals intent/commit/abort, and fails closed on detected
 inconsistency or write failure. One-time values are returned only at issuance;
 only digests and safe metadata persist.
 
-This same connector core is currently used by the private starter: 8 MiB state,
-50 MiB audit, 10,000 records, and 10,000 receipts are hard limits. Full-state
-rewrites and the single-process lock remain capacity constraints; exceeding a
-limit fails closed, and there is no automatic retention/compaction service.
+These JSON-store limits apply to the disposable workbench: 8 MiB state, 50 MiB
+audit, 10,000 records and 10,000 receipts, with full-state rewrites and a
+single-process lock. The private application uses the same control semantics
+with indexed SQLite telemetry instead. Its default retained payload bounds are
+100,000 records/256 MiB/30 days, with 100,000 receipts, a seven-day replay
+window, one million record identities and one million audit rows. These are
+logical storage limits, not a whole-disk quota. Retention is pinned at
+initialization and requires deliberate migration to change; see the
+[storage manual](../public/technical-reference.md#52-storage-limits-reliability-acceptance-and-remaining-parity-work).
 
 Those safeguards make the workbench useful for local contract testing. They do
 not make it a production server. Do not expose it remotely or put production
@@ -458,9 +476,9 @@ log streams, or a second direct registry-write path through MCP.
 ## Scan connector implementation guide
 
 The Scans page is a structural catalog, not an installed scanner suite. The
-registry includes working `canonical-push`, private `canonical-events` and
-custom canonical declarations, the private application's `trivy-report`
-importer, and eleven data-only scan setup templates. The importer
+registry includes `canonical-push`, private `canonical-events`, `server-log-push`,
+`native-monitor`, custom canonical declarations, the private application's
+`trivy-report` importer, and eleven data-only scan setup templates. The importer
 populates only Trivy from reports produced elsewhere; no scanner execution,
 Patch First, file-integrity, EOL, exposure, IOC, urlscan.io, dependency, ClamAV,
 quarantine, or remediation drivers are installed. An adopter must review
@@ -730,3 +748,25 @@ redaction/rotation, source and tenant binding, body-bound replay, partial/crash
 failure, stale/offline health, projector replay, capacity/backpressure,
 dependency-aware removal, and the guarantee that MCP cannot become a telemetry
 or plaintext-secret channel.
+
+## Server log collection proof
+
+The built-in `server-log-push` / `server.log` source is available in the private
+application through canonical admission. It allows `log.event` plus a strictly
+validated `source.heartbeat` reader proof. Existing `canonical-push` and generic
+heartbeat behavior are unchanged. The reference workbench does not enable this
+driver by default. See [the setup and recovery guide](SERVER-LOGS.md).
+
+One proof at most may appear in a batch. Its category is `log-collection` and
+its exact scalar fields are `collectorSchemaVersion`, `inputsPlanned`,
+`inputsRead`, `linesRead`, `linesDropped`, `ok`, and `error`. Version is 1;
+`ok` means every planned input was read, no lines were dropped, and no error
+occurred. Success requires state `ok`; failure requires state `failed` and a
+closed safe error code. Unknown fields and inconsistent claims are rejected.
+
+Collection completion comes from the proof's original `observedAt`, independently
+of the server's delivery receipt time. Log-only chunks cannot turn collection
+healthy; replays and older proofs cannot overwrite newer collection health.
+A quiet proof contains no invented log event. This is an authenticated claim by
+the source credential holder, not independent host attestation or a guarantee
+that the configured inputs cover every relevant log.

@@ -26,10 +26,10 @@ const fixtures = {
   "datadog-logs": index => ({ id: "synthetic-datadog-" + index, type: "log", attributes: { timestamp: AT, status: "error" } })
 };
 
-test("vendor catalog exposes exactly ten reviewed export adapters and valid narrow no-secret push presets", () => {
+test("vendor catalog exposes exactly eighteen reviewed export adapters and valid narrow no-secret push presets", () => {
   const catalog = listVendorAdapters();
-  assert.equal(catalog.length, 10);
-  assert.deepEqual(catalog.map(item => item.id).sort(), Object.keys(fixtures).sort());
+  assert.equal(catalog.length, 18);
+  assert.deepEqual(catalog.map(item => item.id).sort(), [...Object.keys(fixtures), "windows-eventlog", "syslog-rfc5424", "cef", "otlp-logs", "microsoft365-audit", "checkmk-status", "wazuh-alerts", "entra-directory-audit"].sort());
   for (const item of catalog) {
     assert.equal(item.automaticPolling, false);
     assert.equal(item.delivery, "export-or-api-page");
@@ -52,7 +52,7 @@ test("vendor catalog exposes exactly ten reviewed export adapters and valid narr
 
 test("vendor presets consume normal registry capacity and cannot overwrite types or bypass the immutable registry", () => {
   const manifests = listVendorAdapters().map(item => item.manifest);
-  assert.equal(getIntegrationManifests({ integrationManifests: manifests }).length, 24);
+  assert.equal(getIntegrationManifests({ integrationManifests: manifests }).length, 34);
   assert.throws(() => getIntegrationManifests({ integrationManifests: [manifests[0], manifests[0]] }), /unique/);
   const replacement = structuredClone(manifests[0]);
   replacement.displayName = "Changed preset";

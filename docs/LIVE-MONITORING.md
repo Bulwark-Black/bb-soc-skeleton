@@ -574,7 +574,9 @@ it has not been completed merely because repository tests pass:
       retention capacity are monitored, and an operator owns coverage-gap review.
 
 Only after those checks should you set a deployment-specific latency/availability
-expectation. More built-in collectors, environment-filtered upstream contracts,
-native cases/routing, operator least-privilege roles, service packaging and longer
-load/soak/restore testing remain separate work. None of those are implied by a
-working Sentry connection or a successful Slack notification.
+expectation. Separate [platform workers](PLATFORM-COLLECTORS.md) and
+[deployment bundles](DEPLOYMENT-AUTOMATION.md) are available for their documented
+profiles. Sentry environment filtering, additional vendor profiles, richer case
+routing, operator least-privilege roles, and longer load/soak/restore testing
+remain separate work. A working Sentry connection or successful Slack notice
+does not commission those other paths.

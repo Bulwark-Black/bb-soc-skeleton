@@ -131,6 +131,23 @@ const TRIVY_REPORT_MANIFEST = deepFreeze({
     offlineAfterSeconds: 259200, emptyPayloadIsHealthy: false }
 });
 
+const SERVER_LOG_MANIFEST = deepFreeze({
+  schemaVersion: "1", documentType: "connector-manifest", connectorType: "server-log-push", connectorVersion: "1.0.0",
+  displayName: "Server log collector",
+  description: "Application-scoped server logs with explicit completed-read proofs. Quiet successful reads can establish collection health; delivery alone cannot.",
+  scope: "application", supportedSourceKinds: ["server.log"],
+  payload: { schemaId: "soc.canonical-records", schemaVersion: "1", recordKinds: ["log.event", "source.heartbeat"], lines: "forbidden", content: "required" },
+  targets: [
+    { route: "/logs", surfaces: ["log-results"], recordKinds: ["log.event"] },
+    { route: "/sources", surfaces: ["expected-sources"], recordKinds: ["log.event", "source.heartbeat"] },
+    { route: "/health", surfaces: ["is-the-collection-working"], recordKinds: ["source.heartbeat"] }
+  ],
+  configFields: [cadenceField("Expected seconds between completed server-log reads. Run the external collector on this schedule.")],
+  credentialSlots: [],
+  healthPolicy: { deliveryMode: "push", expectedIntervalSeconds: 300, staleAfterSeconds: 450,
+    offlineAfterSeconds: 900, emptyPayloadIsHealthy: false }
+});
+
 const CANONICAL_EVENTS_MANIFEST = deepFreeze({
   schemaVersion: "1", documentType: "connector-manifest", connectorType: "canonical-events", connectorVersion: "1.0.0",
   displayName: "Universal canonical events",
@@ -145,6 +162,18 @@ const CANONICAL_EVENTS_MANIFEST = deepFreeze({
   credentialSlots: [],
   healthPolicy: { deliveryMode: "push", expectedIntervalSeconds: 300, staleAfterSeconds: 450,
     offlineAfterSeconds: 900, emptyPayloadIsHealthy: false }
+});
+
+const NATIVE_MONITOR_MANIFEST = deepFreeze({
+  schemaVersion: "1", documentType: "connector-manifest", connectorType: "native-monitor", connectorVersion: "1.0.0",
+  displayName: "Native host and operations monitoring",
+  description: "Dedicated numeric metrics, service checks and registered job/employee observations. Configure the reviewed Operations registry before collection. Uses the native monitoring endpoint; canonical event ingestion is rejected.",
+  scope: "application", supportedSourceKinds: ["monitor.batch"],
+  payload: { schemaId: "soc.native-monitor", schemaVersion: "1", recordKinds: ["source.heartbeat"], lines: "forbidden", content: "required" },
+  targets: [{ route: "/sources", surfaces: ["expected-sources"], recordKinds: ["source.heartbeat"] }],
+  configFields: [{ ...cadenceField("Native host collection runs every 60 seconds; this setting does not schedule it."), maximum: 60 }],
+  credentialSlots: [],
+  healthPolicy: { deliveryMode: "push", expectedIntervalSeconds: 60, staleAfterSeconds: 180, offlineAfterSeconds: 360, emptyPayloadIsHealthy: false }
 });
 
 const REFERENCE_SCAN_CONNECTOR_MANIFESTS = deepFreeze([
@@ -392,8 +421,10 @@ const REFERENCE_SCAN_CONNECTOR_MANIFESTS = deepFreeze([
 ]);
 
 const REFERENCE_CONNECTOR_MANIFESTS = deepFreeze([
+  NATIVE_MONITOR_MANIFEST,
   REFERENCE_CONNECTOR_MANIFEST,
   CANONICAL_EVENTS_MANIFEST,
+  SERVER_LOG_MANIFEST,
   TRIVY_REPORT_MANIFEST,
   ...REFERENCE_SCAN_CONNECTOR_MANIFESTS
 ]);
@@ -418,7 +449,9 @@ function scaledHealthThresholds(connectorType, cadenceSeconds, manifestOverride)
 }
 
 module.exports = {
+  NATIVE_MONITOR_MANIFEST,
   CANONICAL_EVENTS_MANIFEST,
+  SERVER_LOG_MANIFEST,
   TRIVY_REPORT_MANIFEST,
   REFERENCE_CONNECTOR_MANIFEST,
   REFERENCE_CONNECTOR_MANIFESTS,

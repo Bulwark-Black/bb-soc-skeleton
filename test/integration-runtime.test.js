@@ -10,7 +10,7 @@ const { ReferenceControlPlane } = require("../server/reference-runtime");
 const { ReferenceStateStore, emptyState, validateState } = require("../server/reference-store");
 const { SqliteTelemetryStore } = require("../server/sqlite-telemetry-store");
 const { CANONICAL_EVENTS_MANIFEST } = require("../server/reference-manifest");
-const { MAX_CUSTOM_INTEGRATIONS, getIntegrationManifests, validateCustomManifest } = require("../server/integration-catalog");
+const { MAX_INTEGRATION_MANIFESTS, MAX_CUSTOM_INTEGRATIONS, getIntegrationManifests, validateCustomManifest } = require("../server/integration-catalog");
 const { runAsOperator, runAsService, operatorId } = require("../server/operator-context");
 const { RECORD_KINDS } = require("../tools/ingest-contract");
 
@@ -75,8 +75,9 @@ function batch(identity, kinds, receiptId = "integration-receipt-0001") {
 test("universal canonical admission accepts all 29 kinds without hosts and survives restart", (t) => {
   const f = fixture(t);
   const catalog = f.runtime.listIntegrations();
-  assert.equal(catalog.integrations.length, 14);
+  assert.equal(catalog.integrations.length, 16);
   assert.equal(catalog.capacity.customMaximum, 86);
+  assert.equal(catalog.capacity.maximum, 102);
   const identity = f.activate(f.source("canonical-events", "authentication.event"), "authentication.event");
   assert.equal(f.runtime.controlState().hosts.length, 0);
   assert.equal(f.runtime.getState().records.length, 0, "source tests never fabricate telemetry");
@@ -212,8 +213,43 @@ test("registry validation rejects executable, remote-secret and incompatible dec
   const duplicates = { ...emptyState(), integrationManifests: [manifest(), manifest()] };
   assert.throws(() => validateState(duplicates), /unique and immutable/);
   const full = { ...emptyState(), integrationManifests: Array.from({ length: MAX_CUSTOM_INTEGRATIONS }, (_, index) => manifest("custom-" + index)) };
-  assert.equal(getIntegrationManifests(full).length, 100);
+  assert.equal(getIntegrationManifests(full).length, 102);
   assert.doesNotThrow(() => validateState(full));
   full.integrationManifests.push(manifest("too-many"));
   assert.throws(() => validateState(full), /bounded capacity/);
+});
+
+test("all 86 existing custom slots survive restart and migration alongside the added server-log built-in", async t => {
+  for (const indexed of [false, true]) await t.test(indexed ? "indexed SQLite" : "reference state migration", child => {
+    const f = fixture(child, { indexed });
+    const historicalManifests = Array.from({ length: 86 }, (_, index) => manifest("existing-custom-" + index));
+    // Persist the exact old registry shape: built-ins are executable catalog
+    // declarations, never entries in an operator's stored custom manifests.
+    f.runtime.store.transact({ action: "integration.install", actor: operatorId("integration-review-operator"),
+      targetType: "integration", targetId: "existing-custom-85", detail: "synthetic previously full custom integration registry" }, next => {
+      next.integrationManifests = historicalManifests;
+    });
+    const source = f.activate(f.source("existing-custom-85"));
+    const delivery = batch(source, ["log.event"]); f.runtime.ingest(delivery, source.credential, digest(delivery));
+    const before = f.runtime.getState(); f.reopen();
+    assert.deepEqual(f.runtime.getState(), before);
+    if (!indexed) {
+      f.runtime.dispose();
+      f.runtime = new ReferenceControlPlane({ clock, store: new SqliteTelemetryStore({ directory: f.directory, clock }),
+        enabledConnectorTypes: ["canonical-push", "canonical-events"] });
+      assert.deepEqual(f.runtime.getState(), before);
+    }
+    const catalog = f.runtime.listIntegrations();
+    assert.equal(catalog.capacity.maximum, 102); assert.equal(catalog.capacity.customMaximum, 86);
+    assert.equal(catalog.capacity.customInstalled, 86); assert.equal(catalog.integrations.length, 102);
+    assert.equal(catalog.integrations.find(item => item.manifest.connectorType === "server-log-push").available, true);
+    const snapshot = f.runtime.getSnapshot({ schemaVersion: "1", reason: "refresh" });
+    assert.equal(snapshot.connectorTypes.length, 102);
+    assert.equal(f.runtime.ingest(delivery, source.credential, digest(delivery)).replay, true);
+    assert.throws(() => f.install(manifest("over-capacity")), error => error.status === 507);
+    assert.deepEqual(f.runtime.getState(), before, "Capacity refusal and replay preserve all existing operator data.");
+  });
+  const schema = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "contracts/source-registration.v1.schema.json"), "utf8"));
+  const snapshotSchema = Object.values(schema.$defs).find(value => value.properties?.connectorTypes);
+  assert.equal(snapshotSchema.properties.connectorTypes.maxItems, MAX_INTEGRATION_MANIFESTS);
 });

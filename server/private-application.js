@@ -13,12 +13,16 @@ const { validateDocumentBinding } = require("./document-bindings");
 const { runAsOperator, runAsService, operatorId } = require("./operator-context");
 const { createServiceAccessStore, handleServiceManagement, handleServiceRequest, isServicePath } = require("./service-access");
 const { handleScannerImport } = require("./scanner-ingest");
+const { handlePlatformIngest, PLATFORM_INGEST_PATH } = require("./platform-ingest");
 const { handleVendorImport, VENDOR_BASE } = require("./vendor-import");
 const { createLiveMonitoring, handleLiveMonitoring, MONITORING_BASE } = require("./live-monitoring");
 const { createSetupGuides, handleSetupGuides, SETUP_BASE } = require("./setup-guides");
 const { MAPPING_BASE, handleSourceMapping } = require("./source-mapping");
 const { ASSISTANCE_BASE, handleSetupAssistance } = require("./setup-assistance");
 const { SqliteTelemetryStore } = require("./sqlite-telemetry-store");
+const { createDetectionEngine } = require("./detection-engine");
+const { createFindingNotifications } = require("./finding-notifications");
+const { createOperationsService, handleOperations, OPERATIONS_BASE, NATIVE_MACHINE_PATHS } = require("./operations-service");
 const { INTEGRATION_COVERAGE } = require("./integration-coverage");
 const { RECORD_KINDS } = require("../tools/ingest-contract");
 const {
@@ -88,7 +92,7 @@ function validatePrivateRequest(request, baseURL) {
   if (distinctHeader(request, "host") !== origin.host) throw fail(403, "Host must match the configured private origin.");
   const suppliedOrigin = distinctHeader(request, "origin");
   const pathname = parseRequestUrl(request.url).pathname;
-  const machine = MACHINE_PATHS.has(pathname) || isServicePath(pathname)
+  const machine = pathname === PLATFORM_INGEST_PATH || MACHINE_PATHS.has(pathname) || NATIVE_MACHINE_PATHS.has(pathname) || isServicePath(pathname)
     || (pathname === SCANNER_IMPORT_PATH && distinctHeader(request, "authorization") !== undefined);
   const mutation = !["GET", "HEAD", "OPTIONS"].includes(request.method);
   if (suppliedOrigin !== undefined && suppliedOrigin !== origin.origin) throw fail(403, "Origin must match the private application.");
@@ -272,7 +276,7 @@ async function startPrivateApplication(options = {}) {
   const project = path.resolve(__dirname, "..");
   const requested = path.resolve(options.stateDirectory);
   if (requested === project || requested.startsWith(project + path.sep)) throw new TypeError("Private state must be outside the repository.");
-  let authentication, documents, runtime, administrationRuntime, serviceAccess, monitoring, setupGuides;
+  let authentication, documents, runtime, administrationRuntime, serviceAccess, monitoring, setupGuides, operations, findingNotifications, findingTimer;
   let activeUploads = 0;
   let origin = options.baseURL || "http://127.0.0.1:" + port;
   const server = http.createServer();
@@ -292,11 +296,17 @@ async function startPrivateApplication(options = {}) {
     serviceAccess = createServiceAccessStore({ stateDir: realState });
     runtime = new ReferenceControlPlane({
       store: new SqliteTelemetryStore({ directory: realState, retention: options.telemetryRetention }),
-      enabledConnectorTypes: ["canonical-push", "canonical-events", "trivy-report"]
+      enabledConnectorTypes: ["canonical-push", "canonical-events", "trivy-report", "native-monitor"]
     });
+    runtime.detectionEngine = createDetectionEngine({ store: runtime.store, stateDir: realState, ...options.detection });
+    findingNotifications = createFindingNotifications({ store: runtime.store, stateDir: realState, consoleOrigin: origin, ...options.findingNotifications });
+    runtime.findingNotifications = findingNotifications;
+    findingTimer = setInterval(() => { void findingNotifications.tick().catch(() => {}); }, 5000); findingTimer.unref();
     administrationRuntime = new ReferenceAdministrationRuntime({ stateDirectory: realState });
     monitoring = createLiveMonitoring({ stateDir: realState, runtime, ...options.monitoring });
     setupGuides = createSetupGuides({ stateDir: realState, runtime, monitoring });
+    operations = createOperationsService({ stateDir: realState, runtime, ...options.operations, consoleOrigin: origin });
+    runtime.monitoringHealth = operations.sourceHealth;
     const providerSource = buildBrowserProviderSource() + "\n(" + browserPrivateAuth.toString() + ")(window);\n";
     const referenceHandler = createRequestHandler({ runtime, administrationRuntime, browserSource: providerSource, validateAuthority() {} });
     server.requestTimeout = 30000;
@@ -349,11 +359,56 @@ async function startPrivateApplication(options = {}) {
           await handleScannerImport({ request, response, url, runtime });
           return;
         }
+        if (url.pathname === PLATFORM_INGEST_PATH) {
+          if (activeUploads >= 2) throw fail(429, "Two uploads are already in progress. Retry after they complete.");
+          activeUploads += 1; uploadLease = true;
+          await handlePlatformIngest(request, response, url, runtime); return;
+        }
+        if (NATIVE_MACHINE_PATHS.has(url.pathname)) { await handleOperations(request, response, url, operations); return; }
         if (MACHINE_PATHS.has(url.pathname)) { await referenceHandler(request, response); return; }
         if (distinctHeader(request, "authorization") !== undefined) throw fail(401, "Operator endpoints require a browser session without machine authorization.");
         const session = await authentication.getSession(requestHeaders(request));
         if (url.pathname === "/api/v1/session" && request.method === "GET") { sendJson(response, 200, sessionView(session)); return; }
         if (!session || !session.user) throw fail(401, "Sign in to access this private application.");
+        if (url.pathname === "/api/v1/finding-notifications" || url.pathname.startsWith("/api/v1/finding-notifications/")) {
+          const { appId } = queryOptions(url, ["appId"]);
+          if (!appId) throw fail(400, "Select an application for finding notifications.");
+          if (request.method === "GET" && url.pathname === "/api/v1/finding-notifications") {
+            sendJson(response, 200, findingNotifications.status(appId)); return;
+          }
+          const action = url.pathname.slice("/api/v1/finding-notifications/".length);
+          const fields = {
+            pause: ["paused", "expectedRevision"],
+            reconcile: ["attemptId", "expectedRevision", "action", "acceptedAt", "providerId", "duplicateRiskAccepted"],
+            verify: [],
+            "test-send": ["recipient"]
+          };
+          if (request.method !== "POST" || !Object.hasOwn(fields, action)) throw fail(405, "Unsupported finding notification endpoint or method.");
+          if (distinctHeader(request, "content-encoding") !== undefined) throw fail(415, "Compressed decisions are not accepted.");
+          const { value } = await readJsonBody(request, 8192);
+          const allowed = [...fields[action], "reason", "idempotencyKey"];
+          if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(key => !allowed.includes(key))) throw fail(400, "Supply only documented notification decision fields.");
+          const method = action === "test-send" ? "testSend" : action;
+          sendJson(response, 200, await findingNotifications[method](appId, { ...value, actor: operatorId(session.user.id) })); return;
+        }
+        if (url.pathname === "/api/v1/detection/rules" && request.method === "GET") {
+          const query = queryOptions(url, ["appId"]);
+          const appId = query.appId;
+          if (appId && !runtime.controlState().apps.some(app => app.appId === appId)) throw fail(404, "Unknown application.");
+          sendJson(response, 200, runtime.detectionEngine.catalog(appId)); return;
+        }
+        if (request.method === "GET" && url.pathname === "/api/v1/pages" && url.searchParams.get("route") === "/rules") {
+          queryOptions(url, ["route", "appId", "sourceId", "limit", "offset", "observedAfter", "observedBefore", "rtab", "tview", "tstatus", "ptab", "stab", "ytab"]);
+          const query = Object.fromEntries(url.searchParams); delete query.route;
+          if (query.appId && !runtime.controlState().apps.some(app => app.appId === query.appId)) throw fail(404, "Unknown application.");
+          const page = runtime.readPage("/rules", query);
+          sendJson(response, 200, { ...page, state: "ready", title: "Detection rules",
+            summary: "Portable rule catalog and reviewed per-application policy. " + page.summary,
+            panels: [...runtime.detectionEngine.panels(query.appId), ...page.panels] }); return;
+        }
+        if (url.pathname.startsWith(OPERATIONS_BASE + "/")) {
+          await handleOperations(request, response, url, operations, operatorId(session.user.id)); return;
+        }
         if (url.pathname === MAPPING_BASE || url.pathname.startsWith(MAPPING_BASE + "/")) {
           await handleSourceMapping(request, response, url, runtime); return;
         }
@@ -384,6 +439,11 @@ async function startPrivateApplication(options = {}) {
           if (url.search) throw fail(400, "Storage status does not accept query parameters.");
           sendJson(response, 200, runtime.store.stats());
           return;
+        }
+        if (request.method === "GET" && url.pathname === "/api/v1/pages" && ["/", "/health", "/sources"].includes(url.searchParams.get("route"))) {
+          const route = url.searchParams.get("route"), query = Object.fromEntries(url.searchParams); delete query.route;
+          const page = runtime.readPage(route, query), panels = operations.overviewPanels(query.appId);
+          sendJson(response, 200, panels.length ? { ...page, state: "ready", panels: [...page.panels, ...panels] } : page); return;
         }
         if (request.method === "GET" && url.pathname === "/api/v1/pages" && url.searchParams.get("route") === "/retention"
             && (!url.searchParams.has("vtab") || ["policy", "reality"].includes(url.searchParams.get("vtab")))) {
@@ -434,18 +494,20 @@ async function startPrivateApplication(options = {}) {
       } finally { if (uploadLease) activeUploads -= 1; }
     });
     let closed = false;
-    return { server, url: origin, authentication, documents, runtime, administrationRuntime, serviceAccess, monitoring, setupGuides,
+    return { server, url: origin, authentication, documents, runtime, administrationRuntime, serviceAccess, monitoring, setupGuides, operations, findingNotifications,
       async close() {
         if (closed) return;
-        closed = true;
+        closed = true; clearInterval(findingTimer);
         await new Promise((resolve) => server.close(resolve));
         await monitoring.close();
+        await operations.close();
+        await findingNotifications.close();
         setupGuides.close();
         runtime.dispose(); administrationRuntime.dispose(); documents.close(); serviceAccess.close(); await authentication.close();
       }
     };
   } catch (error) {
-    server.close(); await monitoring?.close(); setupGuides?.close(); runtime?.dispose(); administrationRuntime?.dispose(); documents?.close(); serviceAccess?.close(); await authentication?.close();
+    clearInterval(findingTimer); server.close(); await findingNotifications?.close(); await operations?.close(); await monitoring?.close(); setupGuides?.close(); runtime?.dispose(); administrationRuntime?.dispose(); documents?.close(); serviceAccess?.close(); await authentication?.close();
     throw error;
   }
 }

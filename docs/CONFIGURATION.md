@@ -1,4 +1,4 @@
-# Public configuration
+# Application and public browser configuration
 
 Browser configuration is intentionally small, versioned, data-free, and public.
 It selects presentation/integration behavior; it is not a secret, identity, or
@@ -25,10 +25,13 @@ Tailnet Funnel or public ingress. These server settings are not additions to
 `SOC_CONSOLE_PUBLIC_CONFIG`. The private server supplies application mode,
 required authentication, and the reviewed same-origin integration bridge.
 All provisioned operators currently have full access; this is not per-role or
-per-tenant authorization. State includes Better Auth, Documents, service-access,
-and indexed telemetry SQLite stores, plus bounded administration JSON state and
-audit. Back up the whole directory as a consistent stopped-service unit and test
-restoration. Existing valid reference connector state is migrated atomically to
+per-tenant authorization. State includes authentication, Documents, service access, indexed telemetry,
+live monitoring and setup-guide SQLite stores, per-application Operations stores,
+and bounded administration JSON state/audit. Detection decisions and finding
+mail share the telemetry database; native mail uses its Operations store. Back up the whole directory as a consistent stopped-service unit and test
+restoration. Preserve separately provisioned external credentials and collector
+state through the appropriate secret/state backup process as well. Existing
+valid reference connector state is migrated atomically to
 private telemetry; legacy files remain untouched and cannot be used to run the
 reference writer against the migrated directory.
 
@@ -41,11 +44,12 @@ editor. Retention pruning runs on successful state mutations, not a background
 timer. Review actual counters in Retention → Policy/Reality and the detailed
 limits and migration rules in [technical manual section 52](../public/technical-reference.md#52-storage-limits-reliability-acceptance-and-remaining-parity-work).
 
-Private mode installs `canonical-push`, `canonical-events` and `trivy-report`,
-plus custom canonical-push definitions registered by a human operator in
+Private mode installs executable canonical log/universal push, server-log proof,
+Trivy report import and native monitoring manifests, alongside eleven
+non-executing scan templates. It also accepts custom canonical-push definitions registered by a human operator in
 Sources → Integrations. Definitions live in the transactional telemetry control
 state; no plugin directory or executable module is loaded. They are immutable,
-with 86 custom/100 total slots and 64 KiB per definition. Use Sources → Received
+with 86 custom/102 total manifest slots and 64 KiB per definition. Use Sources → Received
 observations for all supported kinds. See the
 [integration review](INTEGRATION-REVIEW.md) for the sender, lifecycle and limits.
 The eleven legacy
@@ -76,6 +80,14 @@ optional adopter public configuration
   -> public/document-library.js
   -> public/service-access.js
   -> public/scanner-import.js
+  -> public/integration-center.js
+  -> public/vendor-import.js
+  -> public/live-monitoring.js
+  -> public/setup-guides.js
+  -> public/setup-assistance.js
+  -> public/source-mapping.js
+  -> public/server-logs.js
+  -> public/operations.js
   -> public/app.js
   -> public/bootstrap.js
 ```
@@ -146,10 +158,10 @@ reconfigure a mounted application.
 Unknown keys and unsupported schema versions are errors. Nested values must be
 plain objects. Logo paths reject absolute paths, traversal, backslashes, query,
 and fragments. Default routes reject query/fragment/traversal and must match one
-of the 40 registered paths when the application is created. Misspelled keys fail
-visibly rather than being ignored. The catalog contains the 38 SOC paths plus
-the application-owned `/documents` library and shell-owned `/docs` utility.
-Neither local route calls the page adapter. `/docs` never reads control
+of the 48 registered paths when the application is created. Misspelled keys fail
+visibly rather than being ignored. The catalog contains 38 adapter-addressable SOC paths, eight dedicated
+Operations/report paths, the application-owned `/documents` library and shell-owned `/docs` utility.
+The ten local API/utility pages do not call the page adapter. `/docs` never reads control
 providers; `/documents` uses its own authenticated document API in private mode.
 
 The default brand values and `public/assets/mark.png` are product-matched. Keep
@@ -432,9 +444,60 @@ validate, or make cross-origin credentials safe.
 - [ ] The administration global name matches the host object when the
       administration runtime is installed; its absence otherwise fails closed.
 - [ ] `auth.required` matches the deployment's gating requirement.
-- [ ] `routing.defaultRoute` is one of the 40 registered routes, including the
+- [ ] `routing.defaultRoute` is one of the 48 registered routes, including the
       local `/docs` or `/documents` page when intentionally selected.
 - [ ] Effective response CSP permits only required BFF connections and denies
       framing.
 - [ ] Config, UI, page adapter, browser auth, connector control, canonical
       ingest, and server contracts have a tested compatibility/rollback plan.
+
+## Private monitoring, detection and mail configuration
+
+Browser configuration cannot enable these subsystems or supply their credentials.
+The private state directory accepts reviewed server configuration:
+
+| File | Purpose and commissioning boundary |
+| --- | --- |
+| operations-config.json | Registered application/host/series/check bindings, employee roster, website targets and optional native incident mail; the matching source must be tested and activated |
+| detection-config.json | Opt-in rule policy, shadow or active rollout, source scope and suppression state |
+| detection-packs.json | Reviewed bounded JSON predicate packs with tests and provenance; no executable rules or automatic third-party rule updates |
+| finding-notifications.json | Independent per-application finding mail policy, severity/rule/source filters and reviewed SMTP or Resend settings |
+
+Restart to apply these files. Use the documented rule-pack tooling and rollback
+procedure for coordinated rule-policy changes. Sender credentials remain in
+separate external owner-only files; SMTP accepts a credential JSON file and Resend
+a token file, never a browser field or command argument. Sending defaults off.
+An enabled mail policy authorizes real email; SMTP connection verification and an
+explicit reviewed-recipient test send are separate commissioning actions.
+
+External Linux, Windows, website and platform collectors have their own reviewed
+configuration, persistent state and durable queue. The private protocol gateway
+also has a separate configuration and private listener. Generated deployment
+bundles schedule these existing tools only after an operator applies and enables
+them; they are not browser configuration.
+
+See [Native Operations](NATIVE-OPERATIONS.md),
+[Detection rules](DETECTION-RULES.md),
+[Reviewed rule packs](REVIEWED-RULE-PACKS.md),
+[Notifications](NATIVE-NOTIFICATIONS.md), and
+[Deployment automation](DEPLOYMENT-AUTOMATION.md) for exact schemas and limits.
+
+## Platform monitoring expansion
+
+The private application includes source-authenticated platform delivery, a
+Windows/WEF collector, 18 supplied-log adapters, executable cloud/Checkmk/Wazuh
+workers, private OTLP JSON/syslog TLS receivers and 25 opt-in original rules.
+Reviewed JSON packs add tested predicates, shadow/source rollout, expiring
+suppressions and version rollback. Native incidents and derived findings can
+send through Resend or authenticated TLS SMTP using the mail service behind
+Roundcube. Durable delivery includes pause, bounded retries and reconciliation.
+Deployment generation produces Windows Task Scheduler, systemd, Compose, Helm
+and Ansible bundles without applying them.
+
+Read [platform ingestion](PLATFORM-INGEST.md), [coverage](PLATFORM-COVERAGE.md),
+[collectors](PLATFORM-COLLECTORS.md), [protocol receivers](PROTOCOL-GATEWAYS.md),
+[deployment automation](DEPLOYMENT-AUTOMATION.md),
+[reviewed rule packs](REVIEWED-RULE-PACKS.md) and
+[notifications](NATIVE-NOTIFICATIONS.md). Configure and commission each
+integration in its actual environment; supplied adapters are not universal
+provider coverage.

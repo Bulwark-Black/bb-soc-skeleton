@@ -433,7 +433,7 @@ test("all scan views ship exact data-only connection templates with meaningful o
     ["quarantine-template", ["quarantined-now", "deleted-from-quarantine"], ["endpoint.event", "finding"], ["store-access", "encryption-access"]],
     ["remediation-template", ["vm-analyst-latest-review", "remediation-log"], ["remediation.record"], ["workflow-access", "evidence-store-access"]]
   ];
-  assert.equal(REFERENCE_CONNECTOR_MANIFESTS.length, 14);
+  assert.equal(REFERENCE_CONNECTOR_MANIFESTS.length, 16);
   assert.equal(REFERENCE_CONNECTOR_MANIFESTS.filter((manifest) => manifest.connectorType === "trivy-report").length, 1);
   assert.equal(REFERENCE_SCAN_CONNECTOR_MANIFESTS.length, expected.length);
   expected.forEach(([connectorType, surfaces, requiredKinds, credentialSlots], index) => {

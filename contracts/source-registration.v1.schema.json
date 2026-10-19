@@ -560,7 +560,7 @@
         "documentType": { "const": "connector-control-snapshot" },
         "connectorTypes": {
           "type": "array",
-          "maxItems": 100,
+          "maxItems": 102,
           "items": { "$ref": "connector-manifest.v1.schema.json" }
         },
         "apps": {

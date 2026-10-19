@@ -10,7 +10,7 @@ This document is normative for visual-parity work. A deliberate white-label or
 product redesign may fork these values, but an integration claiming default
 product parity should preserve them exactly.
 
-The shell surface invariant is **38 SOC routes plus one local `/docs` utility**.
+The shell surface invariant is **38 adapter routes plus eight Operations/report pages, `/documents`, and local `/docs`: 48 paths**.
 The documentation utility is not a separate microsite or theme: it uses the
 same mark, palette, type, spacing, focus, responsive, and component vocabulary
 as every SOC surface.

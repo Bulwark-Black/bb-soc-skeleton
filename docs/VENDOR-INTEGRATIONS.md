@@ -1,20 +1,23 @@
 # Vendor adapters and durable delivery
 
-This is the executable first vendor pack: ten version-1 mappings for **supplied
-exports and successful API response pages**, a human-authorized import UI, and
-an external SQLite delivery outbox. It is not ten continuously connected vendor
-accounts. No production data, accounts, API keys or demo feeds are included.
+The registry ships 18 version-1 mappings for **supplied exports and successful
+API response pages**, a human-authorized import UI, and an external SQLite
+delivery outbox. Installing a preset does not connect its upstream account.
+No production data, accounts, API keys or demo feeds are included.
 
 **Need automatic collection first?** The separate **Sources → Live monitoring**
 workflow now runs one built-in Sentry Cloud project error collector with guided
 read-only access, persisted checkpoints, collection-health alerts and optional
-Slack delivery. Read [Live monitoring](LIVE-MONITORING.md). That does not turn
-the other nine import mappings into background readers, or make this manual
-file-import workflow acquire credentials.
+Slack delivery. Read [Live monitoring](LIVE-MONITORING.md). Separately,
+[platform collection workers](PLATFORM-COLLECTORS.md) support six reviewed
+acquisition profiles, the [Windows reader](WINDOWS-EVENTS.md) uses native
+bookmarks, and [protocol receivers](PROTOCOL-GATEWAYS.md) accept bounded OTLP
+HTTP JSON or syslog TLS. These require explicit configuration and commissioning;
+this manual file-import workflow does not acquire provider credentials.
 
-## Why these ten
+## Catalog scope
 
-The selection covers cloud infrastructure, application identity, source control,
+The original ten mappings cover cloud infrastructure, application identity, source control,
 edge security and application observability: AWS CloudTrail, Microsoft Entra,
 Google Cloud Audit Logs, Cloudflare, GitHub, GitLab, Okta, Auth0, Sentry and
 Datadog. It is a practical coverage-based shortlist, not an independently
@@ -32,15 +35,19 @@ Trivy's existing validated report importer remains separate.
 
 | Layer | Implemented | Not implied |
 | --- | --- | --- |
-| Mapping | Ten pure checked-in normalizers, bounded JSON/NDJSON parsing, required IDs/time, allowlisted output | Arbitrary vendor payloads, executable uploaded plugins, all event families or API versions |
+| Mapping | Eighteen pure checked-in normalizers, bounded JSON/NDJSON parsing, required IDs/time, allowlisted output | Arbitrary vendor payloads, executable uploaded plugins, all event families or API versions |
 | UI | Preset installation, matching source selection, file preview, source sample validation, reviewed import, receipt and observation link | Credential provisioning at a vendor, automatic account discovery, polling or next-page retrieval |
 | Transport | Private canonical source ingestion and authenticated same-origin human imports | Internet webhook listener or signature verification |
 | Durability | External SQLite outbox, atomic enqueue, exact saved body replay, restart recovery, leases, bounded backoff, blocked-delivery inspection/retry | Hosted scheduler, vendor cursor ownership, exactly-once end-to-end delivery, automatic queue deletion |
 | Observation | Source health after commit, typed read-only views, canonical record deduplication | Rule execution, security verdicts, local permissions or automated remediation |
 
-The table describes this export/import/outbox pack. The separately documented
-Sentry live reader owns its own scheduler, cursors, encrypted credential state
-and notification lifecycle; it does not use the external outbox CLI.
+The table describes the import/outbox layer. The separately documented Sentry
+live reader owns its scheduler, cursors, encrypted credentials and notification
+lifecycle. Platform workers use the integration outbox, Windows owns its
+receipt-confirmed spool, and protocol receivers queue before downstream delivery.
+The optional [detection engine](DETECTION-RULES.md) evaluates enabled original
+rules or [reviewed packs](REVIEWED-RULE-PACKS.md) during canonical admission;
+a mapper alone does not enable a rule or establish a security verdict.
 
 ## Human setup in the app
 
@@ -279,20 +286,48 @@ bounded pages/files before importing. Empty pages are not synthesized into
 healthy heartbeats. Vendor subscription, inaccessible events, filtering and
 sampling are not inferred from what a supplied file contains.
 
-`sentAt` is the latest original event timestamp, ensuring repeated import of the
-same file has the same body. The server's default seven-day admission/replay
-window therefore refuses a file whose latest event is older; the UI does not
-silently re-date historical evidence. Historical bulk migration needs a separate
-reviewed procedure. Normal telemetry record retention remains independently
-configured (30 days by default).
+For direct normalization/manual import, `sentAt` is the latest original event
+timestamp, ensuring repeated import of the same file has the same body. The
+server's default seven-day admission/replay window therefore refuses a manual
+import whose latest event is older; the UI does not silently re-date it.
+The Windows collector, platform workers and protocol receiver instead freeze a
+collection/delivery timestamp when creating their durable batch, while preserving
+original `observedAt` and stable event identities. Their pending bodies must
+remain unchanged during retry. Historical bulk migration still needs a reviewed
+procedure; telemetry record retention is independent (30 days by default).
 
-Output retains only allowlisted fields, generated summaries and bounded enums.
-Hash references are pseudonymous, not guaranteed anonymous; dictionary matching
-and cross-record correlation may remain possible. Raw log message suppression
-is intentional. A future full-text mode needs explicit redaction, authorization,
-retention and fixtures before enabling it. No supplied record proves upstream
+Output follows each adapter's selected-field contract. The original ten vendor
+mappers minimize raw messages and request details; Windows, syslog, CEF, OTLP
+and the monitoring profiles retain their documented message or named-field
+content. Review and redact that content before collection: these adapters do
+not detect secrets inside arbitrary message strings. Hash references are
+pseudonymous, not guaranteed anonymous; dictionary matching and cross-record
+correlation may remain possible. No supplied record proves upstream
 authenticity: these are operator/collector-supplied observations, not signed
 evidence or independently verified SOC decisions.
+
+## Additional Windows, platform and monitoring adapters
+
+These eight adapters complete the current 18-entry catalog. Their exact bounds
+and acquisition contracts are in the linked guides:
+
+| Adapter | Accepted facts and operating path |
+| --- | --- |
+| `windows-eventlog` | Named-field native event envelopes; the [Windows collector](WINDOWS-EVENTS.md) parses XML and checkpoints after a matching receipt. Security, System, Application, ForwardedEvents and optional Sysmon, PowerShell and Defender Operational channels are supported. |
+| `syslog-rfc5424` | Timestamped RFC 5424 messages in JSON wrappers; supplied imports or the private syslog TLS receiver. No RFC 3164 or UDP. |
+| `cef` | CEF 0/1 with explicit original time, optionally inside RFC 5424; supplied imports or the private syslog TLS receiver. |
+| `otlp-logs` | Bounded OTLP JSON logs; supplied imports or the private HTTP JSON receiver. No protobuf, gRPC, metrics or traces. |
+| `microsoft365-audit` | Selected Management Activity content records; the worker reads an existing enabled subscription. |
+| `checkmk-status` | Selected host/service status wrappers acquired by the Checkmk worker; no Event Console, metric-history import or upstream mutation. |
+| `wazuh-alerts` | Upstream alerts.json observations; the local-file worker preserves checkpoints and stops for reviewed rotation recovery. No local Wazuh rule execution or raw archive collection. |
+| `entra-directory-audit` | Selected Graph directoryAudits records; the Entra worker uses a separate source and state for each dataset. |
+
+See [platform format coverage](PLATFORM-COVERAGE.md),
+[collection workers](PLATFORM-COLLECTORS.md),
+[protocol receivers](PROTOCOL-GATEWAYS.md) and
+[deployment generation](DEPLOYMENT-AUTOMATION.md). Upstream alerts and Checkmk
+states remain provider-reported observations, distinct from native health and
+locally derived findings.
 
 ## Collector CLI and Node interface
 
@@ -419,7 +454,7 @@ operator/supervisor must inspect status rather than infer that all work complete
 
 ## HTTP and agent boundaries
 
-- `GET /api/v1/integrations/vendors`: the ten definitions, supported formats and
+- `GET /api/v1/integrations/vendors`: the 18 definitions, supported formats and
   bounds. Human session required, no network acquisition.
 - `POST /api/v1/integrations/vendors/preview`: `{adapterId, sourceId, text}`.
   Returns the first ten normalized records, a source-test sample, source revision,
@@ -429,28 +464,34 @@ operator/supervisor must inspect status rather than infer that all work complete
   normal canonical batch and returns its receipt.
 - These are same-origin human endpoints. A supplied machine Authorization header
   is refused even if a valid browser cookie is present. External collectors use
-  source-bound canonical `/api/v1/ingest` through the sender/outbox instead.
+  source-bound canonical `/api/v1/ingest` through the sender/outbox, or the
+  separately authenticated [platform envelope endpoint](PLATFORM-INGEST.md).
+  Both machine paths reject browser cookies.
 - At most two private uploads are in progress across document/scanner/vendor
   endpoints. The HTTP wrapper is bounded separately from its 8 MiB raw text.
 - MCP exposes this guide as `soc://documentation/vendor-integrations`; it does
   not upload files, ingest events, install presets, issue credentials, or execute
   a collector. Agents still need operator approval for the relevant authority.
 
-## What remains next
+## Commissioning and remaining work
 
-1. Commission the built-in Sentry live path with a real authorized project and
-   optional approved Slack channel, then add reviewed readers for other services.
-   External readers still need the scope, pagination, checkpoint, overlap,
-   rate-limit and secret policies above. The ten mappers' automated tests use
-   supplied pages; they are **not** evidence of live-account commissioning.
-2. Add a supported private scheduling/deployment profile, queue metrics and
-   operator alerts; measure mixed HTTP ingest/browser/queue load and restore drills.
-3. Expand reviewed event families (for example GitHub security alerts or Cloudflare
-   additional datasets) with separate versions rather than accepting arbitrary JSON.
-4. Build broader authoritative detection/case/routing/remediation workflows behind
-   their own permission, approval, revision and audit contracts. Importing an
-   event never silently turns those controls on. The new local live-monitoring
-   alert/Slack lifecycle is a narrow explicit workflow, not a general rules engine.
+1. Commission each chosen reader with authorized upstream accounts and
+   representative records. The 18 adapters, six platform acquisition profiles,
+   Windows collector and private protocol receivers have automated fixture and
+   recovery tests; those are not proof of live-account or Windows commissioning.
+2. Review the generated Windows Task Scheduler, systemd, Compose, Helm or
+   Ansible [bundle](DEPLOYMENT-AUTOMATION.md), provision credentials separately,
+   install only the selected role, and verify queue/status monitoring and restore.
+   The generator neither activates sources nor applies production changes.
+3. Expand reviewed event families with separate versions rather than accepting
+   arbitrary JSON. Unsupported vendors still need reviewed acquisition code.
+4. Enable and test the selected [original rules](DETECTION-RULES.md) or
+   [reviewed packs](REVIEWED-RULE-PACKS.md), beginning with source-scoped shadow
+   policy. Native incidents and findings have opt-in [Resend/SMTP email](NATIVE-NOTIFICATIONS.md);
+   Sentry retains its separate Slack path. Case management, ticket routing,
+   remediation execution and evidence approvals remain separate work.
+5. Measure mixed ingest/browser/queue load, monitor capacity and perform isolated
+   backup/restore drills before relying on unattended operation.
 
-The public skeleton remains data-free. Product assets, styling, CI and release
-automation are unchanged by this vendor-pack work.
+The public repository remains data-free. Collection success, durable delivery,
+rule matches and email-provider acceptance are distinct outcomes.

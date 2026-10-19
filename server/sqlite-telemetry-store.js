@@ -36,7 +36,7 @@ function externalRecord(record) {
   return { schemaVersion, documentType, recordId, sourceId, estateId, kind, observedAt, payload };
 }
 function recordSearch(record) {
-  return [record.recordId, record.sourceId, record.estateId, record.hostId, ...Object.values(record.payload)]
+  return [record.recordId, record.sourceId, record.estateId, record.hostId, ...Object.values(record.payload), ...Object.entries(record.payload.fields || {}).map(([key, value]) => key + "=" + String(value))]
     .filter((value) => typeof value === "string").join("\n");
 }
 function secureSqliteFile(filename) {
@@ -158,6 +158,7 @@ class SqliteTelemetryStore {
       this.db.exec(`
         CREATE INDEX IF NOT EXISTS telemetry_observation_time ON telemetry_records(observed_at DESC, id DESC) WHERE json IS NOT NULL;
         CREATE INDEX IF NOT EXISTS telemetry_observation_source ON telemetry_records(source_id, observed_at DESC, id DESC) WHERE json IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS telemetry_source_delivery ON telemetry_receipts(source_id, received_at DESC);
       `);
       const control = this.controlSnapshot();
       const check = this.db.pragma("quick_check");
@@ -286,12 +287,15 @@ class SqliteTelemetryStore {
     if (typeof mutate !== "function") throw new TypeError("A telemetry mutation function is required.");
     return this.db.transaction(() => {
       const next = this.controlSnapshot();
+      this.derivedRecordIds = new Set();
       const result = mutate(next);
       next.revision += 1;
       // The temporary arrays contain this transaction's rows only, never history.
       const records = next.records; const receipts = next.receipts;
       validateState({ ...next, records: [], receipts: [] });
-      if (records.length > 1000 || receipts.length > 1) throw new TypeError("Telemetry transaction exceeds the ingest batch bound.");
+      const derived = this.derivedRecordIds || new Set();
+      this.derivedRecordIds = null;
+      if (records.length > 5000 || records.filter(record => !derived.has(record.recordId)).length > 1000 || receipts.length > 1) throw new TypeError("Telemetry transaction exceeds the ingest batch bound.");
       const admittedBytes = records.reduce((total, record) => total + Buffer.byteLength(JSON.stringify(record)), 0);
       if (records.length > this.retention.maxRecords || admittedBytes > this.retention.maxRecordBytes) {
         throw capacity("The newly admitted batch exceeds telemetry payload capacity; split the batch before retrying.");
@@ -326,6 +330,20 @@ class SqliteTelemetryStore {
     totals.earliest = this.prepare("SELECT observed_at FROM telemetry_records WHERE kind = 'log.event' AND json IS NOT NULL ORDER BY observed_at ASC LIMIT 1").get()?.observed_at || null;
     const sources = this.prepare("SELECT source_id, logs AS count FROM telemetry_source_counts").all();
     return { ...totals, counts: new Map(sources.map((row) => [row.source_id, row.count])) };
+  }
+  sourceActivity(sourceIds) {
+    this.assertOpen();
+    if (!Array.isArray(sourceIds) || sourceIds.length > 200 || new Set(sourceIds).size !== sourceIds.length
+        || sourceIds.some(id => typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id))) {
+      throw new TypeError("Source activity requires at most 200 distinct canonical source identifiers.");
+    }
+    // Indexed point reads return timestamps only, never event bodies/history.
+    const delivery = this.prepare("SELECT received_at FROM telemetry_receipts WHERE source_id = ? ORDER BY received_at DESC LIMIT 1");
+    const event = this.prepare("SELECT observed_at FROM telemetry_records WHERE source_id = ? AND kind = 'log.event' AND json IS NOT NULL ORDER BY observed_at DESC, id DESC LIMIT 1");
+    return new Map(sourceIds.map(sourceId => [sourceId, {
+      lastDeliveryAt: delivery.get(sourceId)?.received_at || null,
+      lastEventAt: event.get(sourceId)?.observed_at || null
+    }]));
   }
   logQuery({ sourceId, search = "", sourceMatches = [], limit = 200 } = {}) {
     const conditions = ["kind = 'log.event'", "json IS NOT NULL"];

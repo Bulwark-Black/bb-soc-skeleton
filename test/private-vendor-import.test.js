@@ -72,7 +72,7 @@ test("private vendor HTTP authenticates, previews without writes, activates, imp
   await f.expect(f.request(BASE + "/import", { body: {} }), 401);
   await f.login();
   const catalog = await f.expect(f.request(BASE), 200);
-  assert.equal(catalog.adapters.length, 10); assert.equal(new Set(catalog.adapters.map(item => item.id)).size, 10);
+  assert.equal(catalog.adapters.length, 18); assert.equal(new Set(catalog.adapters.map(item => item.id )).size, 18);
   assert.equal(catalog.automaticPolling, false); assert.equal(catalog.rawStorage, false); assert.equal(catalog.limits.inputBytes, MAX_VENDOR_BYTES);
   assert.ok(catalog.adapters.every(item => item.docs.length && item.formats.length && item.manifest.connectorType === "vendor." + item.id));
   const github = catalog.adapters.find(item => item.id === "github-audit");

@@ -11,11 +11,13 @@ product-design parity.
    page content belongs behind an adopter-owned adapter.
 2. Do not add logs, credentials, tokens, cookies, private keys, connection
    strings, internal hostnames, customer or employee names, account inventory,
-   private policies, evidence, detection signatures, vendor configuration, or
-   deployment detail.
-3. Keep checked-in public JavaScript free of outbound network requests,
-   persistence, uploads, subscriptions, command execution, telemetry
-   collection, and environment discovery.
+   private policies, evidence, deployment-specific detection signatures,
+   vendor credentials, or real deployment detail. Portable original rules and
+   reviewed rule packs must retain their license, provenance, and synthetic tests.
+3. Keep the static inspection shell free of network requests, persistence,
+   uploads, subscriptions, command execution, and telemetry collection.
+   Private-application browser clients may use only their reviewed authenticated
+   APIs; keep vendor credentials and upstream requests on the server or collector.
 4. Keep contract examples empty and deterministic. Do not use the current clock,
    randomness, environment inspection, or machine-specific values.
 5. Treat every file under `public/` as world-readable. Treat docs, examples,
@@ -24,9 +26,10 @@ product-design parity.
    documented placeholders and must not include operational data, real
    infrastructure, credentials, identities, or private deployment detail.
 
-Operational providers belong in an adopter-owned, independently reviewed
-application boundary. The checked-in loopback workbench is a bounded reference
-exception, not a relaxed production profile; it may not gain external vendor
+The private application and external collectors ship operational providers
+inside documented authentication, source, and secret boundaries. Review changes
+against those boundaries and preserve empty static inspection. The separate
+loopback workbench is a disposable reference; it may not gain external vendor
 connections or remote-default binding.
 
 ## Product-design rules
@@ -86,8 +89,10 @@ design-system document.
 
 ## Route and renderer changes
 
-Preserve the invariant **38 SOC routes plus one local `/docs` utility**. The 38
-SOC routes are adapter-addressable. `#/docs` is shell-owned and must never call
+Keep the route catalog and documentation synchronized: there are **48 paths**,
+comprising the original 38 adapter-addressable SOC routes, eight native
+Operations/report pages, Documents, and the local `/docs` utility.
+`#/docs` is shell-owned and must never call
 `readPage`, `SOC_CONSOLE_CONNECTORS.getSnapshot`, or
 `SOC_CONSOLE_CONNECTORS.execute`.
 
@@ -108,8 +113,8 @@ Treat a change to `#/docs` as a local shell/documentation change, not a page- or
 connector-provider expansion. Preserve its local-only catalog flag, integrity
 failure state, filter/focus behavior, and exact product styling.
 
-Disabled concepts must remain honestly disabled. Only the five closed connector
-commands may become active through `SOC_CONSOLE_CONNECTORS`; a visible unrelated
+Disabled concepts must remain honestly disabled. Only commands declared by the
+closed connector contract may become active through `SOC_CONSOLE_CONNECTORS`; a visible unrelated
 input or action must not imply that a production workflow, validation,
 persistence, or authorization exists.
 
@@ -144,7 +149,7 @@ documentation.
 
 ## Verification
 
-Node.js 20 or newer is required. Run the complete baseline check:
+Node.js 22.13 or newer is required. Run the complete baseline check:
 
 ```sh
 npm run check
@@ -199,7 +204,14 @@ A change is complete when:
 - source/connector changes preserve lifecycle, identity, secret, ingest, and
   projector invariants documented in [docs/CONNECTORS.md](docs/CONNECTORS.md).
 
-CI pipelines, GitHub workflows, branch protection, repository templates,
-release automation, publishing, and marketplace readiness are intentionally out
-of scope for this contribution guide. Do not add or modify them as part of
-interface, adapter, documentation, or local-tooling work.
+## CI and releases
+
+The checked-in GitHub workflow installs the locked dependencies on Node.js 22,
+checks generated documentation, runs tests with one test worker, and runs the
+public-content audit. Keep that verification aligned with the supported runtime.
+
+For a release, verify the exact commit and its CI results, describe implemented
+capabilities and known limits, and use a new version tag. Preserve published
+tags so earlier source snapshots remain reproducible. Beta releases are
+evaluation snapshots, not a claim of production readiness. Source releases and
+deployment bundle generation do not deploy the application.

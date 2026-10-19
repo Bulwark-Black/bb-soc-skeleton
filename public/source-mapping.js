@@ -184,6 +184,8 @@
         el("pre", "node tools/map-events.js --recipe /absolute/private/recipe.json --file /absolute/private/events.json"),
         el("p", "The command prints only a canonical batch to stdout. Review and save it privately as /absolute/private/batch.json. After separately testing and activating this source, use its source-ingest credential file—not a vendor token or MCP token—with the existing sender:", "muted"),
         el("pre", "node tools/send-events.js --file /absolute/private/batch.json --token-file /absolute/private/source-token --base-url PRIVATE_ORIGIN"),
+        el("p", "For durable delivery, enqueue the reviewed batch before sending and inspect its queue status. The events CLI accepts canonical batches without a vendor adapter.", "muted"),
+        el("pre", "npm run events -- enqueue --file /absolute/private/batch.json --outbox-dir /absolute/private/event-outbox --base-url PRIVATE_ORIGIN"),
         el("p", "Replace PRIVATE_ORIGIN with your configured loopback or approved private HTTPS origin. Keep the original batch for retries; never regenerate IDs or timestamps. Scheduling your exports and running the sender remain your responsibility. No raw sample, credential or sender was persisted here.", "muted"),
         link("Source setup and activation", scopedHref("#/sources?stab=add")), link("Check my setup", scopedHref("#/sources?stab=setup")));
     }

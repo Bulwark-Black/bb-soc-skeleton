@@ -7,9 +7,11 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const Database = require("better-sqlite3");
 const { validateBaseUrl } = require("./agent-mcp");
+const { validateTimestamp } = require("./ingest-contract");
 const { prepareBatch, createIntegrationClient, validateReceipt, SenderError } = require("./integration-client");
 const MAX_ENTRIES = 10000, MAX_BYTES = 64 * 1024 * 1024, MAX_ATTEMPTS = 10;
 const LEASE_MS = 60000, MAX_AGE_MS = 7 * 86400000;
+const DELIVERED_MIN_AGE_MS = 86400000;
 const ROOT = fs.realpathSync(path.resolve(__dirname, ".."));
 
 function secureDirectory(directory) {
@@ -112,7 +114,7 @@ function openOutbox(directory) {
       return { id: previous.id, state: previous.state, duplicate: true };
     }
     const bytes = Buffer.byteLength(body), totals = db.prepare("SELECT count(*) AS count,coalesce(sum(bytes),0) AS bytes FROM deliveries").get();
-    if (totals.count >= MAX_ENTRIES || totals.bytes + bytes > MAX_BYTES) throw new TypeError("Outbox capacity reached; no entry was discarded. Inspect deliveries and archive this dedicated queue after all pending work is resolved.");
+    if (totals.count >= MAX_ENTRIES || totals.bytes + bytes > MAX_BYTES) throw new TypeError("Outbox capacity reached; no entry was discarded. Inspect unfinished deliveries and explicitly prune old delivered metadata with the events prune command.");
     const key = hash(JSON.stringify([baseUrl, batch.sourceId, batch.receiptId])), now = Date.now();
     db.prepare("INSERT INTO deliveries VALUES(?,?,?,?,?,?,?,'pending',0,?,?,?,NULL,NULL,NULL,NULL,NULL)")
       .run(key, baseUrl, batch.sourceId, batch.receiptId, digest, body, bytes, now, now, now);
@@ -134,8 +136,20 @@ function openOutbox(directory) {
     db.prepare("UPDATE deliveries SET state='inflight',claim=?,lease_until=?,attempts=attempts+1,updated_at=? WHERE id=?").run(key, now + LEASE_MS, now, row.id);
     return { ...row, claim: key, attempts: row.attempts + 1 };
   });
+  const pruneDelivered = db.transaction(before => {
+    let cutoff;
+    try { cutoff = Date.parse(validateTimestamp(before, "Prune cutoff")); }
+    catch { throw new TypeError("Prune cutoff must be an RFC 3339 timestamp at least 24 hours in the past."); }
+    if (cutoff > Date.now() - DELIVERED_MIN_AGE_MS) throw new TypeError("Prune cutoff must be an RFC 3339 timestamp at least 24 hours in the past.");
+    // Only explicit maintenance removes completed receipt metadata. The
+    // delivery timestamp, not creation time, protects recently delivered work.
+    // Unfinished rows also retain their retry/cooldown metadata unchanged.
+    const result = db.prepare("DELETE FROM deliveries WHERE state='delivered' AND updated_at<?").run(cutoff);
+    return { removed: result.changes, before: new Date(cutoff).toISOString() };
+  });
   return Object.freeze({
     enqueue: (batch, baseUrl = "http://127.0.0.1:8080") => enqueue.immediate(batch, baseUrl),
+    pruneDelivered: before => pruneDelivered.immediate(before),
     list(options = {}) {
       if (!options || typeof options !== "object" || Array.isArray(options)
           || Object.keys(options).some(key => !["state", "sourceId", "offset", "limit"].includes(key))) throw new TypeError("Use only state, sourceId, offset and limit for outbox status.");
