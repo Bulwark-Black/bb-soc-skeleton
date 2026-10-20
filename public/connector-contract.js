@@ -1206,9 +1206,9 @@
       const result = {
         schemaVersion: VERSION,
         id: identifier(source.id, `${label}.id`),
-        getSnapshot(request) {
+        getSnapshot(request, { signal } = {}) {
           const normalized = validateControlRequest(request);
-          return Promise.resolve().then(() => getSnapshot(normalized)).then(validateControlSnapshot);
+          return Promise.resolve().then(() => getSnapshot(normalized, { signal })).then(validateControlSnapshot);
         },
         execute(request) {
           const normalized = validateCommandRequest(request);

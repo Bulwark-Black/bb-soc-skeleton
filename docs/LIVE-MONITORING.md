@@ -276,8 +276,10 @@ The Sources board and source history receive managed collection-health updates,
 including successful empty polls; the old generic convention that only a
 nonempty push proves health is not used for this supervised reader. Canonical
 observations also feed existing supported log/overview/analytics/timeline views.
-The authoritative local alert and delivery lifecycle is in **Live monitoring**,
-not an implied new rules engine or a completed native triage workflow.
+This collector's authoritative local alert and delivery lifecycle remains in
+**Live monitoring**. The separate [native Triage](NATIVE-TRIAGE.md) workflow
+operates on eligible retained canonical findings; it does not merge Sentry
+collection alerts into its approval queue or change their delivery lifecycle.
 
 ## 8. Alerts, evidence and actionable investigation
 

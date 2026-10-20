@@ -565,3 +565,21 @@ Read [platform ingestion](PLATFORM-INGEST.md), [coverage](PLATFORM-COVERAGE.md),
 [notifications](NATIVE-NOTIFICATIONS.md). Configure and commission each
 integration in its actual environment; supplied adapters are not universal
 provider coverage.
+
+## Native Triage authority
+
+Read [native Triage](NATIVE-TRIAGE.md) before changing finding decisions, explicit
+case groups, proposals or approval operations. Their private operator API is
+separate from version-1 page projections and from source, service-token and MCP
+permissions. Preserve full operator access; do not imply a new role system.
+A supplied analyst name is provenance text, never the authenticated actor.
+
+Use the source-scoped canonical identity and its admission incarnation. Never
+derive a local disposition, case membership or approval from upstream payload
+state. Preview is inert; an explicit reviewed step commits a bounded set of
+frozen proposals, records skips and advances durable progress atomically.
+Selection may exceed 100; the internal step size is not a user selection cap.
+Do not automatically resume an operation on page load or substitute new
+proposals into an existing preview. Preserve operation/audit history and fail
+explicitly at quota. No routine launcher, response executor or notification
+sender is installed by this workflow.

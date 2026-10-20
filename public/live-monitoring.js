@@ -24,6 +24,7 @@
   }
   function render({ container, onError, query } = {}) {
     if (!container) throw new TypeError("Live monitoring needs a container.");
+    const navigationReads = new Set(), navigationWrites = new Set();
     let disposed = false, busy = false, timer = null, apps = [], credentialForms = [], snapshot = null, alertOffset = 0, initialScopeApplied = false;
     const controllers = new Set(), dirtyForms = new Set(), fieldOwners = new WeakMap();
     const intro = panel("Live monitoring — connect, collect, understand");
@@ -34,7 +35,7 @@
     container.replaceChildren(intro, status);
     if (!root.SOC_PRIVATE_APPLICATION) {
       status.textContent = "Start the private application and sign in to connect Sentry. The static skeleton performs no collection, stores no credentials, and contains no monitoring records.";
-      const cleanup = () => {}; cleanup.isDirty = () => false; return cleanup;
+      const cleanup = () => {}; cleanup.isDirty = () => false; cleanup.isPending = () => false; cleanup.cancelReads = () => {}; return cleanup;
     }
     const setup = panel("1 · Connect a Sentry project"), connectionPanel = panel("2 · Verify collection"), alertPanel = panel("3 · Understand and act");
     const setupForm = form();
@@ -81,7 +82,8 @@
     function clearCredentials() { credentialForms.forEach(entry => { entry.token.value = ""; entry.slack.value = ""; clean(entry.form); }); }
     async function request(url, body) {
       if (disposed) throw new Error("Monitoring view is closed.");
-      const controller = new AbortController(); controllers.add(controller); const timeout = root.setTimeout(() => controller.abort(), 30000);
+      const controller = new AbortController(); controllers.add(controller);
+      const navigationRead = body === undefined; (navigationRead ? navigationReads : navigationWrites).add(controller); const timeout = root.setTimeout(() => controller.abort(), 30000);
       try {
         const response = await root.fetch(url, { method: body === undefined ? "GET" : "POST", credentials: "same-origin", cache: "no-store", redirect: "error", signal: controller.signal,
           headers: { Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -98,7 +100,7 @@
         if (error.name === "AbortError") throw new Error("Monitoring request timed out. Refresh status before retrying; the server may have completed the action.");
         if (error instanceof TypeError || error instanceof SyntaxError) throw new Error("Monitoring response could not be read. Displayed values may be stale; check the server and refresh.");
         throw error;
-      } finally { root.clearTimeout(timeout); controllers.delete(controller); }
+      } finally { root.clearTimeout(timeout); controllers.delete(controller); navigationReads.delete(controller); navigationWrites.delete(controller); }
     }
     async function perform(action) {
       if (busy || disposed) return; busy = true; sync();
@@ -216,7 +218,9 @@
     function schedule() { timer = root.setTimeout(async () => { if (disposed) return; if (!busy && !dirtyForms.size) await perform(() => load()); if (!disposed) schedule(); }, 30000); }
     void perform(() => load(true)); schedule();
     const cleanup = () => { disposed = true; root.clearTimeout(timer); token.value = ""; slack.value = ""; clearCredentials(); controllers.forEach(controller => controller.abort()); controllers.clear(); dirtyForms.clear(); };
-    cleanup.isDirty = () => busy || dirtyForms.size > 0;
+    cleanup.isPending = () => navigationWrites.size > 0;
+    cleanup.cancelReads = () => { navigationReads.forEach(controller => controller.abort()); };
+    cleanup.isDirty = () => dirtyForms.size > 0 || cleanup.isPending();
     return cleanup;
   }
   root.SocLiveMonitoring = Object.freeze({ render });

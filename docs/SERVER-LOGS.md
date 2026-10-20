@@ -183,7 +183,8 @@ indexed telemetry. This update carries over reader-completion health,
 checkpointed file ingestion, durable canonical delivery and easier log review.
 It adds no seeded data or private deployment configuration.
 
-Private detection tuning, atomic triage dispositions, phishing/intel adapters,
-scanner execution and estate-specific rules still require their own reviewed
-runtime workflows. Their visible routes and imported observations are not a
-claim that these private workflows have been ported.
+The separate [native Triage](NATIVE-TRIAGE.md) API now supplies local decisions
+and atomic approval steps for retained findings. Log-reader completion and
+imported observation state do not authorize those decisions. Private detection
+tuning, phishing/intel adapters, scanner execution and estate-specific rules
+still require their own reviewed runtime workflows.

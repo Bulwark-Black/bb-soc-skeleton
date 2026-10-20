@@ -35,7 +35,7 @@ const INTEGRATION_COVERAGE = Object.freeze([
   observations("/sources", "All imported observations", RECORD_KINDS, { stab: "observations" }),
   observations("/timeline", "Timeline", RECORD_KINDS),
   observations("/brief", "Daily Brief", ["finding", "case.record", "remediation.record", "evidence.receipt"], {}, "A fact list, not an automatically generated daily briefing or turnover workflow."),
-  observations("/triage", "Triage", ["finding", "case.record", "vulnerability.finding"], {}, "Reported findings/cases, not a mutable local case queue or approval system."),
+  observations("/triage", "Triage", ["finding", "case.record", "vulnerability.finding"], {}, "Read-only imported projection; private Triage uses a separate local decision/proposal API. Imported case records do not authorize groups."),
   observations("/tuning", "Detection Tuning", ["rule.definition", "finding"], {}, "Reported rule/finding facts; no detector is compiled, tuned, or enabled."),
   observations("/rules", "Detection Rules", ["rule.definition"], {}, "Imported rule descriptions do not install or execute a rule engine."),
   observations("/alerts", "Alert Comms", ["alert.delivery"], {}, "Upstream delivery reports, not a notification sender or a delivery guarantee."),

@@ -19,7 +19,7 @@ and perform no reads or mutations. The connector-control contract can activate
 only the documented Onboarding and Sources lifecycle actions. A separately
 validated administration contract can activate only its agent, prompt,
 enrollment, attestation, and risk vocabulary on matching surfaces. Separate
-private APIs implement document management, Operations, scoped service access,
+private APIs implement document management, Operations, native Triage, scoped service access,
 source import/setup, rule policy and mail controls. Other structural action labels
 still need an authorized server workflow; neither imported facts nor page-panel
 hydration enable them. The working Documents API does not activate attachment
@@ -27,7 +27,7 @@ controls elsewhere in the catalog.
 
 `npm start` now installs the private Better Auth application and these shipped
 source, administration, document, scoped service-access, Trivy import, native
-monitoring/job/inbox, opt-in detection and reviewed notification workflows. `npm run start:static` preserves the dependency-free empty preview.
+monitoring/job/inbox, native Triage decisions/proposals, opt-in detection and reviewed notification workflows. `npm run start:static` preserves the dependency-free empty preview.
 The eleven legacy scanner setup templates remain non-executing; the separate
 private `trivy-report` importer processes reports but never runs a scanner.
 An Agent Management record is not a running agent, and a service credential
@@ -122,7 +122,7 @@ See [native Operations](NATIVE-OPERATIONS.md) and
 
 | Route | Structural surface | Provider responsibility |
 | --- | --- | --- |
-| `#/triage` | **Triage:** Queue, Awaiting approval, Cases, Closed, and All views; filters, alerts, bulk disposition, and guidance | Authorized findings, grouping, filters, ownership, and separately authorized commands |
+| `#/triage` | **Security Triage:** private Queue, Awaiting approval, Cases, Closed and All; full scoped counts, explicit grouped alerts, local decisions/proposals, exact approval preview and resumable processing | The dedicated human-session API supplies local workflow authority over retained findings. Static/custom page-provider mode remains read-only. See [native Triage](NATIVE-TRIAGE.md); external AI execution and response actions require their own integration |
 | `#/tuning` | **Detection Tuning:** Definitions, Applied alerts, and Matched but held views with definition status filters; query-selected tune detail, retained-occurrence and exact-finding choosers, read-only draft builder, and exact eight-column Detection Rules Analyst recommendation slot | Versioned definitions, occurrences, recommendations, safety state, and approval workflow; panel hydration never enables lifecycle controls |
 | `#/rules` | **Detection Rules:** Palisade proposed/built-in/inline/custom rules, tested rule creation, recorded negative-space decisions, Sigma browse/import/subset guidance, YARA status/browse/manage, the deliberate Snort boundary, the embedded Tune registry, and stable read-only definition-detail slots | The private rule catalog exposes 25 opt-in original rules and reviewed JSON-pack policy/test/shadow/active/suppression controls. Imported definitions are read-only evidence; full Sigma/YARA/Snort execution and the remaining structural workflows need separate integrations |
 | `#/alerts` | **Alert Comms:** exact reachability/delivery/overflow status, Who gets paged, Delivery log, and per-attempt Reconciliation views | This structural Alert Comms surface needs an adapter. Shipped native/finding email status and controls are on Operations → Incidents, with reviewed recipients and durable reconciliation |
@@ -218,7 +218,7 @@ query as strings and must still allowlist and authorize it.
 | `#/analyst` | `btab`: **`analyst`**; `atab`: **`briefings`**, `cases`, `rules`, `vuln`, `affected`, `retention`; Daily Brief/Turnover board link back to `#/brief` |
 | `#/analytics` | `h`: `24`, **`48`**, `168` |
 | `#/timeline` | `host`: application-validated host selector; `range`: `15m`, `1h`, **`24h`**, `7d` |
-| `#/triage` | `view`: **`queue`**, `approvals`, `cases`, `closed`, `all` |
+| `#/triage` | **Security Triage:** private Queue, Awaiting approval, Cases, Closed and All; full scoped counts, explicit grouped alerts, local decisions/proposals, exact approval preview and resumable processing | The dedicated human-session API supplies local workflow authority over retained findings. Static/custom page-provider mode remains read-only. See [native Triage](NATIVE-TRIAGE.md); external AI execution and response actions require their own integration |
 | `#/tuning` | `tview`: **`definitions`**, `applied`, `held`; for Definitions, standalone `status`: **`active`**, `draft`, `disabled` |
 | `#/rules` | `rtab`: **`palisade`**, `sigma`, `yara`, `snort`, `tuning`; for Tune, `tview`: **`definitions`**, `applied`, `held` and Definitions retains nested `tstatus`: **`all`**, `active`, `draft`, `disabled`; for Palisade, `ptab`: **`active`**, `add`, `help`, `decisions`; for Sigma, `stab`: **`rules`**, `add`, `about`; for YARA, `ytab`: **`about`**, `rules`, `manage` |
 | `#/alerts` | `atab`: **`path`**, `paged`, `log`, `reconcile` |

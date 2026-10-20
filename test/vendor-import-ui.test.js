@@ -239,7 +239,9 @@ test("disposing vendor importer aborts in-flight requests and suppresses late DO
     signals.push(init.signal); init.signal.addEventListener("abort", () => reject(Object.assign(new Error("Stopped"), { name: "AbortError" })), { once: true });
   }) });
   const before = h.container.textContent;
-  assert.equal(h.cleanup.isDirty(), true);
+  assert.equal(h.cleanup.isDirty(), false, "Read loading is not an unsaved draft.");
+  assert.equal(h.cleanup.isPending(), false, "Read loading is not a submitted mutation.");
+  h.cleanup.cancelReads();
   h.cleanup(); await settle();
   assert.equal(signals.length, 3);
   assert.ok(signals.every(signal => signal.aborted));

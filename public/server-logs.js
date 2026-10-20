@@ -42,7 +42,7 @@
         link("Collection health", "#/health"),
         link("Server log setup and recovery manual", "#/docs?section=65-server-logs-and-collector-health"))
     );
-    const cleanup = () => {}; cleanup.isDirty = () => false; return cleanup;
+    const cleanup = () => {}; cleanup.isDirty = () => false; cleanup.isPending = () => false; cleanup.cancelReads = () => {}; return cleanup;
   }
   root.SocServerLogs = Object.freeze({ render });
 })(typeof window === "object" ? window : globalThis);

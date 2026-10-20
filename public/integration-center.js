@@ -34,6 +34,7 @@
   }
   function render({ container, mode = "integrations", sourceId = "", onError } = {}) {
     if (!container) throw new TypeError("Integration center needs a container.");
+    const navigationReads = new Set(), navigationWrites = new Set();
     let disposed = false, busy = false, dirty = false, catalog = null, offset = 0, nextOffset = 0;
     let populateKindChoices = () => {};
     const controllers = new Set();
@@ -44,7 +45,7 @@
     container.replaceChildren(intro, status);
     if (!root.SOC_PRIVATE_APPLICATION) {
       status.textContent = "Start the private application and sign in. The static shell has no integration registry or operational records.";
-      const cleanup = () => {}; cleanup.isDirty = () => false; return cleanup;
+      const cleanup = () => {}; cleanup.isDirty = () => false; cleanup.isPending = () => false; cleanup.cancelReads = () => {}; return cleanup;
     }
     const content = panel(mode === "observations" ? "Stored canonical facts" : "Installed integration types");
     const editor = panel("Register a custom integration type");
@@ -60,6 +61,7 @@
     }
     async function request(endpoint, options = {}) {
       const controller = new AbortController(); controllers.add(controller);
+      const navigationRead = !options.method || options.method === "GET"; (navigationRead ? navigationReads : navigationWrites).add(controller);
       const timeout = root.setTimeout(() => controller.abort(), 20000);
       try {
         const responseLimit = endpoint === API ? 12 * 1024 * 1024 : 4 * 1024 * 1024;
@@ -75,7 +77,7 @@
       } catch (error) {
         if (error.name === "AbortError") throw new Error("Integration request timed out. Refresh the catalog to check the outcome before resubmitting a change.");
         throw error;
-      } finally { root.clearTimeout(timeout); controllers.delete(controller); }
+      } finally { root.clearTimeout(timeout); controllers.delete(controller); navigationReads.delete(controller); navigationWrites.delete(controller); }
     }
     async function perform(action) {
       if (busy || disposed) return;
@@ -236,7 +238,9 @@
       });
     }
     const cleanup = () => { disposed = true; controllers.forEach((controller) => controller.abort()); controllers.clear(); };
-    cleanup.isDirty = () => dirty || busy;
+    cleanup.isPending = () => navigationWrites.size > 0;
+    cleanup.cancelReads = () => { navigationReads.forEach(controller => controller.abort()); };
+    cleanup.isDirty = () => dirty || cleanup.isPending();
     return cleanup;
   }
   root.SocIntegrationCenter = Object.freeze({ render });

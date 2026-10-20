@@ -16,6 +16,8 @@
     container.append(panel);
     const cleanup = () => { disposed = true; if (controller) controller.abort(); root.removeEventListener("beforeunload", beforeUnload); };
     cleanup.isDirty = () => dirty || busy;
+    cleanup.isPending = () => busy;
+    cleanup.cancelReads = () => {};
     if (!root.SOC_PRIVATE_APPLICATION) {
       panel.append(node("p", "Start the private application and sign in to import reports.", "muted"));
       return cleanup;

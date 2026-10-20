@@ -329,10 +329,50 @@ it does not redefine the shell. Preserve all of its local tokens exactly:
 The checked-in tuning summary, actions, KPI row, and workspace establish that
 scoped treatment.
 
-Triage uses the product's compact board treatment: a state/filter rail, a
-1,020-pixel minimum fixed-layout table, five-by-six-pixel cells, ellipsized
-columns, and compact pills inside a keyboard-scrollable region. Threat
-Intelligence uses fixed table geometry while allowing the indicator column to
+The static/adaptor Triage catalog retains the compact structural board.
+Private native Triage uses scoped `triage.css` with five columns: selection,
+case/alert, severity, review and updated. Case headers contain actual alert rows;
+each alert has one evidence leaf without an independent checkbox or disposition.
+Group counts distinguish shown, matching and stored members. Inspection,
+disclosure and checkbox selection are separate controls, and an adjacent real
+**Open investigation** link supports native modified clicks.
+
+The queue and retained inspector use a `1.63fr / 1fr` grid with an 18px gap.
+Above 1100px the inspector is sticky at 14px; at 1100px and below it stacks;
+below 700px controls wrap. The 610px minimum table scrolls inside its own
+container. Summary, Evidence and History are retained tab panels with roving
+keyboard focus; tab changes keep form nodes and issue no reads. Full
+investigation uses the same hash router and inspector, with an explicit queue
+return context.
+
+This is an intentional **scoped Triage palette**, separate from global tokens:
+
+| Role | Surface / border / text |
+| --- | --- |
+| Workspace / panel | `#101820` / `#131e29` |
+| Borders / text / muted | `#2a3745` / `#e4eaf3` / `#9aaabd` |
+| Case / alert / evidence | `#15212d` / `#101a24` / `#0e1720` |
+| Nesting guide | `#34516b` |
+| Inspected row / edge | `#153045` / `#61d0f4` |
+| Selected alert / header | `#16334a` / `#1c3042` |
+| Critical | `#3c222b` / `#954658` / `#ffb5c5` |
+| High and medium | `#392e1b` / `#8b6f3f` / `#efd18a` |
+| Low and info | `#23333e` / `#465c6c` / `#b5c9d8` |
+| Proposal | `#302644` / `#6b5596` / `#dbc3ff` |
+| Working | `#17354b` / `#376e98` / `#a8d8ff` |
+| Neutral | `#24313d` / `#435466` / `#c3cfdf` |
+| Completed | `#1c3129` / `#486c5a` / `#a8cdb8` |
+| Uncertain save | `#332b1c` / `#c39851` / `#e7c27c` |
+
+Focus uses a 2px `#75d9f1` outline with a 3px offset; the active tab has a 2px
+underline. The inspector has a `#2b3540` border and a 10px radius. Table text is
+12px/1.4; case text is 13px, headings 10px, and secondary text 10–11px.
+Alert/evidence indents are 22px/58px. Inspector padding is 20px with 12px/1.6
+body text. Text and accessible state accompany color, long evidence wraps, and
+reduced-motion preferences are respected.
+See [native Triage](NATIVE-TRIAGE.md) for selection and approval behavior.
+
+Threat Intelligence uses fixed table geometry while allowing the indicator column to
 break long values. Rendered governance documents retain the product heading,
 mark, code, preformatted, and blockquote vocabulary.
 

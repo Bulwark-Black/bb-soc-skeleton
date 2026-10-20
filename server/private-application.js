@@ -5,6 +5,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const http = require("node:http");
+const crypto = require("node:crypto");
 const { ReferenceControlPlane, ReferenceControlError } = require("./reference-runtime");
 const { ReferenceAdministrationRuntime } = require("./reference-administration-runtime");
 const { createPrivateAuth, validatePrivateOrigin } = require("./private-auth");
@@ -23,6 +24,7 @@ const { SqliteTelemetryStore } = require("./sqlite-telemetry-store");
 const { createDetectionEngine } = require("./detection-engine");
 const { createFindingNotifications } = require("./finding-notifications");
 const { createOperationsService, handleOperations, OPERATIONS_BASE, NATIVE_MACHINE_PATHS } = require("./operations-service");
+const { createTriageService, handleTriage, TRIAGE_BASE } = require("./triage-service");
 const { INTEGRATION_COVERAGE } = require("./integration-coverage");
 const { RECORD_KINDS } = require("../tools/ingest-contract");
 const {
@@ -276,7 +278,7 @@ async function startPrivateApplication(options = {}) {
   const project = path.resolve(__dirname, "..");
   const requested = path.resolve(options.stateDirectory);
   if (requested === project || requested.startsWith(project + path.sep)) throw new TypeError("Private state must be outside the repository.");
-  let authentication, documents, runtime, administrationRuntime, serviceAccess, monitoring, setupGuides, operations, findingNotifications, findingTimer;
+  let authentication, documents, runtime, administrationRuntime, serviceAccess, monitoring, setupGuides, operations, findingNotifications, findingTimer, triage;
   let activeUploads = 0;
   let origin = options.baseURL || "http://127.0.0.1:" + port;
   const server = http.createServer();
@@ -298,6 +300,7 @@ async function startPrivateApplication(options = {}) {
       store: new SqliteTelemetryStore({ directory: realState, retention: options.telemetryRetention }),
       enabledConnectorTypes: ["canonical-push", "canonical-events", "trivy-report", "native-monitor"]
     });
+    triage = createTriageService({ store: runtime.store, ...options.triage });
     runtime.detectionEngine = createDetectionEngine({ store: runtime.store, stateDir: realState, ...options.detection });
     findingNotifications = createFindingNotifications({ store: runtime.store, stateDir: realState, consoleOrigin: origin, ...options.findingNotifications });
     runtime.findingNotifications = findingNotifications;
@@ -370,6 +373,10 @@ async function startPrivateApplication(options = {}) {
         const session = await authentication.getSession(requestHeaders(request));
         if (url.pathname === "/api/v1/session" && request.method === "GET") { sendJson(response, 200, sessionView(session)); return; }
         if (!session || !session.user) throw fail(401, "Sign in to access this private application.");
+        if (url.pathname === TRIAGE_BASE || url.pathname.startsWith(TRIAGE_BASE + "/")) {
+          const viewerId = crypto.createHash("sha256").update(JSON.stringify(["triage-viewer-v1", session.user.id, session.session.id])).digest("hex");
+          await handleTriage(request, response, url, triage, operatorId(session.user.id), viewerId); return;
+        }
         if (url.pathname === "/api/v1/finding-notifications" || url.pathname.startsWith("/api/v1/finding-notifications/")) {
           const { appId } = queryOptions(url, ["appId"]);
           if (!appId) throw fail(400, "Select an application for finding notifications.");
@@ -494,7 +501,7 @@ async function startPrivateApplication(options = {}) {
       } finally { if (uploadLease) activeUploads -= 1; }
     });
     let closed = false;
-    return { server, url: origin, authentication, documents, runtime, administrationRuntime, serviceAccess, monitoring, setupGuides, operations, findingNotifications,
+    return { server, url: origin, authentication, documents, runtime, administrationRuntime, serviceAccess, monitoring, setupGuides, operations, findingNotifications, triage,
       async close() {
         if (closed) return;
         closed = true; clearInterval(findingTimer);

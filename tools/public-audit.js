@@ -11,6 +11,14 @@ const root = path.resolve(__dirname, "..");
 // happens to live in the repository. New publication surfaces must be reviewed
 // and added here deliberately.
 const requiredTextFiles = new Set([
+  "docs/NATIVE-TRIAGE.md",
+  "server/triage-service.js",
+  "public/triage.js",
+  "public/triage.css",
+  "test/triage-service.test.js",
+  "test/triage-http.test.js",
+  "test/triage-ui.test.js",
+  "test/navigation.test.js",
   "deploy/Dockerfile",
   "deploy/integration-pack.schema.json",
   "docs/DEPLOYMENT-AUTOMATION.md",
@@ -338,7 +346,7 @@ const browserDocumentationFiles = new Set(["public/technical-docs.js"]);
 // These opt-in private application modules may issue same-origin HTTP requests.
 // The empty static shell still has connect-src 'none'; all other browser
 // restrictions (storage, sockets, unsafe HTML, and tokens) remain in force.
-const privateApplicationClients = new Set(["public/private-sign-in.js", "public/document-library.js", "public/service-access.js", "public/scanner-import.js", "public/integration-center.js", "public/vendor-import.js", "public/live-monitoring.js", "public/operations.js", "public/setup-guides.js", "public/source-mapping.js", "public/setup-assistance.js"]);
+const privateApplicationClients = new Set(["public/private-sign-in.js", "public/document-library.js", "public/service-access.js", "public/scanner-import.js", "public/integration-center.js", "public/vendor-import.js", "public/live-monitoring.js", "public/operations.js", "public/triage.js", "public/setup-guides.js", "public/source-mapping.js", "public/setup-assistance.js"]);
 
 // Exact public reference pages, not general vendor hosts or deployment URLs.
 const publicReferenceUrls = new Set([
