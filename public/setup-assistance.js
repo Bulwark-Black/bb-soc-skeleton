@@ -121,7 +121,7 @@
       finally { root.clearTimeout(timeout); pending = null; busy = false; if (!disposed) button.disabled = false; }
     };
     button.addEventListener("click", readFacts);
-    const cleanup = () => { disposed = true; pending?.abort(); }; cleanup.isDirty = () => false; return cleanup;
+    const cleanup = () => { disposed = true; pending?.abort(); }; cleanup.isDirty = () => false; cleanup.isPending = () => false; cleanup.cancelReads = () => { pending?.abort(); }; return cleanup;
   }
   root.SocSetupAssistance = Object.freeze({ render });
 }(window));

@@ -268,7 +268,8 @@ and fingerprint protection continues inside its window. See the detailed
 | --- | --- | --- |
 | Monitor: Overview, Health, Analytics, Logs | Log projections, truthful source health, configured native monitoring and enabled rule findings | Unconfigured domains and a complete all-domain posture |
 | Monitor: Timeline, Daily Brief | Timeline observes all supported kinds; Brief lists finding/case/remediation/evidence facts | Generated briefing, summarization, handover signoff and durable briefing editions |
-| Respond: Triage, Tuning, Rules | Finding/case/vulnerability observations plus original/reviewed rule catalog and policy state | Mutable local case queue, dispositions, arbitrary rule compiler, tuning approvals and retrospective replay |
+| Respond: Triage | Retained findings plus separate native decisions, explicit case groups, proposals and durable approval operations in private mode; version-1 projections remain read-only | AI/routine execution, external ticketing, response actions and automatic import of upstream case authority |
+| Respond: Tuning, Rules | Finding/case/vulnerability observations plus original/reviewed rule catalog and policy state | Arbitrary rule compiler, tuning approvals and retrospective replay |
 | Respond: Alert Comms, Honeypots, Phishing | Upstream delivery, honeypot and phishing observations; native incident/finding email status is managed separately in Operations → Incidents | General notification routing, honeypot deployment, mailbox ingestion, scoring and attachment inspection |
 | Investigate: Activity, IOC, Threat Intel, Known IPs | Relevant activity and indicator/sync observations | Learned baseline, pasted-text extraction, polling feeds, enrichment, hunting and authoritative trusted-address registry |
 | Scans: Trivy | Specialized validated report summaries, package inventory and reported findings | Scanner execution, complete scan coverage, automatic scheduling and verified fixes |
@@ -343,10 +344,12 @@ Native incident and finding email have separate durable Resend/SMTP queues;
 Sentry retains its Slack queue. Provider acceptance is not recipient read
 confirmation, and uncertain delivery requires the documented reconciliation.
 
-General case/triage workflows, escalation/ticketing, remediation, quarantine
-and evidence approval still need authoritative records, permissions, allowed
-transitions, expected revisions, idempotency and audit. Imported facts alone
-cannot enable actions. See [rules](DETECTION-RULES.md),
+Native [Triage](NATIVE-TRIAGE.md) now provides separate local decisions,
+explicit groups, version-bound proposals and durable bulk approval operations.
+Its authenticated operator API does not execute external AI routines or response
+actions. Escalation/ticketing, remediation, quarantine and evidence approval
+still need their own authoritative workflows. Imported facts alone cannot
+enable actions. See [rules](DETECTION-RULES.md),
 [reviewed packs](REVIEWED-RULE-PACKS.md) and [notifications](NATIVE-NOTIFICATIONS.md).
 
 ### 4. Add team authorization and governed evidence

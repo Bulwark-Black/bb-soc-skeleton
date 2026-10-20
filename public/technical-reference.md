@@ -13,7 +13,7 @@ credential onboarding, collection health and optional Slack delivery.
 Sections 58 through 63 explain the guided setup center, custom sample mapping,
 scoped agent connections, document intake, empty-screen help and private
 deployment/recovery responsibilities. Sections 64 through 68 cover AI-assisted
-setup, server-log collection, native Operations, platform collectors and protocol
+setup, server-log collection, native Operations, native Triage, platform collectors and protocol
 receivers, reviewed detection packs, email queues and deployment generation.
 Earlier per-screen recipes also describe richer adopter integrations; consult
 the current capability matrix in section 48 before treating a workflow as shipped.
@@ -58,6 +58,8 @@ An implementation agent should use this manual in the following order:
 9. Read sections 64 through 68 and their linked focused guides before collecting
    host or cloud data, operating native monitoring, enabling rules or mail, or
    generating a deployment bundle.
+10. Read section 69 and docs/NATIVE-TRIAGE.md before changing native finding
+    decisions, case grouping, proposal review or approval progress.
 
 **Non-negotiable invariants**
 
@@ -2249,15 +2251,23 @@ envelopes hydrate read models only. Any create, disposition, approval, send,
 rule, quarantine, or other action needs an explicit server command contract;
 the skeleton never enables it merely because an action label is visible.
 
-**Triage (`#/triage`).** Queue, Awaiting approval, Cases, Closed, and All are
-views over stable finding/case identities, ownership, severity, evidence
-references, and immutable transitions. Detectors and analysts add findings via
-the finding service; an authorized command claims, groups, dispositions,
-escalates, or closes them with expected revision and reason. Archive/retention
-removes closed items from default views but preserves the case/audit chain.
-Bulk operations authorize every selected ID and report partial denial safely;
-the browser does not infer success. An empty Queue means no authorized open
-items, not that detectors or sources are healthy.
+**Triage (`#/triage`).** In private mode, the shipped native workflow reads
+retained finding/vulnerability records and maintains separate local decisions,
+explicit case groups, proposals and durable approval runs. Queue, Awaiting
+approval, Cases, Closed and All are exclusive alert lanes; counts cover the
+full filtered retained scope. Group headers distinguish shown, matching and
+stored members; individual actions belong to child alerts. Cross-page selection
+and all-matching review freeze exact proposals before an explicit approval.
+Internal steps process at most 100 while preserving progress; this is not a
+100-alert selection cap. Changed or expired evidence is skipped. Read section
+69 and docs/NATIVE-TRIAGE.md for the API and recovery rules. Exact evidence,
+local history and aggregate inspection reads are bound to the displayed canonical
+admission version, with explicit size, retention and incomplete-history limits.
+
+The static/custom page-provider projection remains read-only. Imported state
+and case records never authorize local decisions or grouping. An empty Queue
+means no retained matching open items, not healthy detectors or complete
+coverage. No AI runner, external ticket action or remediation executor is added.
 
 **Detection Tuning (`#/tuning`).** Definitions, Applied alerts, and Matched but
 held join versioned detection definitions, retained occurrences, exact finding
@@ -2781,6 +2791,7 @@ Origin values intact through the proxy.
 | External collection | File and Windows/WEF readers; Checkmk, Wazuh, Microsoft 365, Entra, Okta and CloudTrail S3 profiles; private OTLP HTTP JSON/syslog TLS receivers | Automatic tenant provisioning, every vendor API/event family, protobuf/gRPC, live deployment or native Windows commissioning |
 | Telemetry | Indexed SQLite admission, transactional receipts/health/audit, bounded indexed reads and explicit retention | Unlimited SIEM scale, complete coverage inferred from delivery, every specialized screen |
 | Detection | 25 original opt-in rules, reviewed JSON packs, fixtures, shadow/source rollout, suppressions and rollback | General Sigma/Elastic/YARA/Snort execution, automatic rule downloads, mutable case/remediation workflow |
+| Native Triage | Separate local decisions, explicit case groups, version-bound proposals, full scoped counts and durable bulk approval runs | AI/routine execution, service-token mutation, response execution or upstream case authority |
 | Native Operations | Eight dedicated boards, metric quality/gaps/rollups, incidents, maintenance, job/employee/report evidence and work/inbox lifecycle | Executing commands, provisioning inventory or employee authority, independently proving reported work |
 | Notifications | Sentry Slack delivery; separate native incident and derived-finding Resend/TLS SMTP queues, pause and reconciliation | Account-recovery mail, arbitrary imported finding mail, exactly-once SMTP delivery or proof a person read a message |
 | Deployment | Reviewable Task Scheduler/systemd/Compose/Helm/Ansible bundles for supported roles | Automatic installation, credentials, cloud subscriptions, network policy or tested production commissioning |
@@ -4249,8 +4260,9 @@ records after telemetry expiry. Timestamps in this widget are UTC.
 Managed source health/history also record successful empty polls. That is a
 specialized verified reader result, not permission for generic empty canonical
 pushes to claim health. The dedicated Live monitoring alert/delivery state is
-authoritative for this workflow; it does not activate native triage/rules or
-general incident/remediation actions elsewhere in the SOC.
+authoritative for this workflow. The separate native Triage API in section 69
+uses eligible canonical findings; it does not merge these collection alerts or
+replace their delivery lifecycle. General response actions remain separate.
 
 **Alerts and evidence**
 
@@ -5297,9 +5309,9 @@ blocked work. Delayed delivery must fit the receiver's retention/replay policy.
 
 Read **docs/SERVER-LOGS.md** for exact commands, format behavior, privacy,
 commissioning and recovery. The log-reader workflow does not install private
-detection policy, triage mutations, phishing/intel adapters or scanner runners.
-Sections 67–68 describe the separately shipped opt-in original rules and reviewed
-pack pipeline. Existing private credentials, paths, host inventory and records
+detection policy, phishing/intel adapters or scanner runners. Sections 67–68
+describe the separately shipped opt-in original rules and reviewed pack pipeline;
+section 69 describes the separate native Triage decision and approval service. Existing private credentials, paths, host inventory and records
 stay outside this public baseline.
 
 ## 66. Native monitoring and Operations
@@ -5455,5 +5467,141 @@ Read [platform ingestion](../docs/PLATFORM-INGEST.md), [coverage](../docs/PLATFO
 [notifications](../docs/NATIVE-NOTIFICATIONS.md). Configure and commission each
 integration in its actual environment; supplied adapters are not universal
 provider coverage.
+
+## 69. Native Security Triage and durable approvals
+
+The private `/triage` route mounts `public/triage.js` and the scoped
+`triage.css` treatment over `/api/v1/triage`. The static preview and version-1
+imported page projector remain read-only. No closed version-1 page, canonical,
+connector or administration contract changes. The existing Better Auth session
+and exact Host/Origin checks authorize writes; source, service and MCP credentials
+gain no permission. Existing full-access operator authority is preserved.
+
+Eligible subjects are retained `finding` and `vulnerability.finding` records.
+Identity is source ID plus record ID, associated with an application by its source
+registration. Upstream state and `case.record` remain reported facts. Local
+decisions, explicit groups and operator-recorded proposals are separate authority.
+A recommendation author label is claimed provenance; the authenticated actor is
+stored separately. Nothing here starts a Claude routine or an employee runner.
+
+**Counts and presentation**
+
+The full filtered retained scope is counted before pagination. Closed/resolved
+decisions occupy Closed; investigating/real-threat decisions occupy Cases;
+current pending proposals occupy Awaiting approval; other open alerts occupy
+Queue. All is the sum of those four exclusive alert lanes. Imported occurrence
+counts, display groups and rendered rows are different units.
+
+A case header is separate from all its child alerts. Headers show current-page,
+complete-matching and stored-member totals. Alert pagination can split a group;
+header selection applies only to shown exact members. Stored membership may
+outlive retained evidence. Severity, workflow and proposals use distinct labeled
+visual treatments. Cross-page selection remains application/filter-scoped.
+Shell page search filters loaded groups atomically; server search covers the
+complete retained scope. All-matching review requires clear shell page search.
+
+**Exact private reads**
+
+List/detail alerts include an opaque `evidenceVersion` bound to their admission
+row, receipt time and body hash. Operator-only GET `/alert/inspection` requires
+`appId`, `key` and `expectedVersion`, returning current alert, exact evidence,
+initial history and case context in one SQLite read transaction. The HTTP result
+also carries an opaque session-bound `viewerId` for stale-response guards; it is
+not a credential or authority. No read commits decisions, workflow receipts,
+progress or audit. Source, enrollment, service and MCP credentials gain no read
+permission.
+
+Separate `/alert/evidence` and `/alert/history` reads use the same exact scope.
+The canonical evidence display budget is 48,000 serialized UTF-8 bytes. Evidence
+responses are bounded to 65,536 bytes; clipping names omitted whole fields,
+sets `complete`/`fullRecordAvailable` false and offers no unbounded raw download.
+The canonical record is not the original provider file or proof of complete
+upstream collection. The aggregate inspection budget is 655,360 bytes.
+
+History is at most 524,288 bytes, defaults to 30 events and accepts a limit up to
+100. A byte-bounded page can contain fewer than the requested limit. Follow its
+signed older/newer cursors, which bind app, key, incarnation, limit and a fixed
+high-water mark; later writes appear only in a fresh read. Events preserve
+recorded sequence and distinguish actor from supplied author label, applied
+decisions from skips, and selected-alert notes from sibling case members. Prior
+incarnations are excluded. Legacy approval outcomes without exact per-item
+provenance report incomplete history and an explicit notice, not invented events.
+
+Explicit case context reports stored/available/unavailable totals and up to 30
+retained member identities; `hasMore` points readers to the paginated group board.
+Ungrouped alerts have null case context. Attachments and independent agent-note
+associations remain unsupported. Only the selected alert's recorded proposal,
+decision and history notes are available; their labels are not independent
+identity or analysis-run proof.
+
+Unknown/duplicate fields or malformed cursor/token input returns 400; missing,
+expired and cross-application targets return 404. A stale evidence version returns
+409 `evidence-version-conflict`; incompatible/tampered cursors return 400
+`triage-cursor-invalid`. Corrupt or unavailable retained reads fail 503 without
+substituting another incarnation or presenting invented empty evidence/history.
+
+**Review and commit**
+
+Selected or all-matching preview freezes exact members and proposed outcomes
+without changing decisions. An operator can page through the frozen membership.
+An explicit approval step processes at most 100 eligible items, while the browser
+advances the saved run. Selection itself has no 100-alert cap. Pause stops between
+requests; reload only retrieves progress; resume requires explicit action.
+
+Snapshots bind admission row ID, receipt time, body hash, proposal revision,
+decision revision and group identity. Each step rechecks them. Changed/withdrawn
+proposals, intervening decisions and expired/recreated evidence are skipped.
+New arrivals never join an existing operation. Critical or incomplete case
+evidence is excluded from bulk approval; individual manual decisions require
+a reason. Only exact selected alerts change, never their siblings implicitly.
+
+Candidates equal eligible plus pre-approval exclusions. Eligible equals approved
+plus recheck-skipped plus remaining. Result counters are separate from proposed
+outcome totals. Every step commits local decisions, proposal consumption, item
+results, progress, revision and audit together in one SQLite transaction. Stale
+step replay returns current progress without processing the next batch; an
+ahead-of-current revision conflicts. Operations are bound to their original
+operator and application.
+
+**Persistence and limits**
+
+Additive Triage tables share the existing external telemetry SQLite store.
+Current heads, immutable local history, membership, operation snapshots/results,
+receipts and audit are retained. Canonical payload retention remains independent;
+historical local state cannot revive evidence or attach to a recreated identity.
+A 128 MiB logical owned-state quota fails the entire mutation explicitly rather
+than evicting history. It does not bound total database/WAL/disk size. HTTP
+requests are bounded to 16 MiB and read pages to 200 alerts; neither page limit
+restricts the SQL counts or all-matching approval scope.
+
+Back up the consistent whole external-state directory before upgrading; restore
+the matching pre-upgrade state and code for rollback. No automated purge/export,
+new rule engine, model call, notification or response execution is implied.
+Read [native Triage](../docs/NATIVE-TRIAGE.md) for exact endpoints, field limits,
+error handling, migration/recovery and operator steps.
+
+The [case/alert/evidence workspace](../docs/NATIVE-TRIAGE.md#case-alert-evidence-and-inspector-workspace)
+is implemented with a five-column queue, independent disclosure/inspection/
+selection, one evidence leaf per canonical alert, and adjacent **Open
+investigation** links. Summary, Evidence and History retain the same form DOM;
+tab changes perform no fetch. Exact alert changes use one bounded aggregate
+read with draft, pending-write, session and stale-response guards.
+
+Full investigation preserves exact identity and a validated queue return
+context. Filters, pagination, timezone, disclosures and saved approvals survive
+local navigation. History restoration stays GET-only. Shared navigation keeps
+the prior view on failed reads or canceled discard, restores scroll/focus for
+Back/Forward, and preserves drafts during same-document anchor navigation.
+Read cancellation never aborts an already submitted write; uncertain intent
+requires explicit reconciliation or identical replay.
+
+Synthetic browser acceptance checks 1280, 768 and 390 CSS pixel layouts without
+document overflow, retained input identity and unsaved text, zero-request tab
+switches, one-read inspection and unchanged canonical/workflow state. Focused
+service, HTTP, UI and shared-navigation regressions cover exact scope, history
+bounds, read races and write recovery. The workspace shows explicit case-member
+context and selected-alert notes; attachments and independent agent-note
+associations remain unsupported. Audited writes, existing operator authority,
+explicit approval progress and external Claude routines retain their semantics.
 
 End of version-1 technical implementation manual.

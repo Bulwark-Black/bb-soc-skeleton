@@ -561,6 +561,7 @@ test("every public runtime script and provider example has no capability or unsa
     "public/setup-guides.js",
     "public/source-mapping.js",
     "public/technical-docs.js",
+    "public/triage.js",
     "public/ui-catalog.js",
     "public/vendor-import.js"
   ]);
@@ -579,7 +580,7 @@ test("every public runtime script and provider example has no capability or unsa
   ];
   for (const name of runtimeFiles) {
     const source = read(name);
-    const privateClient = ["public/document-library.js", "public/private-sign-in.js", "public/scanner-import.js", "public/service-access.js", "public/integration-center.js", "public/vendor-import.js", "public/live-monitoring.js", "public/operations.js", "public/setup-guides.js", "public/setup-assistance.js", "public/source-mapping.js"].includes(name);
+    const privateClient = ["public/document-library.js", "public/private-sign-in.js", "public/scanner-import.js", "public/service-access.js", "public/integration-center.js", "public/vendor-import.js", "public/live-monitoring.js", "public/operations.js", "public/triage.js", "public/setup-guides.js", "public/setup-assistance.js", "public/source-mapping.js"].includes(name);
     for (const pattern of forbiddenCapabilities) {
       if (privateClient && pattern.source === "\\bfetch\\s*\\(") continue;
       assert.doesNotMatch(source, pattern, `${name}: ${pattern}`);
@@ -1025,6 +1026,7 @@ test("technical documentation supports stable section focus and chapter filterin
   const nextSection = manual.sections[manual.sections.indexOf(selected) + 1];
   chapterSelect.value = nextSection.id;
   harness.mountRoot.dispatchEvent({ type: "change", target: chapterSelect });
+  await new Promise(resolve => setImmediate(resolve));
   assert.match(harness.location.hash, new RegExp("section=" + nextSection.id));
 
   const localFilter = findNodes(harness.mountRoot,
@@ -1997,11 +1999,13 @@ test("the active Search anything and go shortcuts dispatch without exposing a da
     (candidate) => candidate.tagName === "A" && candidate.textContent.includes("Investigate"))[0];
   assert.equal(investigate.getAttribute("href"), "#/search?q=CVE-2026-1234");
   input.dispatchEvent({ type: "keydown", key: "Enter" });
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(harness.location.hash, "#/search?q=CVE-2026-1234");
 
   harness.document.activeElement = null;
   harness.document.dispatchEvent({ type: "keydown", key: "g", metaKey: false, ctrlKey: false, altKey: false });
   harness.document.dispatchEvent({ type: "keydown", key: "l", metaKey: false, ctrlKey: false, altKey: false });
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(harness.location.hash, "#/logs");
   harness.document.dispatchEvent({ type: "keydown", key: "?", metaKey: false, ctrlKey: false, altKey: false });
   assert.equal(toast.hidden, false);
@@ -3868,7 +3872,7 @@ test("beginner checklist is offered only on a confirmed empty unfiltered private
     harness.context.SocSetupAssistance = { render(options) { renders.push(options); return () => {}; } };
     await harness.app.mount();
     assert.equal(renders.some(options => options.offerChecklist), item.expected, item.hash + " " + item.state);
-    assert.equal(renders[0].offerChecklist, false, "loading is not evidence of emptiness");
+    assert.equal(renders.length, 1, "read completion mounts the private view once; loading does not remount it");
     const last = renders[renders.length - 1]; assert.equal(last.mode, item.state === "ready" ? "checklist" : "screen");
     assert.equal(last.controlsContainer.getAttribute("id"), "page-title"); harness.app.unmount();
   }
@@ -3887,7 +3891,7 @@ test("setup selection updates history and controller query without navigation or
     renders += 1; selection = options.onSelection; query = options.query;
     const cleanup = () => { disposals += 1; }; cleanup.isDirty = () => dirty; return cleanup;
   } };
-  await harness.app.mount(); const originalSelection = selection;
+  await harness.app.mount(); const originalSelection = selection; replacements.length = 0;
   for (const invalid of ["not-a-guide", "setup-../invalid", "setup-" + "a".repeat(36), undefined, 42]) originalSelection(invalid);
   assert.equal(replacements.length, 0); assert.equal(harness.app.getState().query.setupId, undefined);
   originalSelection(id);

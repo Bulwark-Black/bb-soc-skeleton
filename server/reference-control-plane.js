@@ -256,12 +256,13 @@ function installBrowserProvider(global, api) {
   global.SOC_CONSOLE_CONNECTORS = Object.freeze({
     schemaVersion: "1",
     id: "reference-loopback-connectors",
-    getSnapshot(request) {
+    getSnapshot(request, { signal } = {}) {
       const query = new URLSearchParams({ reason: request.reason });
       if (request.knownRevision !== undefined) query.set("knownRevision", String(request.knownRevision));
       return global.fetch(api + "/control/snapshot?" + query, {
         credentials: "same-origin",
-        headers: { Accept: "application/json" }
+        headers: { Accept: "application/json" },
+        signal
       }).then(readJson);
     },
     execute(request) {
@@ -271,19 +272,21 @@ function installBrowserProvider(global, api) {
   global.SOC_CONSOLE_ADMINISTRATION = Object.freeze({
     schemaVersion: "1",
     id: "reference-loopback-administration",
-    getSnapshot(request) {
+    getSnapshot(request, { signal } = {}) {
       const query = new URLSearchParams({ domain: request.domain, reason: request.reason });
       if (request.knownRevision !== undefined) query.set("knownRevision", String(request.knownRevision));
       return global.fetch(api + "/administration/snapshot?" + query, {
         credentials: "same-origin",
-        headers: { Accept: "application/json" }
+        headers: { Accept: "application/json" },
+        signal
       }).then(readJson);
     },
-    getPrompt(request) {
+    getPrompt(request, { signal } = {}) {
       const query = new URLSearchParams({ promptId: request.promptId });
       return global.fetch(api + "/administration/prompts?" + query, {
         credentials: "same-origin",
-        headers: { Accept: "application/json" }
+        headers: { Accept: "application/json" },
+        signal
       }).then(readJson);
     },
     execute(request) {
@@ -313,12 +316,13 @@ function installBrowserProvider(global, api) {
       subscriptions: false,
       persistence: true
     }),
-    readPage(request) {
+    readPage(request, { signal } = {}) {
       const query = new URLSearchParams({ route: request.route });
       Object.entries(request.query || {}).forEach(([key, value]) => query.set(key, value));
       return global.fetch(api + "/pages?" + query, {
         credentials: "same-origin",
-        headers: { Accept: "application/json" }
+        headers: { Accept: "application/json" },
+        signal
       }).then(readJson);
     }
   });

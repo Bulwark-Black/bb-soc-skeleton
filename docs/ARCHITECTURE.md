@@ -23,6 +23,10 @@ service checks, website observations, incident episodes, jobs, work and employee
 instructions in per-application SQLite stores. The canonical admission transaction
 can derive findings with opt-in rules and reserve filtered finding email. Native
 incident mail and finding mail use separate durable queues with Resend or TLS SMTP.
+Native Triage adds local decisions, explicit groups, proposals and approval
+operations in the existing telemetry SQLite database. A reviewed approval step
+commits its decisions, proposal consumption, item outcomes, progress and audit
+together. It never derives local workflow authority from a source's reported state.
 Reviewed configuration and commissioning are required before collection or sending.
 Generated scheduling/deployment packs support selected external collectors; the
 adopter applies and operates them. An agent runner and a remote MCP listener
@@ -121,11 +125,13 @@ public/index.html
   +-- public/source-mapping.js   source setup and reviewed mapping clients
   +-- public/server-logs.js      file-log collector setup guidance
   +-- public/operations.js       native Operations and finding-mail clients
+  +-- public/triage.js           private native Triage client
   +-- public/app.js              empty states, renderers, factory/controller
   +-- public/bootstrap.js        resolve integrations and mount once
   |
   +-- public/active-ui.css       sanitized exact active component styles
   +-- public/app.css             portable renderer mappings and layout
+  +-- public/triage.css          scoped native Triage hierarchy and state styling
   +-- public/assets/*            exact product mark and favicon set
 ```
 
@@ -139,7 +145,12 @@ public/index.html
 `application-bridge.js` installs nothing in static mode. The private application
 serves authenticated page/control/auth providers at that hook before bootstrap;
 the separate development workbench serves its explicitly non-production bridge.
-`document-library.js` remains inactive without the private application marker.
+`document-library.js` and `triage.js` remain inactive without the private
+application marker. The private `/triage` route uses its dedicated authenticated
+API; the version-1 imported-observation projector stays read-only. No page,
+canonical, connector or administration version-1 shape is expanded by this
+workflow. See [native Triage](NATIVE-TRIAGE.md) for identity, preview/commit,
+retention and recovery boundaries.
 
 The application factory is composed with validated dependencies:
 

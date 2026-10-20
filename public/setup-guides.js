@@ -19,6 +19,7 @@
   function timestamp(value) { return typeof value === "string" && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : "Not available"; }
   function render({ container, onError, onSelection, query } = {}) {
     if (!container) throw new TypeError("Setup guides need a container.");
+    const navigationReads = new Set(), navigationWrites = new Set();
     let disposed = false, busy = false, bindingDirty = false, registerDirty = false, selectedId = null, loaded = false, sequence = 0, registrationCommand = null;
     let setup = { revision: 0, plans: [], choices: [] }, apps = [], diagnostic = null;
     const controllers = new Set();
@@ -31,7 +32,7 @@
     container.replaceChildren(intro, status);
     if (!root.SOC_PRIVATE_APPLICATION) {
       status.textContent = "Start the private application and sign in to save a setup guide and check your own sources. The static skeleton makes no requests, stores no guide and contains no monitoring evidence.";
-      const cleanup = () => {}; cleanup.isDirty = () => false; return cleanup;
+      const cleanup = () => {}; cleanup.isDirty = () => false; cleanup.isPending = () => false; cleanup.cancelReads = () => {}; return cleanup;
     }
     const savedPanel = panel("Resume a saved guide"), appPanel = panel("1 · Choose your application"), pathPanel = panel("2 · Choose how data arrives"), sourcePanel = panel("3 · Connect and bind your source"), checkPanel = panel("4 · Check my setup");
     const bindingForm = form(), app = field(bindingForm, "Registered application", "setupApp"), environment = field(bindingForm, "Environment", "setupEnvironment");
@@ -143,7 +144,8 @@
     }
     async function request(url, method = "GET", body) {
       if (disposed) throw new Error("Setup view is closed.");
-      const controller = new AbortController(); controllers.add(controller); const timeout = root.setTimeout(() => controller.abort(), 30000);
+      const controller = new AbortController(); controllers.add(controller);
+      const navigationRead = method === "GET"; (navigationRead ? navigationReads : navigationWrites).add(controller); const timeout = root.setTimeout(() => controller.abort(), 30000);
       try {
         const response = await root.fetch(url, { method, credentials: "same-origin", cache: "no-store", redirect: "error", signal: controller.signal,
           headers: { Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -159,7 +161,7 @@
         if (error.name === "AbortError") throw new Error("Setup request timed out. Refresh the saved state before retrying; the server may have completed the action.");
         if (error instanceof TypeError || error instanceof SyntaxError) throw new Error("Setup response could not be read. Displayed values may be stale; check the private server and refresh.");
         throw error;
-      } finally { root.clearTimeout(timeout); controllers.delete(controller); }
+      } finally { root.clearTimeout(timeout); controllers.delete(controller); navigationReads.delete(controller); navigationWrites.delete(controller); }
     }
     async function perform(action) {
       if (busy || disposed) return; busy = true; sync();
@@ -227,7 +229,9 @@
     refreshButton.dataset.canRetry = "true"; intro.append(refreshButton);
     void perform(() => load());
     const cleanup = () => { disposed = true; controllers.forEach(controller => controller.abort()); controllers.clear(); clearRegistration(); diagnostic = null; };
-    cleanup.isDirty = () => bindingDirty || registerDirty || busy;
+    cleanup.isPending = () => navigationWrites.size > 0;
+    cleanup.cancelReads = () => { navigationReads.forEach(controller => controller.abort()); };
+    cleanup.isDirty = () => bindingDirty || registerDirty || cleanup.isPending();
     return cleanup;
   }
   root.SocSetupGuides = Object.freeze({ render });

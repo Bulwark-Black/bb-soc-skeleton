@@ -178,8 +178,12 @@ test("failed upload retains the draft and never claims success or creates a comp
 test("disposal aborts in-flight requests and prevents late detail responses from replacing the view", async t => {
   let release;
   const h = harness(t, { detail: existing(), fetch: (url, init, fallback) => url === API + "/" + ID ? new Promise(resolve => { release = () => resolve(fallback(url, init)); }) : fallback(url, init) }); await settle();
-  h.button("Existing synthetic evidence").click(); await settle(); assert.equal(h.cleanup.isDirty(), true);
-  const request = h.requests.at(-1); h.cleanup(); const before = h.container.textContent;
+  h.button("Existing synthetic evidence").click(); await settle();
+  assert.equal(h.cleanup.isDirty(), false, "Read loading is not an unsaved document draft.");
+  assert.equal(h.cleanup.isPending(), false, "Read loading is not a submitted document mutation.");
+  const request = h.requests.at(-1); h.cleanup.cancelReads();
+  assert.equal(request.init.signal.aborted, true);
+  h.cleanup(); const before = h.container.textContent;
   assert.equal(request.init.signal.aborted, true); release(); await settle(); assert.equal(h.container.textContent, before); assert.equal(h.errors.length, 0);
   assert.equal(h.listeners.has("beforeunload"), false);
 });

@@ -174,8 +174,11 @@ test("static integration center performs no requests and disposing an active wid
     requestSignal = init.signal;
     requestSignal.addEventListener("abort", () => reject(Object.assign(new Error("Stopped"), { name: "AbortError" })), { once: true });
   }) });
-  assert.equal(active.cleanup.isDirty(), true);
+  assert.equal(active.cleanup.isDirty(), false, "an initial read is not an unsaved draft");
+  assert.equal(active.cleanup.isPending(), false, "pending protects submitted writes, not reads");
   const before = active.container.textContent;
+  active.cleanup.cancelReads();
+  assert.equal(requestSignal.aborted, true, "the shared router can cancel the initial read independently");
   active.cleanup(); await settle();
   assert.equal(requestSignal.aborted, true);
   assert.equal(active.container.textContent, before);
@@ -208,4 +211,29 @@ test("observations apply local-time bounds with source/kind filters and display 
   input(h.field("observedAfterFilter"), ""); input(h.field("observedBeforeFilter"), ""); h.form().requestSubmit(); await settle();
   assert.equal(observedQueries.at(-1).observedAfter, undefined); assert.equal(observedQueries.at(-1).observedBefore, undefined);
   assert.equal(h.cleanup.isDirty(), false);
+});
+
+
+test("cancelReads preserves a submitted integration registration and its pending guard", async (t) => {
+  let finishWrite, writeSignal;
+  const h = harness(t, { fetch: (_url, init) => {
+    if (init.method !== "POST") return response(catalog());
+    writeSignal = init.signal;
+    return new Promise(resolve => { finishWrite = () => resolve(response(catalog())); });
+  } });
+  await settle();
+  const manifest = structuredClone(CANONICAL_EVENTS_MANIFEST); manifest.connectorType = "custom-pending-review";
+  input(h.field("manifestJson"), JSON.stringify(manifest));
+  h.form().requestSubmit();
+  assert.equal(h.cleanup.isPending(), true);
+  assert.equal(h.cleanup.isDirty(), true);
+  assert.ok(writeSignal);
+  h.cleanup.cancelReads();
+  assert.equal(writeSignal.aborted, false, "read cancellation must not imply cancellation of a submitted write");
+  assert.equal(h.cleanup.isPending(), true);
+  finishWrite(); await settle();
+  assert.equal(h.cleanup.isPending(), false);
+  assert.equal(h.cleanup.isDirty(), false);
+  assert.equal(h.requests.filter(request => request.init.method === "POST").length, 1);
+  assert.equal(h.errors.length, 0);
 });

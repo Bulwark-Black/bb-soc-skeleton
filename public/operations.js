@@ -76,6 +76,7 @@
   function render({ container, route = "/infrastructure", appId, query, applications = [], onError, scopeLoaded = false, displayTimezone } = {}) {
     if (!container || !Object.hasOwn(ROUTES, route)) throw new TypeError("Operations requires a container and supported route.");
     const document = container.ownerDocument || root.document;
+    const navigationReads = new Set(), navigationWrites = new Set();
     let disposed = false, busy = false, dirty = false, delegated = null;
     const controllers = new Set(), chartInspectors = [], draftForms = new Set(), unresolvedForms = new Set();
     const q = query?.entries ? Object.fromEntries(query.entries()) : { ...(query || {}) };
@@ -115,7 +116,9 @@
     }
     const main = el("div", undefined, "ops"); const heading = el("header", undefined, "ops-heading"); append(heading, [el("small", "BB SOC / Operations"), el("h1", ROUTES[route]), p("Measurements, collection freshness, incident decisions and employee assessments remain separate evidence.")]); heading.querySelector("h1").id = "page-title"; main.append(heading);
     const status = p("Loading operations…"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite"); main.append(status); const content = el("div"); main.append(content); container.replaceChildren(main);
-    const cleanup = () => { disposed = true; controllers.forEach(controller => controller.abort()); controllers.clear(); if (delegated) delegated(); }; cleanup.isDirty = () => dirty || busy || !!delegated?.isDirty();
+    const cleanup = () => { disposed = true; controllers.forEach(controller => controller.abort()); controllers.clear(); if (delegated) delegated(); }; cleanup.isPending = () => navigationWrites.size > 0 || unresolvedForms.size > 0 || !!delegated?.isPending();
+    cleanup.cancelReads = () => { navigationReads.forEach(controller => controller.abort()); delegated?.cancelReads?.(); };
+    cleanup.isDirty = () => dirty || cleanup.isPending() || !!delegated?.isDirty();
     if (!root.SOC_PRIVATE_APPLICATION) { status.textContent = "This data-free preview has no monitoring provider. Start the private application and configure Operations to receive your own observations."; content.append(link("Configure Operations", "/docs", { section: "66-native-monitoring-and-operations" })); return cleanup; }
     if (!scopeLoaded && !list(applications).length) {
       cleanup.ready = (async () => {
@@ -140,7 +143,8 @@
     content.append(intervalControls()); if (window.warning) content.append(notice(window.warning, true));
     const board = el("div"); content.append(board);
     async function request(endpoint, params = {}, body) {
-      if (disposed) throw new Error("View closed."); const controller = new AbortController(); controllers.add(controller); const timer = root.setTimeout(() => controller.abort(), 30000);
+      if (disposed) throw new Error("View closed."); const controller = new AbortController(); controllers.add(controller);
+      const navigationRead = body === undefined; (navigationRead ? navigationReads : navigationWrites).add(controller); const timer = root.setTimeout(() => controller.abort(), 30000);
       const search = new URLSearchParams({ ...Object.fromEntries(Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== "").map(([key, value]) => [key, String(value)])), appId: q.appId });
       try {
         const response = await root.fetch(endpoint === "__applications" ? "/api/v1/control/snapshot?reason=refresh" : (endpoint === "finding-notifications" || endpoint.startsWith("finding-notifications/") ? "/api/v1/" : API + "/") + endpoint + "?" + search, { method: body === undefined ? "GET" : "POST", credentials: "same-origin", cache: "no-store", redirect: "error", signal: controller.signal,
@@ -152,7 +156,7 @@
         const bytes = new Uint8Array(length); let offset = 0; chunks.forEach(chunk => { bytes.set(chunk, offset); offset += chunk.byteLength; });
         const result = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); if (!result || typeof result !== "object" || result.ok === false) throw new Error("Operations evidence is unavailable."); return result;
       } catch (error) { if (error.name === "AbortError") throw new Error("Operations request timed out. Refresh before retrying; a submitted decision may already be saved."); if (error instanceof TypeError || error instanceof SyntaxError) throw new Error("Operations response could not be read safely."); throw error; }
-      finally { root.clearTimeout(timer); controllers.delete(controller); }
+      finally { root.clearTimeout(timer); controllers.delete(controller); navigationReads.delete(controller); navigationWrites.delete(controller); }
     }
     const read = async (endpoint, params) => {
       try {

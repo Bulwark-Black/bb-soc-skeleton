@@ -872,13 +872,13 @@
       const result = {
         schemaVersion: VERSION,
         id: identifier(source.id, `${label}.id`),
-        getSnapshot(request) {
+        getSnapshot(request, { signal } = {}) {
           const normalized = validateSnapshotRequest(request);
-          return Promise.resolve().then(() => getSnapshot(normalized)).then((response) => validateSnapshot(response, normalized));
+          return Promise.resolve().then(() => getSnapshot(normalized, { signal })).then((response) => validateSnapshot(response, normalized));
         },
-        getPrompt(request) {
+        getPrompt(request, { signal } = {}) {
           const normalized = validatePromptRequest(request);
-          return Promise.resolve().then(() => getPrompt(normalized)).then((response) => validatePrompt(response, normalized));
+          return Promise.resolve().then(() => getPrompt(normalized, { signal })).then((response) => validatePrompt(response, normalized));
         },
         execute(request) {
           const normalized = validateCommandRequest(request);

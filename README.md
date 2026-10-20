@@ -3,7 +3,7 @@
 A self-hosted, private monitoring and log-ingestion starter for applications,
 servers, Windows/Active Directory, and supported cloud services. It combines the
 Bulwark Black SOC interface with authenticated ingestion, native Operations
-boards, opt-in detections, and email delivery. The repository ships without
+boards, native security triage, opt-in detections, and email delivery. The repository ships without
 private inventory, credentials, or telemetry.
 
 The interface has 48 registered paths: the original 38 SOC paths, eight
@@ -82,6 +82,37 @@ bundles are included. See [collectors](docs/PLATFORM-COLLECTORS.md),
 [reviewed rule rollout](docs/REVIEWED-RULE-PACKS.md). Each integration has an explicit
 supported profile and requires commissioning in the adopter environment.
 
+## Security Triage and approvals
+
+The private **Respond → Triage** page now combines retained findings with a
+separate local decision and proposal history. Case headers make their nested
+alerts explicit; severity, workflow and pending proposals have distinct visual
+treatments. Counts distinguish alerts from case groups and from the rows shown
+on the current page. Each alert has one canonical evidence leaf and a direct
+**Open investigation** link. A retained **Summary / Evidence / History**
+inspector keeps drafts and form state while switching tabs without new reads.
+Exact admission versions prevent expired or replaced evidence from silently
+becoming a different alert. Scoped history pages retain a fixed snapshot and
+identify recorded actors separately from supplied author labels.
+
+Queue filters, pagination, timezone, approval context and return navigation are
+preserved. Failed reads keep the prior view; pending or uncertain writes block
+departure until explicitly reconciled. Case membership is shown with bounded
+counts; case-file attachments and independent agent-note associations remain
+unsupported.
+
+Select alerts across pages or preview all matching proposals, inspect the exact
+scope and proposed outcomes, then approve with saved progress. The user selection
+has no 100-alert limit; processing uses internal batches of at most 100 and can
+pause or resume. Changed or expired findings are skipped and reported. Creating
+a preview does not approve anything. Read the [native Triage guide](docs/NATIVE-TRIAGE.md)
+for authorization, scope, storage, recovery and the private API.
+
+This is a local review workflow. It does not launch an AI employee or a Claude
+routine, execute a response action, or grant service credentials new authority.
+Imported source state remains evidence; local workflow changes require an
+authenticated operator. The static preview remains read-only and data-free.
+
 ## What is included
 
 - The exact Bulwark Black SOC mark, favicon set, dark circuit shell, palette,
@@ -137,6 +168,8 @@ supported profile and requires commissioning in the adopter environment.
 - Durable server-file and Windows Event Log/WEF collectors, six platform
   collector profiles, authenticated OTLP HTTP JSON and mutual-TLS syslog
   receivers, with checkpoints, frozen outboxes, and explicit recovery.
+- Native finding decisions, explicit case groups, version-bound proposals and
+  durable bulk approval previews/progress with cross-page selection.
 - Native host/service/website monitoring, metric history, incidents, critical
   jobs, AI employee work/evidence, and analyst reports.
 - Twenty-five opt-in detection rules, bounded correlation, reviewed rule-pack

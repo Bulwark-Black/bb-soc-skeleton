@@ -420,6 +420,8 @@ documented behavior.
 The canonical [detection engine](DETECTION-RULES.md) supplies 25 opt-in original
 rules and [reviewed JSON packs](REVIEWED-RULE-PACKS.md), including source-scoped
 shadow rollout and expiring suppression. It is separate from numeric native
-health and incident evaluation. General triage/case workflows, phishing,
-scanner execution and automated remediation still need their documented
-adopter implementations; this port does not reproduce every private workflow.
+health and incident evaluation. The separate [native Triage](NATIVE-TRIAGE.md)
+workflow now provides local finding decisions, case groups, proposals and durable
+bulk approvals. It does not replace incident acknowledgment or employee guidance,
+and does not start a Claude routine. Phishing, scanner execution and automated
+remediation still need their documented adopter implementations.

@@ -7,6 +7,7 @@
   function link(label, href) { const node = el("a", label, "resource-action"); node.href = href; return node; }
   function render({ container, onError, query } = {}) {
     if (!container) throw new TypeError("Vendor importer needs a container.");
+    const navigationReads = new Set(), navigationWrites = new Set();
     let disposed = false, busy = false, dirty = false, catalog, snapshot, adapters = [], preview = null, raw = "", sequence = 0;
     const controllers = new Set();
     const inScope = item => (!query?.get?.("appId") || item.appId === query.get("appId"))
@@ -18,7 +19,7 @@
       link("Detailed setup and delivery guide", "#/docs?section=56-vendor-adapters-and-durable-delivery"));
     const status = el("p", "Loading vendor adapters…", "muted"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
     container.replaceChildren(intro, status);
-    if (!root.SOC_PRIVATE_APPLICATION) { status.textContent = "Start the private application and sign in. No vendor credentials, files or records are included in the static skeleton."; const cleanup = () => {}; cleanup.isDirty = () => false; return cleanup; }
+    if (!root.SOC_PRIVATE_APPLICATION) { status.textContent = "Start the private application and sign in. No vendor credentials, files or records are included in the static skeleton."; const cleanup = () => {}; cleanup.isDirty = () => false; cleanup.isPending = () => false; cleanup.cancelReads = () => {}; return cleanup; }
     const presets = panel("1 · Choose and install a source preset"), importer = panel("2 · Preview and import your own events");
     const form = el("form", undefined, "administration-form"); form.style.display = "grid"; form.style.gap = "12px";
     function field(label, tag, name) { const wrapper = el("label", label, "form-field"), input = el(tag); input.name = name; wrapper.append(input); form.append(wrapper); return input; }
@@ -58,7 +59,8 @@
     form.addEventListener("submit", event => event.preventDefault());
     async function request(url, body) {
       if (disposed) throw new Error("Vendor import view is closed.");
-      const controller = new AbortController(); controllers.add(controller); const timer = root.setTimeout(() => controller.abort(), 20000);
+      const controller = new AbortController(); controllers.add(controller);
+      const navigationRead = !body; (navigationRead ? navigationReads : navigationWrites).add(controller); const timer = root.setTimeout(() => controller.abort(), 20000);
       try {
         const response = await root.fetch(url, { method: body ? "POST" : "GET", credentials: "same-origin", redirect: "error", cache: "no-store", signal: controller.signal,
           headers: { Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
@@ -68,7 +70,7 @@
         const result = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
         if (!response.ok) throw new Error(response.status === 401 ? "Your session ended. Sign in again." : typeof result.message === "string" ? result.message.slice(0, 400) : "Vendor operation was refused.");
         return result;
-      } finally { root.clearTimeout(timer); controllers.delete(controller); }
+      } finally { root.clearTimeout(timer); controllers.delete(controller); navigationReads.delete(controller); navigationWrites.delete(controller); }
     }
     async function perform(action) {
       if (busy || disposed) return; busy = true; sync();
@@ -131,7 +133,9 @@
     }));
     void perform(load);
     const cleanup = () => { disposed = true; raw = ""; preview = null; controllers.forEach(controller => controller.abort()); controllers.clear(); };
-    cleanup.isDirty = () => dirty || busy;
+    cleanup.isPending = () => navigationWrites.size > 0;
+    cleanup.cancelReads = () => { navigationReads.forEach(controller => controller.abort()); };
+    cleanup.isDirty = () => dirty || cleanup.isPending();
     return cleanup;
   }
   root.SocVendorImport = Object.freeze({ render });

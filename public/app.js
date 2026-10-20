@@ -119,12 +119,14 @@
     return `#${path}${serialized ? `?${serialized}` : ""}`;
   }
 
-  function parseLocation(defaultRoute) {
-    const raw = global.location && global.location.hash ? global.location.hash.slice(1) : defaultRoute;
-    const question = raw.indexOf("?");
-    const path = question < 0 ? raw : raw.slice(0, question);
-    const query = new URLSearchParams(question < 0 ? "" : raw.slice(question + 1));
-    return { path: path || defaultRoute, query };
+  function parseLocation(defaultRoute, hash = global.location?.hash || "") {
+    const raw = hash.startsWith("#") ? hash.slice(1) : hash;
+    if (raw && !raw.startsWith("/")) return { path: defaultRoute, query: new URLSearchParams(), fragment: raw, fragmentOnly: true };
+    const fragmentAt = raw.indexOf("#"), route = fragmentAt < 0 ? raw : raw.slice(0, fragmentAt);
+    const question = route.indexOf("?");
+    return { path: (question < 0 ? route : route.slice(0, question)) || defaultRoute,
+      query: new URLSearchParams(question < 0 ? "" : route.slice(question + 1)),
+      fragment: fragmentAt < 0 ? "" : raw.slice(fragmentAt + 1), fragmentOnly: false };
   }
 
   function whenMatches(when, values) {
@@ -272,6 +274,13 @@
     let commandSequence = 0;
     let goShortcutPending = false;
     let goShortcutTimer = null;
+    let navigationSequence = 0, navigationController = null, pageReadController = null;
+    let historyEntry = null, historySequence = Date.now() * 1024, restoringEntry = null, pendingHistoryId = null;
+    let previousScrollRestoration = null;
+    let formObserver = null, editSequence = 0, hasRendered = false, allowDirtyReplacement = false;
+    const historyEntries = new Map(), formBaselines = new WeakMap();
+    const historyKey = "socNavigation";
+
 
     function showToast(message) {
       if (!hooks.toast || !hooks.toastMessage) return;
@@ -397,7 +406,7 @@
           ? (providerLabels[state.providerState] || "Data adapter connected")
           : "No data adapter";
       }
-      if (hooks.timezoneToggle) hooks.timezoneToggle.textContent = pageByPath.get(state.route)?.variant === "operations"
+      if (hooks.timezoneToggle) hooks.timezoneToggle.textContent = (pageByPath.get(state.route)?.variant === "operations" || state.route === "/triage" && global.SOC_PRIVATE_APPLICATION && global.SocTriage)
         ? (state.query.get("tz") || state.timezone) : state.timezone;
       if (hooks.autoRefreshState) {
         hooks.autoRefreshState.dataset.active = String(Boolean(provider && state.mounted));
@@ -4149,7 +4158,7 @@
       // A read may have started before the user selected a file or received a
       // one-time credential. Recheck at the actual DOM replacement boundary.
       const routeKey = routeHash(state.route, queryObject(state.query));
-      if (privateViewCleanup && privateViewRoute === routeKey && privateViewCleanup.isDirty && privateViewCleanup.isDirty()
+      if (!allowDirtyReplacement && privateViewCleanup && privateViewRoute === routeKey && privateViewCleanup.isDirty && privateViewCleanup.isDirty()
           && (!(config.auth && config.auth.required) || state.session.authenticated)) {
         updateShellState();
         return;
@@ -4186,7 +4195,7 @@
         || (page.variant === "tuning" && tuningMode !== "registry")
         || (page.variant === "rules" && state.query.get("ruleView"));
       if (page.hidden || queryDetail) wrapper.append(breadcrumbs(page));
-      if (page.variant !== "operations") wrapper.append(pageHeader(page));
+      if (page.variant !== "operations" && !(page.path === "/triage" && global.SOC_PRIVATE_APPLICATION && global.SocTriage)) wrapper.append(pageHeader(page));
 
       const setupId = state.query.get("setupId");
       if (page.path !== "/sources" || state.query.get("stab") !== "setup") {
@@ -4202,7 +4211,7 @@
         return;
       }
 
-      if (global.SOC_PRIVATE_APPLICATION && global.SocSetupAssistance && !page.hidden && page.variant !== "operations") {
+      if (global.SOC_PRIVATE_APPLICATION && global.SocSetupAssistance && !page.hidden && page.variant !== "operations" && page.path !== "/triage") {
         const screenNeedsHelp = !page.localOnly
           && (state.providerError || ["empty", "error"].includes(state.envelope && state.envelope.state));
         const emptyUnfilteredView = !state.providerError && state.providerState === "empty"
@@ -4218,6 +4227,20 @@
         wrapper.append(renderTechnicalDocumentation());
         root.replaceChildren(wrapper);
         applyPageFilter();
+        return;
+      }
+
+      if (page.path === "/triage" && global.SOC_PRIVATE_APPLICATION && global.SocTriage) {
+        const container = node("section", { className: "triage-workspace" });
+        wrapper.append(container);
+        root.replaceChildren(wrapper);
+        privateViewCleanup = global.SocTriage.render({ container, appId: state.query.get("appId") || "", query: state.query,
+          applications: state.controlSnapshot?.apps || [], onError: showToast,
+          displayTimezone: state.timezone === "UTC" ? "UTC" : Intl.DateTimeFormat().resolvedOptions().timeZone,
+          getPageFilter: () => hooks.pageFilter?.value || "", onReady: applyPageFilter,
+          navigate: navigateHref, onContext: updateContext
+        }) || null;
+        privateViewRoute = routeKey;
         return;
       }
 
@@ -4261,9 +4284,7 @@
               if (!state.mounted || state.route !== "/sources" || state.query.get("stab") !== "setup" || !global.history?.replaceState) return;
               if (id !== null && (typeof id !== "string" || !/^setup-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id))) return;
               if (id) state.query.set("setupId", id); else state.query.delete("setupId");
-              const selectedRoute = routeHash(state.route, queryObject(state.query));
-              global.history.replaceState(null, "", selectedRoute);
-              privateViewRoute = selectedRoute;
+              updateContext(state.query);
             }
           }) || null;
           privateViewRoute = routeKey;
@@ -4467,10 +4488,14 @@
     }
 
     async function loadSession() {
+      // The closed session projection intentionally has no stable actor ID.
+      // Revalidation is a selection boundary; route-only navigation is not.
+      if (global.SocTriage) global.SocTriage.clearSelections();
       state.authError = false;
       if (!auth) {
         state.authState = "absent";
         state.session = Object.freeze({ authenticated: false });
+        if (global.SocTriage) global.SocTriage.clearSelections();
         return;
       }
       state.authState = "loading";
@@ -4482,93 +4507,14 @@
         state.authState = "error";
         state.authError = true;
         state.session = Object.freeze({ authenticated: false });
+        if (global.SocTriage) global.SocTriage.clearSelections();
         if (global.console && typeof global.console.error === "function") global.console.error("Authentication adapter failed.");
-      }
-    }
-
-    async function loadControlSnapshot(reason) {
-      const requestSerial = state.requestSerial;
-      if (!commands || !["/sources", "/onboard", "/scans"].includes(state.route)) {
-        state.controlState = commands ? "idle" : "absent";
-        state.controlError = false;
-        state.controlSnapshot = null;
-        return;
-      }
-      state.controlState = "loading";
-      state.controlError = false;
-      try {
-        const request = {
-          schemaVersion: VERSION,
-          reason: reason === "initial" ? "initial" : reason === "command" ? "command" : "refresh"
-        };
-        if (state.controlSnapshot) request.knownRevision = state.controlSnapshot.revision;
-        const snapshot = connectorRuntime.validateControlSnapshot(await commands.getSnapshot(request));
-        if (!state.mounted || requestSerial !== state.requestSerial) return;
-        state.controlSnapshot = snapshot;
-        state.controlState = "ready";
-      } catch (error) {
-        if (!state.mounted || requestSerial !== state.requestSerial) return;
-        state.controlSnapshot = null;
-        state.controlState = "error";
-        state.controlError = true;
-        if (global.console && typeof global.console.error === "function") global.console.error("Connector command provider failed.");
       }
     }
 
     function administrationDomainForPage(page) {
       if (!page || !page.variant || !page.variant.startsWith("administration-")) return null;
       return page.variant === "administration-agents" ? "agents" : "governance";
-    }
-
-    async function loadAdministrationSnapshot(page, reason) {
-      const serial = state.requestSerial;
-      const domain = administrationDomainForPage(page);
-      state.administrationPrompt = null;
-      if (!domain || !administration) {
-        state.administrationState = administration ? "idle" : "absent";
-        state.administrationError = false;
-        state.administrationSnapshot = null;
-        return;
-      }
-      if (!state.session.authenticated) {
-        state.administrationState = "gated";
-        state.administrationError = false;
-        state.administrationSnapshot = null;
-        return;
-      }
-      state.administrationState = "loading";
-      state.administrationError = false;
-      try {
-        const request = {
-          schemaVersion: VERSION,
-          documentType: "administration-snapshot-request",
-          domain,
-          reason: reason === "initial" ? "initial" : reason === "command" ? "command" : "refresh"
-        };
-        if (state.administrationSnapshot && state.administrationSnapshot.domain === domain) {
-          request.knownRevision = state.administrationSnapshot.revision;
-        }
-        const snapshot = await administration.getSnapshot(request);
-        if (!state.mounted || serial !== state.requestSerial) return;
-        state.administrationSnapshot = snapshot;
-        if (domain === "agents" && state.query.get("prompt")) {
-          const prompt = await administration.getPrompt({
-            schemaVersion: VERSION,
-            documentType: "agent-prompt-request",
-            promptId: state.query.get("prompt")
-          });
-          if (!state.mounted || serial !== state.requestSerial) return;
-          state.administrationPrompt = prompt;
-        }
-        state.administrationState = "ready";
-      } catch (error) {
-        if (!state.mounted || serial !== state.requestSerial) return;
-        state.administrationSnapshot = null;
-        state.administrationPrompt = null;
-        state.administrationState = "error";
-        state.administrationError = true;
-        if (global.console && typeof global.console.error === "function") global.console.error("Administration provider failed.");
-      }
     }
 
     function restoreRouteFocus(reason, routeChanged, previousTabLabel) {
@@ -4595,88 +4541,116 @@
 
     function finishRouteRender(reason, routeChanged, previousTabLabel) {
       renderPage();
+      hasRendered = true;
+      initializeForms();
       restoreRouteFocus(reason, routeChanged, previousTabLabel);
     }
 
-    async function renderRoute(reason) {
+    // Read candidates independently of the visible state. A slow or failed read
+    // must not erase the view the operator is still using.
+    async function renderRoute(reason, destination, navigationSignal) {
       const focusedElement = documentRef.activeElement;
-      const previousTabLabel = focusedElement && focusedElement.getAttribute && focusedElement.getAttribute("role") === "tab"
-        ? focusedElement.textContent : "";
-      const location = parseLocation(config.routing.defaultRoute);
-      const routeChanged = location.path !== state.route;
-      state.route = location.path;
-      state.query = location.query;
-      const serial = ++state.requestSerial;
-      state.envelope = null;
-      state.providerError = false;
-      if (reason === "refresh" && state.administrationResult
-          && state.administrationResult.output && state.administrationResult.output.oneTimeCredential) {
-        state.administrationResult = null;
-      }
-      if (routeChanged) {
-        state.commandResult = null;
-        state.administrationResult = null;
-      }
-      if (hooks.pageFilter) hooks.pageFilter.value = pageFilters.get(state.route) || "";
-      const page = pageByPath.get(state.route);
-      if (!page) {
-        finishRouteRender(reason, routeChanged, previousTabLabel);
-        return;
-      }
-      if (config.auth && config.auth.required && !state.session.authenticated) {
-        state.providerState = provider ? "gated" : "absent";
-        finishRouteRender(reason, routeChanged, previousTabLabel);
-        return;
-      }
-      if (administrationDomainForPage(page)) {
-        state.providerState = provider ? "idle" : "absent";
-        state.controlState = commands ? "idle" : "absent";
-        state.controlError = false;
-        state.controlSnapshot = null;
-        await loadAdministrationSnapshot(page, reason);
-        if (!state.mounted || serial !== state.requestSerial) return;
-        finishRouteRender(reason, routeChanged, previousTabLabel);
-        return;
-      }
-      if (page.localOnly || (page.path === "/sources" && ["setup", "logs", "mapping", "operations", "integrations", "live", "vendors", "observations"].includes(state.query.get("stab")))) {
-        state.providerState = provider ? "idle" : "absent";
-        state.controlState = commands ? "idle" : "absent";
-        state.controlError = false;
-        state.controlSnapshot = null;
-        state.administrationState = administration ? "idle" : "absent";
-        state.administrationSnapshot = null;
-        state.administrationPrompt = null;
-        finishRouteRender(reason, routeChanged, previousTabLabel);
-        return;
-      }
-      await loadControlSnapshot(reason);
-      if (!state.mounted || serial !== state.requestSerial) return;
-      if (!provider) {
-        state.providerState = "absent";
-        finishRouteRender(reason, routeChanged, previousTabLabel);
-        return;
-      }
-      state.providerState = "loading";
-      renderPage();
-      restoreRouteFocus(reason, routeChanged, previousTabLabel);
+      const previousTabLabel = focusedElement?.getAttribute?.("role") === "tab" ? focusedElement.textContent : "";
+      const location = destination || routeLocation(global.location?.hash || "");
+      const routeChanged = location.path !== state.route, serial = ++state.requestSerial, edits = editSequence, wasDirty = isDirty();
+      pageReadController?.abort();
+      const controller = typeof global.AbortController === "function" ? new global.AbortController() : null;
+      pageReadController = controller;
+      const abort = () => controller?.abort();
+      navigationSignal?.addEventListener("abort", abort, { once: true });
+      const candidate = { ...state, route: location.path, query: new URLSearchParams(location.query), envelope: null, providerError: false };
+      if (routeChanged) { candidate.commandResult = null; candidate.administrationResult = null; }
+      if (reason === "refresh" && candidate.administrationResult?.output?.oneTimeCredential) candidate.administrationResult = null;
+      const page = pageByPath.get(candidate.route);
+      const privateTab = page?.path === "/sources" && ["setup", "logs", "mapping", "operations", "integrations", "live", "vendors", "observations"].includes(candidate.query.get("stab"));
+      const domain = administrationDomainForPage(page);
+      const deadline = ["/logs", "/analytics"].includes(candidate.route) ? 60000 : 30000;
+      const read = operation => boundedRead(operation, controller, deadline);
+      const loadingMessage = "Loading the requested view; your current view remains available.";
+      root.setAttribute("aria-busy", "true");
+      if (hasRendered && reason === "navigation" && page && !page.localOnly && !privateTab) showToast(loadingMessage);
+      let failed = false;
       try {
-        const request = adapterRuntime.validateRequest({
-          schemaVersion: VERSION,
-          route: state.route,
-          query: providerQuery(state.route, state.query),
-          reason
-        });
-        const envelope = adapterRuntime.validateEnvelope(await provider.readPage(request), request.route);
-        if (!state.mounted || serial !== state.requestSerial) return;
-        state.envelope = envelope;
-        state.providerState = envelope.state;
+        if (!page) { /* The registered not-found view has no reads. */ }
+        else if (config.auth?.required && !state.session.authenticated) candidate.providerState = provider ? "gated" : "absent";
+        else if (domain) {
+          candidate.providerState = provider ? "idle" : "absent";
+          candidate.controlState = commands ? "idle" : "absent"; candidate.controlSnapshot = null; candidate.controlError = false;
+          candidate.administrationPrompt = null; candidate.administrationError = false;
+          candidate.administrationState = administration ? "ready" : "absent";
+          if (administration) {
+            const request = { schemaVersion: VERSION, documentType: "administration-snapshot-request", domain,
+              reason: reason === "initial" ? "initial" : reason === "command" ? "command" : "refresh" };
+            if (state.administrationSnapshot?.domain === domain) request.knownRevision = state.administrationSnapshot.revision;
+            candidate.administrationSnapshot = await read(signal => administration.getSnapshot(request, { signal }));
+            if (candidate.query.get("prompt")) candidate.administrationPrompt = await read(signal => administration.getPrompt({
+              schemaVersion: VERSION, documentType: "agent-prompt-request", promptId: candidate.query.get("prompt") }, { signal }));
+          }
+        } else if (page.localOnly || privateTab) {
+          candidate.providerState = provider ? "idle" : "absent";
+          candidate.controlState = commands ? "idle" : "absent"; candidate.controlError = false; candidate.controlSnapshot = null;
+          candidate.administrationState = administration ? "idle" : "absent";
+          candidate.administrationSnapshot = null; candidate.administrationPrompt = null;
+        } else {
+          candidate.controlState = commands ? "idle" : "absent"; candidate.controlError = false; candidate.controlSnapshot = null;
+          if (commands && ["/sources", "/onboard", "/scans"].includes(candidate.route)) {
+            const request = { schemaVersion: VERSION, reason: reason === "initial" ? "initial" : reason === "command" ? "command" : "refresh" };
+            if (state.controlSnapshot) request.knownRevision = state.controlSnapshot.revision;
+            candidate.controlSnapshot = connectorRuntime.validateControlSnapshot(await read(signal => commands.getSnapshot(request, { signal })));
+            candidate.controlState = "ready";
+          }
+          if (page.path === "/triage" && global.SOC_PRIVATE_APPLICATION && global.SocTriage) candidate.providerState = provider ? "idle" : "absent";
+          else if (!provider) candidate.providerState = "absent";
+          else {
+            const request = adapterRuntime.validateRequest({ schemaVersion: VERSION, route: candidate.route,
+              query: providerQuery(candidate.route, candidate.query), reason });
+            candidate.envelope = adapterRuntime.validateEnvelope(await read(signal => provider.readPage(request, { signal })), request.route);
+            candidate.providerState = candidate.envelope.state;
+          }
+        }
       } catch (error) {
-        if (!state.mounted || serial !== state.requestSerial) return;
-        state.providerState = "error";
-        state.providerError = true;
-        if (global.console && typeof global.console.error === "function") global.console.error("Data adapter failed.");
+        if (!state.mounted || serial !== state.requestSerial || navigationSignal?.aborted) return false;
+        failed = true;
+        if (hasRendered) { showToast("The requested view could not be loaded. Your current view is preserved; retry when ready."); return false; }
+        if (domain) { candidate.administrationState = "error"; candidate.administrationError = true; }
+        else { candidate.providerState = "error"; candidate.providerError = true; }
+        if (global.console?.error) global.console.error("Page read failed.");
+      } finally {
+        navigationSignal?.removeEventListener("abort", abort);
+        if (pageReadController === controller) pageReadController = null;
+        if (serial === state.requestSerial) {
+          root.removeAttribute("aria-busy");
+          if (hooks.toastMessage?.textContent === loadingMessage) hideToast();
+        }
       }
-      finishRouteRender(reason, routeChanged, previousTabLabel);
+      if (!state.mounted || serial !== state.requestSerial || navigationSignal?.aborted) return false;
+      if (hasRendered && (edits !== editSequence || isPending() || !wasDirty && isDirty()) && reason !== "command") {
+        showToast("Navigation paused because work changed while the view was loading."); return false;
+      }
+      // Do not copy an earlier session/pending flag over a more recent auth or write result.
+      const { mounted, terminal, session, authState, authError, commandPending, administrationPending } = state;
+      Object.assign(state, candidate, { mounted, terminal, session, authState, authError, commandPending, administrationPending, requestSerial: serial });
+      if (hooks.pageFilter) hooks.pageFilter.value = pageFilters.get(state.route) || "";
+      allowDirtyReplacement = reason === "navigation";
+      try { finishRouteRender(reason, routeChanged, previousTabLabel); } finally { allowDirtyReplacement = false; }
+      return !failed;
+    }
+
+    function boundedRead(operation, controller, milliseconds) {
+      return new Promise((resolve, reject) => {
+        const signal = controller?.signal;
+        let settled = false;
+        const finish = (error, value) => {
+          if (settled) return; settled = true;
+          global.clearTimeout(timer); signal?.removeEventListener("abort", aborted);
+          if (error) reject(error); else resolve(value);
+        };
+        const aborted = () => finish(new Error("Page read canceled."));
+        const timer = global.setTimeout(() => { finish(new Error("Page read timed out.")); controller?.abort(); }, milliseconds);
+        signal?.addEventListener("abort", aborted, { once: true });
+        if (signal?.aborted) { aborted(); return; }
+        Promise.resolve().then(() => operation(signal)).then(value => finish(null, value), error => finish(error));
+      });
     }
 
     function applyPageFilter(event) {
@@ -4706,6 +4680,7 @@
           ? visible + " of " + candidates.length + (state.route === "/docs" ? " chapters shown" : " interface items shown")
           : "";
       }
+      if (state.route === "/triage" && global.SOC_PRIVATE_APPLICATION && privateViewCleanup?.filterChanged) privateViewCleanup.filterChanged();
       const noResults = root.querySelector(".technical-documentation-no-results");
       if (noResults) noResults.hidden = !(query && visible === 0);
     }
@@ -5237,6 +5212,7 @@
     }
 
     function onTabKeydown(event) {
+      if (event.defaultPrevented) return;
       if (event.target.matches(".triage-resizer") && ["ArrowLeft", "ArrowRight"].includes(event.key)) {
         event.preventDefault();
         const columnId = event.target.dataset.col;
@@ -5298,23 +5274,157 @@
       }
     }
 
-    function onHashChange() {
-      const previous = routeHash(state.route, queryObject(state.query));
-      if (global.location.hash === previous) return;
-      if (privateViewCleanup && privateViewCleanup.isDirty && privateViewCleanup.isDirty()
-          && typeof global.confirm === "function" && !global.confirm("Leave this page and discard your unsaved changes, selected upload, or one-time credential?")) {
-        global.location.hash = previous;
-        return;
+    function routeLocation(hash) {
+      const location = parseLocation(config.routing.defaultRoute, hash);
+      if (location.fragmentOnly) { location.path = state.route; location.query = new URLSearchParams(state.query); }
+      return location;
+    }
+    function isPending() {
+      return state.commandPending || state.administrationPending || !!privateViewCleanup?.isPending?.();
+    }
+    function isDirty() {
+      if (privateViewCleanup?.isDirty) return !!privateViewCleanup.isDirty();
+      return Array.from(root.querySelectorAll("form")).some(form => form.dataset?.dirty === "true");
+    }
+    async function canLeave() {
+      if (isPending()) { showToast("Wait for the pending action or reconcile its outcome before leaving this view."); return false; }
+      if (!isDirty()) return true;
+      return typeof global.confirm === "function" && global.confirm("Leave this page and discard your unsaved changes, selected upload, or one-time credential?");
+    }
+    function focusPosition() {
+      const active = documentRef.activeElement;
+      if (!active || active === root) return null;
+      return { id: active.getAttribute?.("id") || "", name: active.getAttribute?.("name") || "",
+        index: Array.from(root.querySelectorAll("[name]")).indexOf(active) };
+    }
+    function savePosition() {
+      if (!historyEntry || global.location?.hash !== historyEntry.hash) return;
+      historyEntry = { ...historyEntry, x: Number(global.scrollX) || 0, y: Number(global.scrollY) || 0, focus: focusPosition() };
+      historyEntries.set(historyEntry.id, historyEntry); writeHistory(historyEntry, "replaceState");
+    }
+    function writeHistory(entry, method) {
+      if (global.history?.[method]) global.history[method]({ ...(global.history.state || {}), [historyKey]: entry }, "", entry.hash);
+      else if (global.location) global.location.hash = entry.hash;
+    }
+    function newEntry(hash, replace = false) {
+      const position = replace && historyEntry ? historyEntry.position : (historyEntry?.position ?? -1) + 1;
+      if (!replace) for (const [id, entry] of historyEntries) if (entry.position > (historyEntry?.position ?? -1)) historyEntries.delete(id);
+      return { id: ++historySequence, position, hash, route: state.route, query: state.query.toString(), x: 0, y: 0, focus: null };
+    }
+    function commitHistory(hash, options = {}) {
+      const incoming = options.entry, entry = incoming ? { ...incoming } : options.replace && historyEntry ? { ...historyEntry } : newEntry(hash);
+      entry.route = state.route; entry.query = state.query.toString(); entry.hash = hash;
+      if (options.local && !incoming) { entry.x = historyEntry?.x || 0; entry.y = historyEntry?.y || 0; entry.focus = focusPosition(); }
+      historyEntry = entry; historySequence = Math.max(historySequence, entry.id); historyEntries.set(entry.id, entry);
+      if (historyEntries.size > 1000) historyEntries.delete(historyEntries.keys().next().value);
+      writeHistory(entry, options.existing || options.replace ? "replaceState" : "pushState");
+      if (options.restore) restorePosition(entry);
+      else if (!options.local && !options.fragment) global.scrollTo?.(0, 0);
+      if (options.fragment) {
+        let id; try { id = decodeURIComponent(options.fragment); } catch { id = options.fragment; }
+        const target = Array.from(root.querySelectorAll("[id]")).find(item => item.getAttribute("id") === id);
+        target?.scrollIntoView?.(); target?.focus?.({ preventScroll: true });
       }
-      renderRoute("navigation");
+    }
+    function restorePosition(entry) {
+      const position = entry.focus;
+      const target = position?.id ? Array.from(root.querySelectorAll("[id]")).find(item => item.getAttribute("id") === position.id)
+        : position?.name ? Array.from(root.querySelectorAll("[name]")).find((item, index) => index === position.index && item.getAttribute("name") === position.name) : null;
+      (target || root).focus?.({ preventScroll: true }); global.scrollTo?.(entry.x || 0, entry.y || 0);
+    }
+    function restoreHistory(incoming) {
+      if (!historyEntry) return;
+      const delta = historyEntry.position - incoming.position;
+      if (delta && global.history?.go) { restoringEntry = historyEntry.id; global.history.go(delta); }
+      else { writeHistory(historyEntry, "replaceState"); restorePosition(historyEntry); }
+    }
+    function updateContext(query) {
+      if (!state.mounted) return;
+      state.query = new URLSearchParams(query); privateViewRoute = routeHash(state.route, queryObject(state.query));
+      if (!historyEntry) return;
+      historyEntry = { ...historyEntry, hash: privateViewRoute, route: state.route, query: state.query.toString() };
+      historyEntries.set(historyEntry.id, historyEntry); writeHistory(historyEntry, "replaceState");
+    }
+    async function navigateHref(href, options = {}) {
+      if (!state.mounted || state.terminal || typeof href !== "string" || !href.startsWith("#")) return false;
+      const destination = routeLocation(href);
+      if (destination.fragmentOnly && options.entry) {
+        destination.path = options.entry.route; destination.query = new URLSearchParams(options.entry.query);
+      }
+      const base = routeHash(destination.path, queryObject(destination.query));
+      if (!destination.fragmentOnly && !pageByPath.has(destination.path) && !options.existing) return false;
+      const currentBase = routeHash(state.route, queryObject(state.query));
+      if (!options.existing) savePosition();
+      const sequence = ++navigationSequence;
+      navigationController?.abort(); pageReadController?.abort();
+      navigationController = typeof global.AbortController === "function" ? new global.AbortController() : null;
+      const signal = navigationController?.signal;
+      const canceled = () => !state.mounted || sequence !== navigationSequence || signal?.aborted;
+      const rejectNavigation = () => { if (!canceled() && options.existing) restoreHistory(options.entry); return false; };
+      if (base === currentBase) {
+        if (!options.existing && href === historyEntry?.hash) return true;
+        commitHistory(href, { ...options, local: true, fragment: options.existing ? "" : destination.fragment, restore: options.existing }); return true;
+      }
+      let local;
+      try { local = privateViewCleanup?.navigateLocal?.({ path: destination.path, query: destination.query, reason: options.reason || "navigation", signal, canLeave }); }
+      catch { showToast("This view could not be opened. Your current view is preserved."); return rejectNavigation(); }
+      // Any Promise is handled, including cancellation. Never fall through to a
+      // full render after the retained inspector rejects an asynchronous read.
+      if (local !== undefined && local !== false) {
+        try {
+          const accepted = await local;
+          if (canceled()) return false;
+          if (accepted !== true) return rejectNavigation();
+          state.route = destination.path; state.query = new URLSearchParams(destination.query); privateViewRoute = base;
+          commitHistory(href, { ...options, local: true, restore: options.existing, fragment: destination.fragment });
+          updateNavigation(); updateShellState(); return true;
+        } catch { if (!canceled()) showToast("This view could not be opened. Your current view is preserved."); return rejectNavigation(); }
+      }
+      if (!(await canLeave()) || canceled()) return rejectNavigation();
+      privateViewCleanup?.cancelReads?.();
+      const accepted = await renderRoute("navigation", destination, signal);
+      if (canceled()) return false;
+      if (!accepted) return rejectNavigation();
+      commitHistory(href, { ...options, restore: options.existing, fragment: destination.fragment }); return true;
+    }
+    function onHistoryChange() {
+      if (!state.mounted) return;
+      const hash = global.location?.hash || routeHash(config.routing.defaultRoute), stored = global.history?.state?.[historyKey];
+      if (restoringEntry && stored?.id === restoringEntry) { restoringEntry = null; restorePosition(historyEntry); return; }
+      if (hash === historyEntry?.hash && (!stored || stored.id === historyEntry.id)) return;
+      const known = stored && stored.id !== historyEntry?.id && Number.isSafeInteger(stored.position) && Number.isSafeInteger(stored.id)
+        ? historyEntries.get(stored.id) || stored : null;
+      const incoming = known ? { ...known } : { ...newEntry(hash), route: state.route, query: state.query.toString() };
+      if (!known) writeHistory(incoming, "replaceState");
+      if (pendingHistoryId === incoming.id) return;
+      pendingHistoryId = incoming.id;
+      void navigateHref(hash, { existing: true, entry: incoming, reason: known ? "popstate" : "navigation" }).finally(() => { if (pendingHistoryId === incoming.id) pendingHistoryId = null; });
+    }
+    function onDocumentClick(event) {
+      if (event.defaultPrevented || event.button && event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const link = event.target?.closest?.("a");
+      if (!link || link.getAttribute("download") !== null || link.getAttribute("target") && link.getAttribute("target") !== "_self") return;
+      const href = link.getAttribute("href"); if (!href?.startsWith("#")) return;
+      event.preventDefault(); void navigateHref(href);
+    }
+    function initializeForms() {
+      for (const form of root.querySelectorAll("form")) {
+        let controls = formBaselines.get(form);
+        if (!controls) { controls = new Map(); formBaselines.set(form, controls); }
+        for (const control of form.querySelectorAll("[name]")) if (!controls.has(control)) {
+          const baseline = { value: String(control.value ?? ""), checked: !!control.checked }; controls.set(control, baseline);
+          control.defaultValue = baseline.value; control.defaultChecked = baseline.checked;
+          for (const option of control.options || []) option.defaultSelected = !!option.selected;
+        }
+      }
     }
     function onRouteSelect() { if (hooks.routeSelect && hooks.routeSelect.value) navigate(hooks.routeSelect.value); }
     function onTimezone() {
-      if (privateViewCleanup && privateViewCleanup.isDirty && privateViewCleanup.isDirty()) {
+      if (isPending() || isDirty()) {
         showToast("Save or discard your pending work before changing the time display.");
         return;
       }
-      if (pageByPath.get(state.route)?.variant === "operations") {
+      if ((pageByPath.get(state.route)?.variant === "operations" || state.route === "/triage" && global.SOC_PRIVATE_APPLICATION && global.SocTriage)) {
         const current = state.query.get("tz") || state.timezone;
         state.timezone = current === "UTC" ? "Local" : "UTC";
         const tz = state.timezone === "UTC" ? "UTC" : Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -5341,7 +5451,23 @@
       root.addEventListener("submit", onRootSubmit);
       root.addEventListener("pointerdown", onRootPointerDown);
       root.addEventListener("dblclick", onRootDoubleClick);
-      global.addEventListener("hashchange", onHashChange);
+      const initialHash = global.location?.hash || routeHash(config.routing.defaultRoute);
+      const retainedEntry = global.history?.state?.[historyKey];
+      historyEntry = retainedEntry && Number.isSafeInteger(retainedEntry.id) && Number.isSafeInteger(retainedEntry.position)
+        && retainedEntry.position >= 0 && retainedEntry.hash === initialHash ? { ...retainedEntry } : newEntry(initialHash);
+      historySequence = Math.max(historySequence, historyEntry.id);
+      historyEntries.set(historyEntry.id, historyEntry); writeHistory(historyEntry, "replaceState");
+      if (global.history && "scrollRestoration" in global.history) {
+        previousScrollRestoration = global.history.scrollRestoration; global.history.scrollRestoration = "manual";
+      }
+      global.addEventListener("hashchange", onHistoryChange);
+      global.addEventListener("popstate", onHistoryChange);
+      global.addEventListener("scroll", savePosition);
+      documentRef.addEventListener("click", onDocumentClick);
+      documentRef.addEventListener("focusin", savePosition);
+      if (typeof global.MutationObserver === "function") {
+        formObserver = new global.MutationObserver(initializeForms); formObserver.observe(root, { childList: true, subtree: true });
+      }
       documentRef.addEventListener("keydown", onDocumentKeydown);
       documentRef.addEventListener("pointermove", onDocumentPointerMove);
       documentRef.addEventListener("pointerup", onDocumentPointerUp);
@@ -5358,6 +5484,7 @@
       await loadSession();
       if (!state.mounted) return api;
       await renderRoute("initial");
+      if (state.mounted) { historyEntry.route = state.route; historyEntry.query = state.query.toString(); savePosition(); }
       if (state.mounted && provider) autoRefreshId = global.setInterval(() => { refresh("automatic"); }, 300000);
       return api;
     }
@@ -5366,7 +5493,9 @@
       if (state.terminal) return;
       state.terminal = true;
       state.mounted = false;
-      state.requestSerial += 1;
+      state.requestSerial += 1; navigationSequence += 1;
+      navigationController?.abort(); pageReadController?.abort(); formObserver?.disconnect(); historyEntries.clear();
+      if (previousScrollRestoration !== null) global.history.scrollRestoration = previousScrollRestoration;
       if (privateViewCleanup) { privateViewCleanup(); privateViewCleanup = null; }
       if (assistanceCleanup) { assistanceCleanup(); assistanceCleanup = null; }
       if (autoRefreshId !== null) global.clearInterval(autoRefreshId);
@@ -5379,7 +5508,11 @@
       root.removeEventListener("submit", onRootSubmit);
       root.removeEventListener("pointerdown", onRootPointerDown);
       root.removeEventListener("dblclick", onRootDoubleClick);
-      global.removeEventListener("hashchange", onHashChange);
+      global.removeEventListener("hashchange", onHistoryChange);
+      global.removeEventListener("popstate", onHistoryChange);
+      global.removeEventListener("scroll", savePosition);
+      documentRef.removeEventListener("click", onDocumentClick);
+      documentRef.removeEventListener("focusin", savePosition);
       documentRef.removeEventListener("keydown", onDocumentKeydown);
       documentRef.removeEventListener("pointermove", onDocumentPointerMove);
       documentRef.removeEventListener("pointerup", onDocumentPointerUp);
@@ -5399,7 +5532,7 @@
       if (shellRoot && typeof shellRoot.removeAttribute === "function") {
         shellRoot.removeAttribute("data-active-route");
       }
-      root.replaceChildren();
+      root.replaceChildren(); root.removeAttribute("aria-busy");
       state.providerState = provider ? "disposed" : "absent";
       state.controlState = commands ? "disposed" : "absent";
       state.controlSnapshot = null;
@@ -5411,6 +5544,7 @@
       state.administrationDraft = null;
       state.authState = auth ? "unmounted" : "absent";
       state.session = Object.freeze({ authenticated: false });
+      if (global.SocTriage) global.SocTriage.clearSelections();
       updateShellState();
       if (state.started && provider && typeof provider.dispose === "function") {
         try {
@@ -5453,27 +5587,30 @@
     function navigate(path, query) {
       if (state.terminal) throw new Error("This application controller has been unmounted.");
       if (!pageByPath.has(path)) throw new TypeError("navigate path is not in the SOC interface catalog.");
-      const target = routeHash(path, query);
-      if (target === global.location.hash && privateViewCleanup && privateViewCleanup.isDirty && privateViewCleanup.isDirty()) return undefined;
-      if (global.location.hash === target) return renderRoute("navigation");
-      global.location.hash = target;
-      return undefined;
+      return navigateHref(routeHash(path, query));
     }
 
     function markFormDirty(event) {
-      const form = event.target && event.target.closest ? event.target.closest("form") : null;
-      if (form && form.dataset) form.dataset.dirty = "true";
+      const form = event.target?.closest?.("form"); if (!form) return;
+      editSequence += 1;
+      const controls = formBaselines.get(form);
+      const dirty = !controls || Array.from(controls).some(([control, baseline]) =>
+        String(control.value ?? "") !== baseline.value || !!control.checked !== baseline.checked);
+      if (form.dataset) { if (dirty) form.dataset.dirty = "true"; else delete form.dataset.dirty; }
     }
 
     function refresh(reason) {
       if (!state.mounted) return Promise.resolve();
       if (refreshPromise) return refreshPromise;
-      if (state.commandPending || state.administrationPending || (privateViewCleanup && privateViewCleanup.isDirty && privateViewCleanup.isDirty()) || root.querySelector('form[data-dirty="true"]')
+      if (reason === "automatic" && privateViewCleanup?.hasSelection?.()) return Promise.resolve();
+      if (isPending() || isDirty()
           || root.querySelector('dialog[open]') || (hooks.commandDialog && hooks.commandDialog.open)) {
         if (reason !== "automatic") showToast("Refresh paused to preserve your edits or pending action. Save or leave this page first.");
         return Promise.resolve();
       }
       refreshPromise = (async () => {
+        privateViewCleanup?.cancelReads?.();
+        savePosition();
         await loadSession();
         if (!state.mounted) return;
         await renderRoute("refresh");

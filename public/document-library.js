@@ -67,10 +67,11 @@
       const unavailable = panel("Documents & evidence");
       unavailable.append(node("p", "Document storage is available when the application server is running. Start the private application to upload files, retain versions, and track review status.", "muted"));
       container.append(unavailable);
-      const cleanup = () => {}; cleanup.isDirty = () => false;
+      const cleanup = () => {}; cleanup.isDirty = () => false; cleanup.isPending = () => false; cleanup.cancelReads = () => {};
       return cleanup;
     }
     if (typeof apiBase !== "string" || !/^\/api\/[A-Za-z0-9/_-]+$/.test(apiBase)) throw new TypeError("Document API must be a same-origin API path.");
+    const navigationReads = new Set(), navigationWrites = new Set();
     let disposed = false, busy = false, selectedId = null, detail = null, dirty = false, dirtyForm = null, archiveFilter = "active", offset = 0;
     let catalogReady = false, catalog = { apps: [], risks: [], attestations: [] }, lastSavedVersion = null;
     const requests = new Set();
@@ -174,6 +175,7 @@
     async function request(url, options = {}) {
       if (disposed) throw new Error("Document view is closed.");
       const controller = new AbortController(); requests.add(controller);
+      const navigationRead = !options.method || options.method === "GET"; (navigationRead ? navigationReads : navigationWrites).add(controller);
       const timeout = root.setTimeout(() => controller.abort(), 30000);
       try {
         const response = await root.fetch(url, { ...options, credentials: "same-origin", cache: "no-store", redirect: "error", signal: controller.signal, headers: { Accept: "application/json", ...options.headers } });
@@ -192,7 +194,7 @@
       } catch (error) {
         if (error.name === "AbortError" && !disposed) throw new Error("The document request timed out. Refresh to check whether the last save completed before retrying.");
         throw error;
-      } finally { root.clearTimeout(timeout); requests.delete(controller); }
+      } finally { root.clearTimeout(timeout); requests.delete(controller); navigationReads.delete(controller); navigationWrites.delete(controller); }
     }
     async function perform(action) {
       if (disposed || busy) return;
@@ -314,7 +316,9 @@
     root.addEventListener("beforeunload", beforeUnload);
     perform(load);
     const cleanup = () => { disposed = true; for (const controller of requests) controller.abort(); root.removeEventListener("beforeunload", beforeUnload); container.removeAttribute("data-document-dirty"); };
-    cleanup.isDirty = () => dirty || busy;
+    cleanup.isPending = () => navigationWrites.size > 0;
+    cleanup.cancelReads = () => { navigationReads.forEach(controller => controller.abort()); };
+    cleanup.isDirty = () => dirty || cleanup.isPending();
     cleanup.refresh = () => { if (dirty || busy) return false; perform(load); return true; };
     return cleanup;
   }

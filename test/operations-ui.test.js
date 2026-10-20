@@ -221,3 +221,30 @@ test("finding mail controls scope commissioning, persist verification, and block
   assert.equal(sent.length, 3); assert.equal(sent[2].body.recipient, "team@example.invalid");
   assert.match(sent[2].url, /^\/api\/v1\/finding-notifications\/test-send\?appId=app-one$/);
 });
+
+test("navigation cancels outstanding reads without labeling them pending writes", async t => {
+  const signals = [];
+  const h = harness(t, { fetch: (url, init) => new Promise((resolve, reject) => {
+    signals.push(init.signal); init.signal.addEventListener("abort", () => {
+      const error = new Error("Synthetic canceled read"); error.name = "AbortError"; reject(error);
+    }, { once: true });
+  }) });
+  assert.ok(signals.length > 0); assert.equal(h.cleanup.isPending(), false); assert.equal(h.cleanup.isDirty(), false);
+  h.cleanup.cancelReads(); assert.ok(signals.every(signal => signal.aborted));
+  await h.cleanup.ready; assert.equal(h.cleanup.isPending(), false); assert.equal(h.timers.size, 0);
+});
+
+test("read cancellation preserves submitted and uncertain mutations until identical retry is confirmed", async t => {
+  let release, signal, posts = 0;
+  const h = harness(t, { route: "/incidents", query: { incident: "incident-one" }, fetch: (url, init, fallback) => {
+    if (init.method === "POST" && ++posts === 1) { signal = init.signal; return new Promise(resolve => { release = () => resolve(response({}, 503)); }); }
+    return fallback(url, init);
+  } });
+  await h.cleanup.ready; const form = h.form("Acknowledge incident"); input(form, "note", "Synthetic reviewed decision"); submit(form);
+  assert.equal(h.cleanup.isPending(), true); h.cleanup.cancelReads(); assert.equal(signal.aborted, false);
+  release(); await settle(); assert.equal(h.cleanup.isPending(), true, "an unconfirmed decision remains protected after the HTTP request settles");
+  const first = h.requests.find(item => item.init.method === "POST").body;
+  submit(form); await settle(); const requests = h.requests.filter(item => item.init.method === "POST");
+  assert.equal(requests.length, 2); assert.deepEqual(requests[1].body, first);
+  assert.equal(h.cleanup.isPending(), false); assert.equal(h.cleanup.isDirty(), false);
+});

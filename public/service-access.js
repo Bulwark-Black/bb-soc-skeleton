@@ -77,8 +77,9 @@
     container.append(intro);
     if (!root.SOC_PRIVATE_APPLICATION) {
       intro.append(element("p", "Start the private application and sign in as an operator to manage service access. Static previews and the reference workbench do not issue service credentials.", "muted"));
-      const cleanup = () => {}; cleanup.isDirty = () => false; cleanup.refresh = () => {}; return cleanup;
+      const cleanup = () => {}; cleanup.isDirty = () => false; cleanup.isPending = () => false; cleanup.cancelReads = () => {}; cleanup.refresh = () => {}; return cleanup;
     }
+    const navigationReads = new Set(), navigationWrites = new Set();
     let disposed = false, busy = false, dirty = false, configDirty = false, configVisible = false, evidenceFresh = false, secretVisible = false, offset = 0, selectedId = null, latest = null, loaded = false;
     const pending = new Set();
     const status = element("p", "Loading service identities…", "muted"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
@@ -205,6 +206,7 @@
     async function request(endpoint, options = {}) {
       if (disposed) throw new Error("Service access view is closed.");
       const controller = new AbortController(); pending.add(controller);
+      const navigationRead = !options.method || options.method === "GET"; (navigationRead ? navigationReads : navigationWrites).add(controller);
       const timeout = root.setTimeout(() => controller.abort(), 20000);
       try {
         const response = await root.fetch(endpoint, { ...options, credentials: "same-origin", cache: "no-store", redirect: "error", signal: controller.signal,
@@ -218,7 +220,7 @@
         if (error.name === "AbortError" && !disposed) throw new Error("Service access request timed out. Refresh to check the outcome. If an issued credential was not received, revoke that identity and issue another.");
         if (error instanceof TypeError || error instanceof SyntaxError) throw new Error("Service access response could not be read. Refresh to check the saved state before retrying; an issued credential may need to be revoked and replaced.");
         throw error;
-      } finally { root.clearTimeout(timeout); pending.delete(controller); }
+      } finally { root.clearTimeout(timeout); pending.delete(controller); navigationReads.delete(controller); navigationWrites.delete(controller); }
     }
     async function perform(action) {
       if (busy || disposed) return;
@@ -316,7 +318,9 @@
     function beforeUnload(event) { if (dirty || configDirty || configVisible || busy || secretVisible) { event.preventDefault(); event.returnValue = ""; } }
     root.addEventListener("beforeunload", beforeUnload);
     function cleanup() { disposed = true; pending.forEach(controller => controller.abort()); pending.clear(); root.removeEventListener("beforeunload", beforeUnload); clearSecret(); clearConfiguration(); name.value = ""; container.removeAttribute("data-service-access-dirty"); }
-    cleanup.isDirty = () => dirty || configDirty || configVisible || busy || secretVisible;
+    cleanup.isPending = () => navigationWrites.size > 0;
+    cleanup.cancelReads = () => { navigationReads.forEach(controller => controller.abort()); };
+    cleanup.isDirty = () => dirty || configDirty || configVisible || secretVisible || cleanup.isPending();
     cleanup.refresh = () => { if (dirty || configDirty || busy || secretVisible) { notice("Refresh paused to preserve the draft or one-time credential."); return; } return perform(load); };
     intro.append(document.createTextNode(" · "), button("Reload service identities", () => cleanup.refresh()));
     perform(load);

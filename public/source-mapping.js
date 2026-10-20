@@ -9,6 +9,7 @@
   function link(text, href) { const node = el("a", text, "resource-action"); node.href = href; node.style.display = "inline-flex"; node.style.margin = "4px 6px 4px 0"; return node; }
   function render({ container, onError, query } = {}) {
     if (!container) throw new TypeError("Source mapping needs a container.");
+    const navigationReads = new Set(), navigationWrites = new Set();
     let disposed = false, busy = false, dirty = false, catalog = null, inspection = null, preview = null;
     const controllers = new Set(), rows = new Map();
     const intro = panel("Connect a source we do not list");
@@ -19,7 +20,7 @@
     container.replaceChildren(intro, status);
     if (!root.SOC_PRIVATE_APPLICATION) {
       status.textContent = "Start the private application and sign in to inspect your redacted samples. The static skeleton makes no requests and contains no example security data.";
-      const cleanup = () => {}; cleanup.isDirty = () => false; return cleanup;
+      const cleanup = () => {}; cleanup.isDirty = () => false; cleanup.isPending = () => false; cleanup.cancelReads = () => {}; return cleanup;
     }
     const binding = panel("1 · Choose the exact application and source"), sample = panel("2 · Inspect a redacted sample"), mapping = panel("3 · Explicitly map retained fields"), output = panel("4 · Review the canonical preview");
     const app = field(binding, "Application", "mappingApp"), environment = field(binding, "Environment", "mappingEnvironment"), source = field(binding, "Custom or canonical source", "mappingSource");
@@ -112,7 +113,8 @@
       for (const row of rows.values()) rowState(row);
     }
     async function request(url, method = "GET", body) {
-      const controller = new AbortController(); controllers.add(controller); const timer = root.setTimeout(() => controller.abort(), 30000);
+      const controller = new AbortController(); controllers.add(controller);
+      const navigationRead = method === "GET"; (navigationRead ? navigationReads : navigationWrites).add(controller); const timer = root.setTimeout(() => controller.abort(), 30000);
       try {
         const response = await root.fetch(url, { method, credentials: "same-origin", cache: "no-store", redirect: "error", signal: controller.signal,
           headers: { Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -121,7 +123,7 @@
         if (!response.ok) throw new Error(({ 400: "Mapping refused. Check required paths, source binding, original IDs/timestamps, secret-bearing key names and canonical value formats. Nothing was imported.", 401: "Sign in to the private application again.", 403: "This mapping action requires private operator access.", 413: "The sample, recipe or output exceeds its size limit. Use a smaller redacted batch." })[response.status] || "The mapping service is unavailable. No import was attempted.");
         const buffer = new Uint8Array(bytes); let offset = 0; for (const chunk of chunks) { buffer.set(chunk, offset); offset += chunk.byteLength; }
         return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(buffer));
-      } finally { root.clearTimeout(timer); controllers.delete(controller); }
+      } finally { root.clearTimeout(timer); controllers.delete(controller); navigationReads.delete(controller); navigationWrites.delete(controller); }
     }
     async function perform(action) {
       if (busy || disposed) return; busy = true; sync();
@@ -191,7 +193,9 @@
     }
     void perform(load);
     const cleanup = () => { if (disposed) return; disposed = true; for (const controller of controllers) controller.abort(); controllers.clear(); text.value = ""; fields.value = ""; inspection = null; preview = null; rows.clear(); mappingRows.replaceChildren(); fieldList.replaceChildren(); result.replaceChildren(); dirty = false; };
-    cleanup.isDirty = () => !disposed && dirty; return cleanup;
+    cleanup.isPending = () => navigationWrites.size > 0;
+    cleanup.cancelReads = () => { navigationReads.forEach(controller => controller.abort()); };
+    cleanup.isDirty = () => !disposed && (dirty || cleanup.isPending()); return cleanup;
   }
   root.SocSourceMapping = Object.freeze({ render });
 })(typeof window === "object" ? window : globalThis);
